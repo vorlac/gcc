@@ -87,6 +87,12 @@ else
     warn "Homebrew not found. Falling back to GCC's download_prerequisites."
 fi
 
+# clean gcc src dir...
+if [[ "${CLEAN}" -eq 1 ]]; then
+    log "Cleaning gcc source repo directory..."
+    rm -rf "${GCC_SRC_DIR}"
+fi
+
 if [[ -d "${GCC_SRC_DIR}/.git" ]]; then
     log "GCC source directory exists. Updating..."
     cd "${GCC_SRC_DIR}"
@@ -107,7 +113,7 @@ if [[ -d "${GCC_SRC_DIR}/.git" ]]; then
     mkdir -p "${WORKSPACE}"
     cd "${WORKSPACE}"
 else
-    log "Cloning gcc trunk..."
+    log "Cloning gcc: ${GCC_GIT_URL_HTTPS} [origin/${GCC_GIT_BRANCH}]..."
     git clone --depth=1 --branch="${GCC_GIT_BRANCH}" "${GCC_GIT_URL_HTTPS}" "${GCC_SRC_DIR}"
 fi
 
@@ -122,7 +128,7 @@ fi
 
 # clean build dir...
 if [[ "${CLEAN}" -eq 1 ]]; then
-    log "Cleaning build directory..."
+    log "Cleaning build directory: ${GCC_BUILD_DIR}"
     rm -rf "${GCC_BUILD_DIR}"
 fi
 

@@ -24,6 +24,33 @@
 
 #include "asmcfi.h"
 
+#define CONCAT1(a, b) CONCAT2(a, b)
+#define CONCAT2(a, b) a ## b
+
+#ifdef __USER_LABEL_PREFIX__
+#  define SYM(x) CONCAT1 (__USER_LABEL_PREFIX__, x)
+#else
+#  define SYM(x) x
+#endif
+
+#ifdef __ELF__
+#  define TYPE(x) .type SYM(x), %function
+#  define SIZE(x) .size SYM(x), . - SYM(x)
+#  ifdef HAVE_ATTRIBUTE_VISIBILITY
+#    define HIDDEN(x) .hidden SYM(x)
+#  else
+#    define HIDDEN(x)
+#  endif
+#else
+#  define TYPE(x)
+#  define SIZE(x)
+#  ifdef __MACH__
+#    define HIDDEN(x) .private_extern SYM(x)
+#  else
+#    define HIDDEN(x)
+#  endif
+#endif
+
 #define BTI_C	hint	34
 #define PACIASP	hint	25
 #define AUTIASP	hint	29
@@ -57,10 +84,10 @@
 
 	.text
 	.align	2
-	.global	_ITM_beginTransaction
-	.type	_ITM_beginTransaction, %function
+	.global	SYM(_ITM_beginTransaction)
+	TYPE(_ITM_beginTransaction)
 
-_ITM_beginTransaction:
+SYM(_ITM_beginTransaction):
 	cfi_startproc
 	CFI_PAC_KEY
 	PAC_AND_BTI
@@ -84,7 +111,7 @@ _ITM_beginTransaction:
 
 	/* Invoke GTM_begin_transaction with the struct we just built.  */
 	mov	x1, sp
-	bl	GTM_begin_transaction
+	bl	SYM(GTM_begin_transaction)
 
 	/* Return; we don't need to restore any of the call-saved regs.  */
 	ldp	x29, x30, [sp], 11*16
@@ -95,14 +122,14 @@ _ITM_beginTransaction:
 	CFI_PAC_TOGGLE
 	ret
 	cfi_endproc
-	.size	_ITM_beginTransaction, . - _ITM_beginTransaction
+	SIZE(_ITM_beginTransaction)
 
 	.align	2
-	.global	GTM_longjmp
-	.hidden	GTM_longjmp
-	.type	GTM_longjmp, %function
+	.global	SYM(GTM_longjmp)
+	HIDDEN(GTM_longjmp)
+	TYPE(GTM_longjmp)
 
-GTM_longjmp:
+SYM(GTM_longjmp):
 	/* The first parameter becomes the return value (x0).
 	   The third parameter is ignored for now.  */
 	cfi_startproc
@@ -126,7 +153,7 @@ GTM_longjmp:
 	CFI_PAC_TOGGLE
 	br	x30
 	cfi_endproc
-	.size	GTM_longjmp, . - GTM_longjmp
+	SIZE(GTM_longjmp)
 
 /* GNU_PROPERTY_AARCH64_* macros from elf.h for use in asm code.  */
 #define FEATURE_1_AND 0xc0000000
@@ -159,7 +186,7 @@ GTM_longjmp:
   .word value;				\
   .word 0;
 
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__ELF__) && (defined(__linux__) || defined(__FreeBSD__))
 .section .note.GNU-stack, "", %progbits
 
 /* Add GNU property note if built with branch protection.  */
