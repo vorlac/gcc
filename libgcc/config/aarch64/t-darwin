@@ -1,0 +1,6 @@
+# AArch64 Darwin libgcc support.
+# This is included from the generic *-*-darwin* block in config.host.
+# See also t-aarch64-darwin which is included later for overrides.
+
+# No SME .ver mapfile needed since we exclude the ELF assembly stubs.
+SHLIB_MAPFILES = libgcc-std.ver $(srcdir)/config/libgcc-libsystem.ver

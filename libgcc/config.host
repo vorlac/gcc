@@ -267,7 +267,7 @@ case ${host} in
   if test "x$enable_darwin_at_rpath" = "xyes"; then
     tmake_file="$tmake_file t-darwin-rpath "
   fi
-  extra_parts="crt3.o libd10-uwfef.a crttms.o crttme.o libemutls_w.a"
+  extra_parts="crt3.o libd10-uwfef.a crttms.o crttme.o libemutls_w.a libheapt_w.a"
   ;;
 *-*-dragonfly*)
   tmake_file="$tmake_file t-crtstuff-pic t-libgcc-pic t-eh-dw2-dip"
@@ -396,6 +396,17 @@ aarch64*-*-elf | aarch64*-*-rtems*)
 	tmake_file="${tmake_file} ${cpu_type}/t-lse t-slibgcc-libgcc"
 	tmake_file="${tmake_file} ${cpu_type}/t-softfp t-softfp t-crtfm"
 	tmake_file="${tmake_file} t-dfprules"
+	md_unwind_def_header=aarch64/aarch64-unwind-def.h
+	md_unwind_header=aarch64/aarch64-unwind.h
+	;;
+aarch64*-*-darwin*)
+	extra_parts="$extra_parts crtfastmath.o"
+	tmake_file="${tmake_file} ${cpu_type}/t-aarch64"
+	tmake_file="${tmake_file} ${cpu_type}/t-softfp t-softfp t-crtfm"
+	tmake_file="${tmake_file} ${cpu_type}/t-heap-trampoline"
+	# t-aarch64-darwin must come after t-aarch64 to override
+	# the ELF-specific SME .S files that t-aarch64 adds.
+	tmake_file="${tmake_file} ${cpu_type}/t-aarch64-darwin"
 	md_unwind_def_header=aarch64/aarch64-unwind-def.h
 	md_unwind_header=aarch64/aarch64-unwind.h
 	;;

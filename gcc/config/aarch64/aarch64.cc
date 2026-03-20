@@ -7736,6 +7736,19 @@ aarch64_layout_arg (cumulative_args_t pcum_v, const function_arg_info &arg)
       return;
     }
 
+#if TARGET_MACHO
+  /* Apple's arm64 ABI requires that variadic arguments (those corresponding
+     to the ... part of a variadic function) are always passed on the stack,
+     not in registers.  Named arguments are passed in registers normally.  */
+  if (!arg.named)
+    {
+      pcum->aapcs_arg_processed = true;
+      pcum->aapcs_stack_words = (aarch64_arg_size (arg) + UNITS_PER_WORD - 1)
+				/ UNITS_PER_WORD;
+      return;
+    }
+#endif
+
   bool warn_pcs_change
     = (warn_psabi
        && !pcum->silent_p
@@ -13361,6 +13374,19 @@ aarch64_print_operand (FILE *f, rtx x, int code)
       if (GET_CODE (x) == HIGH)
 	x = XEXP (x, 0);
 
+#if TARGET_MACHO
+      /* Apple Mach-O uses @PAGE / @GOTPAGE instead of ELF :reloc: syntax.  */
+      output_addr_const (asm_out_file, x);
+      switch (aarch64_classify_symbolic_expression (x))
+	{
+	case SYMBOL_SMALL_GOT_4G:
+	  asm_fprintf (asm_out_file, "@GOTPAGE");
+	  break;
+	default:
+	  asm_fprintf (asm_out_file, "@PAGE");
+	  break;
+	}
+#else
       switch (aarch64_classify_symbolic_expression (x))
 	{
 	case SYMBOL_SMALL_GOT_4G:
@@ -13391,9 +13417,24 @@ aarch64_print_operand (FILE *f, rtx x, int code)
 	  break;
 	}
       output_addr_const (asm_out_file, x);
+#endif
       break;
 
     case 'L':
+#if TARGET_MACHO
+      /* Apple Mach-O uses @PAGEOFF / @GOTPAGEOFF suffix instead of
+	 ELF :lo12: prefix syntax.  */
+      output_addr_const (asm_out_file, x);
+      switch (aarch64_classify_symbolic_expression (x))
+	{
+	case SYMBOL_SMALL_GOT_4G:
+	  asm_fprintf (asm_out_file, "@GOTPAGEOFF");
+	  break;
+	default:
+	  asm_fprintf (asm_out_file, "@PAGEOFF");
+	  break;
+	}
+#else
       switch (aarch64_classify_symbolic_expression (x))
 	{
 	case SYMBOL_SMALL_GOT_4G:
@@ -13432,6 +13473,7 @@ aarch64_print_operand (FILE *f, rtx x, int code)
 	  break;
 	}
       output_addr_const (asm_out_file, x);
+#endif
       break;
 
     case 'G':
@@ -13608,9 +13650,15 @@ aarch64_print_address_internal (FILE *f, machine_mode mode, rtx x,
 	break;
 
       case ADDRESS_LO_SUM:
+#if TARGET_MACHO
+	asm_fprintf (f, "[%s, ", reg_names [REGNO (addr.base)]);
+	output_addr_const (f, addr.offset);
+	asm_fprintf (f, "@PAGEOFF]");
+#else
 	asm_fprintf (f, "[%s, #:lo12:", reg_names [REGNO (addr.base)]);
 	output_addr_const (f, addr.offset);
 	asm_fprintf (f, "]");
+#endif
 	return true;
 
       case ADDRESS_SYMBOLIC:
@@ -26314,7 +26362,9 @@ aarch64_declare_function_name (FILE *stream, const char* name,
   aarch64_asm_output_variant_pcs (stream, fndecl, name);
 
   /* Don't forget the type directive for ELF.  */
+#ifdef ASM_OUTPUT_TYPE_DIRECTIVE
   ASM_OUTPUT_TYPE_DIRECTIVE (stream, name, "function");
+#endif
   ASM_OUTPUT_FUNCTION_LABEL (stream, name, fndecl);
 
   cfun->machine->label_is_assembled = true;
@@ -26380,7 +26430,9 @@ aarch64_asm_output_alias (FILE *stream, const tree decl, const tree target)
   const char *name = XSTR (XEXP (DECL_RTL (decl), 0), 0);
   const char *value = IDENTIFIER_POINTER (target);
   aarch64_asm_output_variant_pcs (stream, decl, name);
+#ifdef ASM_OUTPUT_DEF
   ASM_OUTPUT_DEF (stream, name, value);
+#endif
 }
 
 /* Implement ASM_OUTPUT_EXTERNAL.  Output .variant_pcs for undefined
@@ -31711,15 +31763,32 @@ aarch64_sls_emit_shared_blr_thunks (FILE *out_file)
       /* Only emits if the compiler is configured for an assembler that can
 	 handle visibility directives.  */
       targetm.asm_out.assemble_visibility (decl, VISIBILITY_HIDDEN);
+#ifdef ASM_OUTPUT_TYPE_DIRECTIVE
       ASM_OUTPUT_TYPE_DIRECTIVE (out_file, name, "function");
+#endif
       ASM_OUTPUT_LABEL (out_file, name);
       aarch64_sls_emit_function_stub (out_file, regnum);
       /* Use the most conservative target to ensure it can always be used by any
 	 function in the translation unit.  */
       asm_fprintf (out_file, "\tdsb\tsy\n\tisb\n");
+#ifdef ASM_DECLARE_FUNCTION_SIZE
       ASM_DECLARE_FUNCTION_SIZE (out_file, name, decl);
+#endif
     }
 }
+
+#if TARGET_MACHO
+/* Darwin requires each architecture to provide machopic_output_stub.
+   AArch64 Darwin uses GOT-based indirection rather than Mach-O symbol stubs,
+   so this should never be called.  Provide a stub that traps if it is.  */
+
+void
+machopic_output_stub (FILE *file, const char *symb, const char *stub)
+{
+  /* AArch64 is always 64-bit and does not use Mach-O symbol stubs.  */
+  gcc_unreachable ();
+}
+#endif
 
 /* Implement TARGET_ASM_FILE_END.  */
 void
@@ -33379,15 +33448,27 @@ aarch64_run_selftests (void)
 #define TARGET_ALIGN_ANON_BITFIELD hook_bool_void_true
 
 #undef TARGET_ASM_ALIGNED_DI_OP
+#if TARGET_MACHO
+#define TARGET_ASM_ALIGNED_DI_OP "\t.quad\t"
+#else
 #define TARGET_ASM_ALIGNED_DI_OP "\t.xword\t"
+#endif
 
 #undef TARGET_ASM_ALIGNED_HI_OP
+#if TARGET_MACHO
+#define TARGET_ASM_ALIGNED_HI_OP "\t.short\t"
+#else
 #define TARGET_ASM_ALIGNED_HI_OP "\t.hword\t"
+#endif
 
 #undef TARGET_ASM_ALIGNED_SI_OP
+#if TARGET_MACHO
+#define TARGET_ASM_ALIGNED_SI_OP "\t.long\t"
+#else
 #define TARGET_ASM_ALIGNED_SI_OP "\t.word\t"
+#endif
 
-#if TARGET_PECOFF
+#if TARGET_PECOFF || TARGET_MACHO
 #undef TARGET_ASM_UNALIGNED_HI_OP
 #define TARGET_ASM_UNALIGNED_HI_OP TARGET_ASM_ALIGNED_HI_OP
 #undef TARGET_ASM_UNALIGNED_SI_OP

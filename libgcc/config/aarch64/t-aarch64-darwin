@@ -1,0 +1,7 @@
+# AArch64 Darwin-specific libgcc overrides.
+# This file must be included AFTER t-aarch64 to override the ELF-specific
+# SME .S assembly files that Apple's assembler cannot handle.
+
+# Strip all .S files from LIB2ADDEH — the SME assembly stubs use ELF syntax.
+# Keep only the C files.
+LIB2ADDEH := $(filter-out %.S,$(LIB2ADDEH))

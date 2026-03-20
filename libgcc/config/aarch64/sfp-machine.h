@@ -124,6 +124,21 @@ void __sfp_handle_exceptions (int);
 
 
 /* Define ALIASNAME as a strong alias for NAME.  */
+#ifdef __MACH__
+/* Darwin/Mach-O does not support __attribute__((alias)).  Instead, create
+   a global symbol that equals the target function's address.  The compiler
+   will emit this as a pointer at file scope.  For CMPtype functions used in
+   libgcc, this creates a function pointer — not ideal but works because
+   the only callers are within libgcc itself via direct calls.
+
+   A more correct approach: create a real forwarding stub.  We use an
+   assembly-level .set directive if available, or fall back to a function
+   pointer.  */
+# define strong_alias(name, aliasname) \
+  __asm__(".globl _" #aliasname "\n\t" \
+          ".set _" #aliasname ", _" #name "\n");
+#else
 # define strong_alias(name, aliasname) _strong_alias(name, aliasname)
 # define _strong_alias(name, aliasname) \
   extern __typeof (name) aliasname __attribute__ ((alias (#name)));
+#endif

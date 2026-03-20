@@ -298,6 +298,8 @@ darwin_driver_init (unsigned int *decoded_options_count,
 	    seenPPC = true;
 	  else if (!strcmp ((*decoded_options)[i].arg, "ppc64"))
 	    seenPPC64 = true;
+	  else if (!strcmp ((*decoded_options)[i].arg, "arm64"))
+	    /* AArch64 Darwin is always 64-bit LP64; nothing to do.  */;
 	  else
 	    error ("this compiler does not support %qs",
 		   (*decoded_options)[i].arg);
@@ -312,13 +314,17 @@ darwin_driver_init (unsigned int *decoded_options_count,
 	  --*decoded_options_count;
 	  break;
 
+#ifdef OPT_m32
 	case OPT_m32:
 	  seenM32 = true;
 	  break;
+#endif
 
+#ifdef OPT_m64
 	case OPT_m64:
 	  seenM64 = true;
 	  break;
+#endif
 
 	case OPT_mmacosx_version_min_:
 	  seen_version_min = true;
@@ -426,6 +432,7 @@ darwin_driver_init (unsigned int *decoded_options_count,
   if (*decoded_options_count <= 1)
     return;
 
+#if defined(OPT_m32) && defined(OPT_m64)
   if (appendM32 || appendM64)
     {
       ++*decoded_options_count;
@@ -435,6 +442,7 @@ darwin_driver_init (unsigned int *decoded_options_count,
       generate_option (appendM32 ? OPT_m32 : OPT_m64, NULL, 1, CL_DRIVER,
 		       &(*decoded_options)[*decoded_options_count - 1]);
     }
+#endif
 
   if (!seen_sysroot_p)
     {

@@ -707,6 +707,7 @@ machopic_indirect_data_reference (rtx orig, rtx reg)
 
       if (defined && MACHO_DYNAMIC_NO_PIC_P)
 	{
+#if DARWIN_PPC
 	  if (DARWIN_PPC)
 	    {
 	  /* Create a new register for CSE opportunities.  */
@@ -715,7 +716,11 @@ machopic_indirect_data_reference (rtx orig, rtx reg)
 	  emit_insn (gen_macho_low (Pmode, reg, hi_reg, orig));
 	      return reg;
  	    }
-	  else if (DARWIN_X86)
+	  else
+#endif
+	  if (DARWIN_X86)
+	    return orig;
+	  else if (DARWIN_AARCH64)
 	    return orig;
 	  else
 	   /* some other cpu -- writeme!  */
@@ -768,7 +773,7 @@ machopic_indirect_data_reference (rtx orig, rtx reg)
       ptr_ref = gen_const_mem (Pmode, ptr_ref);
       machopic_define_symbol (ptr_ref);
 
-      if (DARWIN_X86
+      if ((DARWIN_X86 || DARWIN_AARCH64)
           && reg
           && MACHO_DYNAMIC_NO_PIC_P)
 	{
@@ -3633,7 +3638,7 @@ darwin_override_options (void)
 	  ld_needs_eh_markers = true;
 	}
     }
-  else if (DARWIN_X86 && darwin_symbol_stubs && TARGET_64BIT)
+  else if ((DARWIN_X86 || DARWIN_AARCH64) && darwin_symbol_stubs && TARGET_64BIT)
     {
       inform (input_location,
 	      "%<-mpic-symbol-stubs%> is not required for 64-bit code "
