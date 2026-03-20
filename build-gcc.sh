@@ -108,10 +108,7 @@ if [[ -d "${GCC_SRC_DIR}/.git" ]]; then
     cd "${WORKSPACE}"
 else
     log "Cloning gcc trunk..."
-    if ! git clone --depth=1 "${GCC_GIT_URL}" "${GCC_SRC_DIR}" 2>/dev/null; then
-        warn "git:// protocol failed, trying HTTPS..."
-        git clone --depth=1 "${GCC_GIT_URL_HTTPS}" "${GCC_SRC_DIR}"
-    fi
+    git clone --depth=1 --branch="${GCC_GIT_BRANCH}" "${GCC_GIT_URL_HTTPS}" "${GCC_SRC_DIR}"
 fi
 
 # gcc ships a convenient script that fetches
