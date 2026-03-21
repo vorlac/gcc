@@ -123,6 +123,17 @@ Early::resolve_rebind_import (NodeId use_dec_id,
   // if we've found at least one definition, then we're good
   if (definitions.empty ())
     return false;
+  for (const auto &def : definitions)
+    {
+      if (def.first.is_ambiguous ())
+	{
+	  rich_location rich_locus (line_table,
+				    rebind_import.to_resolve.get_locus ());
+	  rust_error_at (rich_locus, ErrorCode::E0659, "%qs is ambiguous",
+			 rebind_import.to_resolve.as_string ().c_str ());
+	  return true;
+	}
+    }
 
   auto &imports = import_mappings.new_or_access (use_dec_id);
 
@@ -314,77 +325,74 @@ Early::visit (AST::MacroInvocation &invoc)
 }
 
 void
-Early::visit_attributes (std::vector<AST::Attribute> &attrs)
+Early::visit_derive_attribute (AST::Attribute &attr,
+			       Analysis::Mappings &mappings)
 {
-  auto &mappings = Analysis::Mappings::get ();
-
-  for (auto &attr : attrs)
+  auto traits = attr.get_traits_to_derive ();
+  for (auto &trait : traits)
     {
-      auto name = attr.get_path ().get_segments ().at (0).get_segment_name ();
-
-      if (attr.is_derive ())
+      auto definition = ctx.resolve_path (trait.get (), Namespace::Macros);
+      if (!definition.has_value ())
 	{
-	  auto traits = attr.get_traits_to_derive ();
-	  for (auto &trait : traits)
-	    {
-	      auto definition
-		= ctx.resolve_path (trait.get (), Namespace::Macros);
-	      if (!definition.has_value ())
-		{
-		  // FIXME: Change to proper error message
-		  collect_error (Error (trait.get ().get_locus (),
-					"could not resolve trait %qs",
-					trait.get ().as_string ().c_str ()));
-		  continue;
-		}
-
-	      auto pm_def = mappings.lookup_derive_proc_macro_def (
-		definition->get_node_id ());
-
-	      if (pm_def.has_value ())
-		mappings.insert_derive_proc_macro_invocation (trait,
-							      pm_def.value ());
-	    }
+	  // FIXME: Change to proper error message
+	  collect_error (Error (trait.get ().get_locus (),
+				"could not resolve trait %qs",
+				trait.get ().as_string ().c_str ()));
+	  continue;
 	}
-      else if (Analysis::BuiltinAttributeMappings::get ()
-		 ->lookup_builtin (name)
-		 .is_error ()) // Do not resolve builtins
-	{
-	  auto definition
-	    = ctx.resolve_path (attr.get_path (), Namespace::Macros);
-	  if (!definition.has_value ())
-	    {
-	      // FIXME: Change to proper error message
-	      collect_error (
-		Error (attr.get_locus (),
-		       "could not resolve attribute macro invocation %qs",
-		       name.c_str ()));
-	      return;
-	    }
-	  auto pm_def = mappings.lookup_attribute_proc_macro_def (
-	    definition->get_node_id ());
 
-	  if (!pm_def.has_value ())
-	    return;
+      auto pm_def
+	= mappings.lookup_derive_proc_macro_def (definition->get_node_id ());
 
-	  mappings.insert_attribute_proc_macro_invocation (attr.get_path (),
-							   pm_def.value ());
-	}
+      if (pm_def.has_value ())
+	mappings.insert_derive_proc_macro_invocation (trait, pm_def.value ());
     }
 }
 
 void
-Early::visit (AST::Function &fn)
+Early::visit_non_builtin_attribute (AST::Attribute &attr,
+				    Analysis::Mappings &mappings,
+				    std::string &name)
 {
-  visit_attributes (fn.get_outer_attrs ());
-  DefaultResolver::visit (fn);
+  auto definition = ctx.resolve_path (attr.get_path (), Namespace::Macros);
+  if (!definition.has_value ())
+    {
+      // FIXME: Change to proper error message
+      collect_error (Error (attr.get_locus (),
+			    "could not resolve attribute macro invocation %qs",
+			    name.c_str ()));
+      return;
+    }
+  auto pm_def
+    = mappings.lookup_attribute_proc_macro_def (definition->get_node_id ());
+
+  if (!pm_def.has_value ())
+    return;
+
+  mappings.insert_attribute_proc_macro_invocation (attr.get_path (),
+						   pm_def.value ());
 }
 
 void
-Early::visit (AST::StructStruct &s)
+Early::visit (AST::Attribute &attr)
 {
-  visit_attributes (s.get_outer_attrs ());
-  DefaultResolver::visit (s);
+  auto &mappings = Analysis::Mappings::get ();
+
+  auto name = attr.get_path ().get_segments ().at (0).get_segment_name ();
+  auto is_not_builtin = [&name] (AST::Attribute &attr) {
+    return Analysis::BuiltinAttributeMappings::get ()
+      ->lookup_builtin (name)
+      .is_error ();
+  };
+
+  if (attr.is_derive ())
+    {
+      visit_derive_attribute (attr, mappings);
+    }
+  else if (is_not_builtin (attr)) // Do not resolve builtins
+    {
+      visit_non_builtin_attribute (attr, mappings, name);
+    }
 }
 
 void

@@ -9031,6 +9031,17 @@ trees_in::decl_value ()
 	  && decl_tls_wrapper_p (decl))
 	note_vague_linkage_fn (decl);
 
+      /* Apply relevant attributes.
+	 FIXME should probably use cplus_decl_attributes for this,
+	 but it's not yet ready for modules.  */
+
+      if (VAR_OR_FUNCTION_DECL_P (inner))
+	if (tree attr = lookup_attribute ("section", DECL_ATTRIBUTES (inner)))
+	  {
+	    tree section_name = TREE_VALUE (TREE_VALUE (attr));
+	    set_decl_section_name (inner, TREE_STRING_POINTER (section_name));
+	  }
+
       /* Setup aliases for the declaration.  */
       if (tree alias = lookup_attribute ("alias", DECL_ATTRIBUTES (decl)))
 	{
@@ -11358,6 +11369,19 @@ trees_in::fn_parms_init (tree fn)
 		 base_tag - ix, ix, parm, fn);
       if (!tree_node_vals (parm))
 	return 0;
+
+      /* Apply relevant attributes.
+	 FIXME should probably use cplus_decl_attributes for this,
+	 but it's not yet ready for modules.  */
+
+      /* TREE_USED is deliberately not streamed for most declarations,
+	 but needs to be set if we have the [[maybe_unused]] attribute.  */
+      if (lookup_attribute ("unused", DECL_ATTRIBUTES (parm))
+	  || lookup_attribute ("maybe_unused", DECL_ATTRIBUTES (parm)))
+	{
+	  TREE_USED (parm) = true;
+	  DECL_READ_P (parm) = true;
+	}
     }
 
   /* Reload references to contract functions, if any.  */
