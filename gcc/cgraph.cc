@@ -1273,20 +1273,19 @@ int
 cgraph_edge::get_next_speculative_id ()
 {
   int max_id = -1;
-  cgraph_edge *e;
 
-  /* Iterate through all edges leaving this caller */
-  for (e = caller->callees; e; e = e->next_callee)
+  /* If this edge is not yet speculative, there are no existing speculative
+     edges for this call site, so return 0.  */
+  if (!speculative)
+    return 0;
+
+  /* Iterate only through speculative edges for this specific call site.  */
+  for (cgraph_edge *e = first_speculative_call_target ();
+       e;
+       e = e->next_speculative_call_target ())
     {
-      /* Match the specific GIMPLE statement and check the
-	 speculative flag */
-      if (e->call_stmt == call_stmt
-	  && e->lto_stmt_uid == lto_stmt_uid
-	  && e->speculative)
-	{
-	  if (e->speculative_id > max_id)
-	    max_id = e->speculative_id;
-	}
+      if (e->speculative_id > max_id)
+	max_id = e->speculative_id;
     }
 
   return max_id + 1;
@@ -3627,6 +3626,16 @@ cgraph_node::only_called_directly_p (void)
 				       NULL, true);
 }
 
+/* Returns TRUE iff THIS is a descendant of N in the clone tree.  */
+
+bool
+cgraph_node::is_clone_of (cgraph_node *n) const
+{
+  for (cgraph_node *walker = clone_of; walker; walker = walker->clone_of)
+    if (walker == n)
+      return true;
+  return false;
+}
 
 /* Collect all callers of NODE.  Worker for collect_callers_of_node.  */
 

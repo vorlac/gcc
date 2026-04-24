@@ -6872,6 +6872,8 @@ trees_out::core_vals (tree t)
 
     case PTRMEM_CST:
       WT (((lang_tree_node *)t)->ptrmem.member);
+      if (state)
+	state->write_location (*this, ((lang_tree_node *)t)->ptrmem.locus);
       break;
 
     case STATIC_ASSERT:
@@ -6933,6 +6935,9 @@ trees_out::core_vals (tree t)
     case TRAIT_EXPR:
       WT (((lang_tree_node *)t)->trait_expression.type1);
       WT (((lang_tree_node *)t)->trait_expression.type2);
+      if (state)
+	state->write_location
+	  (*this, ((lang_tree_node *)t)->trait_expression.locus);
       if (streaming_p ())
 	WU (((lang_tree_node *)t)->trait_expression.kind);
       break;
@@ -7443,7 +7448,8 @@ trees_in::core_vals (tree t)
       break;
 
     case PTRMEM_CST:
-      RT (((lang_tree_node *)t)->ptrmem.member);
+      RTU (((lang_tree_node *)t)->ptrmem.member);
+      ((lang_tree_node *)t)->ptrmem.locus = state->read_location (*this);
       break;
 
     case STATIC_ASSERT:
@@ -7493,6 +7499,8 @@ trees_in::core_vals (tree t)
     case TRAIT_EXPR:
       RT (((lang_tree_node *)t)->trait_expression.type1);
       RT (((lang_tree_node *)t)->trait_expression.type2);
+      ((lang_tree_node *)t)->trait_expression.locus
+	= state->read_location (*this);
       RUC (cp_trait_kind, ((lang_tree_node *)t)->trait_expression.kind);
       break;
 
@@ -12619,12 +12627,14 @@ trees_in::is_matching_decl (tree existing, tree decl, bool is_typedef)
       tree d_spec = TYPE_RAISES_EXCEPTIONS (d_type);
       if (DECL_MAYBE_DELETED (e_inner) || DEFERRED_NOEXCEPT_SPEC_P (e_spec))
 	{
-	  if (!DEFERRED_NOEXCEPT_SPEC_P (d_spec)
+	  if (!(DECL_MAYBE_DELETED (d_inner)
+		|| DEFERRED_NOEXCEPT_SPEC_P (d_spec))
 	      || (UNEVALUATED_NOEXCEPT_SPEC_P (e_spec)
 		  && !UNEVALUATED_NOEXCEPT_SPEC_P (d_spec)))
 	    {
 	      dump (dumper::MERGE)
 		&& dump ("Propagating instantiated noexcept to %N", existing);
+	      gcc_checking_assert (existing == e_inner);
 	      TREE_TYPE (existing) = d_type;
 
 	      /* Propagate to existing clones.  */
@@ -12650,7 +12660,9 @@ trees_in::is_matching_decl (tree existing, tree decl, bool is_typedef)
 
       /* Similarly if EXISTING has an undeduced return type, but DECL's
 	 is already deduced.  */
-      if (undeduced_auto_decl (existing) && !undeduced_auto_decl (decl))
+      bool e_undeduced = undeduced_auto_decl (existing);
+      bool d_undeduced = undeduced_auto_decl (decl);
+      if (e_undeduced && !d_undeduced)
 	{
 	  dump (dumper::MERGE)
 	    && dump ("Propagating deduced return type to %N", existing);
@@ -12659,6 +12671,8 @@ trees_in::is_matching_decl (tree existing, tree decl, bool is_typedef)
 	  DECL_SAVED_AUTO_RETURN_TYPE (existing) = TREE_TYPE (e_type);
 	  TREE_TYPE (existing) = change_return_type (TREE_TYPE (d_type), e_type);
 	}
+      else if (d_undeduced && !e_undeduced)
+	/* EXISTING was deduced, leave it alone.  */;
       else if (type_uses_auto (d_ret)
 	       && !same_type_p (TREE_TYPE (d_type), TREE_TYPE (e_type)))
 	{
@@ -13240,6 +13254,13 @@ trees_in::read_function_def (tree decl, tree maybe_template)
       DECL_RESULT (decl) = result;
       DECL_INITIAL (decl) = initial;
       DECL_SAVED_TREE (decl) = saved;
+
+      /* Some entities (like anticipated builtins) were declared without
+	 DECL_ARGUMENTS, so update them now.  But don't do it if there's
+	 already an argument list, because we've already built the
+	 definition referencing those merged PARM_DECLs.  */
+      if (!DECL_ARGUMENTS (decl))
+	DECL_ARGUMENTS (decl) = DECL_ARGUMENTS (maybe_dup);
 
       if (context)
 	SET_DECL_FRIEND_CONTEXT (decl, context);
@@ -14518,7 +14539,7 @@ instantiating_tu_local_entity (tree decl)
     return false;
 
   auto_diagnostic_group d;
-  warning (OPT_Wexpose_global_module_tu_local,
+  pedwarn (input_location, OPT_Wexpose_global_module_tu_local,
 	   "instantiation exposes TU-local entity %qD", decl);
   inform (DECL_SOURCE_LOCATION (decl), "declared here");
 
@@ -14848,9 +14869,10 @@ depset::hash::add_dependency (depset *dep)
      details.  */
   if (writing_merge_key)
     {
-      dep->set_flag_bit<DB_MAYBE_RECURSIVE_BIT> ();
-      if (!current->is_maybe_recursive ())
+      if (!dep->is_maybe_recursive () && !current->is_maybe_recursive ())
 	current->set_flag_bit<DB_ENTRY_BIT> ();
+      dep->set_flag_bit<DB_MAYBE_RECURSIVE_BIT> ();
+      current->set_flag_bit<DB_MAYBE_RECURSIVE_BIT> ();
     }
 
   if (dep->is_unreached ())
@@ -14958,7 +14980,8 @@ depset::hash::add_binding_entity (tree decl, WMB_Flags flags, void *data_)
 	return false;
 
       bool internal_decl = false;
-      if (!header_module_p () && is_tu_local_entity (decl))
+      if (!header_module_p () && is_tu_local_entity (decl)
+	  && !((flags & WMB_Using) && (flags & WMB_Export)))
 	{
 	  /* A TU-local entity.  For ADL we still need to create bindings
 	     for internal-linkage functions attached to a named module.  */
@@ -15982,6 +16005,11 @@ depset::hash::finalize_dependencies ()
       /* Otherwise, we'll check for bad internal refs.
 	 Don't complain about any references from TU-local entities.  */
       if (dep->is_tu_local ())
+	continue;
+
+      /* We already complained about usings of non-external entities in
+	 check_can_export_using_decl, don't do it again here.  */
+      if (dep->get_entity_kind () == EK_USING)
 	continue;
 
       if (dep->is_exposure ())
@@ -22069,12 +22097,18 @@ set_defining_module_for_partial_spec (tree decl)
     vec_safe_push (partial_specializations, decl);
 }
 
+/* Record that DECL is declared in this TU, and note attachment and
+   exporting for namespace-scope entities.  FRIEND_P is true if
+   this is a friend declaration.  */
+
 void
 set_originating_module (tree decl, bool friend_p ATTRIBUTE_UNUSED)
 {
   set_instantiating_module (decl);
 
-  if (!DECL_NAMESPACE_SCOPE_P (decl))
+  /* DECL_CONTEXT may not be set yet when we're called for
+     non-namespace-scope entities.  */
+  if (!DECL_CONTEXT (decl) || !DECL_NAMESPACE_SCOPE_P (decl))
     return;
 
   gcc_checking_assert (friend_p || decl == get_originating_module_decl (decl));
@@ -22113,7 +22147,7 @@ check_module_decl_linkage (tree decl)
       && decl_defined_p (decl)
       && !(DECL_LANG_SPECIFIC (decl)
 	   && DECL_TEMPLATE_INSTANTIATION (decl))
-      && decl_linkage (decl) == lk_external)
+      && DECL_EXTERNAL_LINKAGE_P (decl))
     error_at (DECL_SOURCE_LOCATION (decl),
 	      "external linkage definition of %qD in header module must "
 	      "be declared %<inline%>", decl);
@@ -22127,7 +22161,7 @@ check_module_decl_linkage (tree decl)
 	 internal namespace as exporting a declaration with internal
 	 linkage, as this would also implicitly export the internal
 	 linkage namespace.  */
-      if (decl_internal_context_p (decl))
+      if (decl_anon_ns_mem_p (decl))
 	{
 	  error_at (DECL_SOURCE_LOCATION (decl),
 		    "exporting declaration %qD declared in unnamed namespace",
@@ -23105,13 +23139,22 @@ maybe_translate_include (cpp_reader *reader, line_maps *lmaps, location_t loc,
       /* Redirect importable <name> to <bits/stdc++.h>.  */
       /* ??? Generalize to use a .json.  */
       expanded_location eloc = expand_location (loc);
+      auto indir = [](const char *f, const char *d)
+      {
+	if (!filename_ncmp (f, d, strlen (d))) return true;
+	/* Also check canonical paths (c++/123879).  */
+	auto cf = lrealpath (f); auto cd = lrealpath (d);
+	bool r = cf && cd && !filename_ncmp (cf, cd, strlen (cd));
+	free (cf); free (cd);
+	return r;
+      };
       if (angle && is_importable_header (fname)
 	  /* Exclude <version> which often goes with import std.  */
 	  && strcmp (fname, "version") != 0
 	  /* Don't redirect #includes between headers under the same include
 	     path directory (i.e. between library headers); if the import
 	     brings in the current file we then get redefinition errors.  */
-	  && !strstr (eloc.file, _cpp_get_file_dir (file)->name)
+	  && !indir (eloc.file, _cpp_get_file_dir (file)->name)
 	  /* ??? These are needed when running a toolchain from the build
 	     directory, because libsupc++ headers aren't linked into
 	     libstdc++-v3/include with the other headers.  */

@@ -403,18 +403,21 @@ FPU.
 @cindex @code{_Decimal32} data type
 @cindex @code{_Decimal64} data type
 @cindex @code{_Decimal128} data type
-@cindex @code{df} integer suffix
-@cindex @code{dd} integer suffix
-@cindex @code{dl} integer suffix
-@cindex @code{DF} integer suffix
-@cindex @code{DD} integer suffix
-@cindex @code{DL} integer suffix
+@cindex @code{df} floating point suffix
+@cindex @code{dd} floating point suffix
+@cindex @code{dl} floating point suffix
+@cindex @code{DF} floating point suffix
+@cindex @code{DD} floating point suffix
+@cindex @code{DL} floating point suffix
+@cindex @code{d} floating point suffix
+@cindex @code{D} floating point suffix
 
-As an extension, GNU C supports decimal floating types as
-defined in the N1312 draft of ISO/IEC WDTR24732.  Support for decimal
-floating types in GCC will evolve as the draft technical report changes.
-Calling conventions for any target might also change.  Not all targets
-support decimal floating types.
+As an extension, GNU C supports decimal floating types as defined in
+the N1312 draft of ISO/IEC WDTR24732.  GCC does not yet implement the
+later specification of decimal floating point in the C23 standard,
+primarily due to problems with library support.  The N1312 draft
+support is available in all dialects of C, but not all targets support
+decimal floating types.
 
 The decimal floating types are @code{_Decimal32}, @code{_Decimal64}, and
 @code{_Decimal128}.  They use a radix of ten, unlike the floating types
@@ -427,7 +430,8 @@ relational operators; equality operators; and conversions to and from
 integer and other floating types.  Use a suffix @samp{df} or
 @samp{DF} in a literal constant of type @code{_Decimal32}, @samp{dd}
 or @samp{DD} for @code{_Decimal64}, and @samp{dl} or @samp{DL} for
-@code{_Decimal128}.
+@code{_Decimal128}.  The draft TR also defines the suffixes @samp{d}
+and @samp{D} for type @code{double}.
 
 GCC support of decimal float as specified by the draft technical report
 is incomplete:
@@ -4935,7 +4939,7 @@ command line.  The original target command-line options are ignored.
 One or more strings can be provided as arguments.
 Each string consists of one or more comma-separated suffixes to
 the @code{-m} prefix jointly forming the name of a machine-dependent
-option.  @xref{Submodel Options,,Machine-Dependent Options}.
+option.  @xref{Target-Specific Options}.
 
 The @code{target} attribute can be used for instance to have a function
 compiled with a different ISA (instruction set architecture) than the
@@ -27149,9 +27153,10 @@ temporarily paused or slowed down.
 @node RISC-V Vector Intrinsics
 @subsection RISC-V Vector Intrinsics
 
-GCC supports vector intrinsics as specified in version 0.11 of the RISC-V
-vector intrinsic specification, which is available at the following link:
-@uref{https://github.com/riscv-non-isa/rvv-intrinsic-doc/tree/v0.11.x}.
+GCC supports vector intrinsics as specified in the ratified version 1.0 of the
+RISC-V vector intrinsic specification, which is available from the repository's
+release page:
+@uref{https://github.com/riscv-non-isa/rvv-intrinsic-doc/releases/tag/v1.0-ratified}.
 All of these functions are declared in the include file @file{riscv_vector.h}.
 
 @node CORE-V Built-in Functions
@@ -31203,6 +31208,76 @@ Applying
 these attributes on a type has the effect of propagating it to every
 member function of the type, including implicit special member
 functions.  @xref{Common Attributes}.
+
+@cindex @code{trivial_abi} type attribute
+@item trivial_abi
+
+The @code{trivial_abi} attribute can be applied to a C++ class, struct,
+or union.  It instructs the compiler to pass and return the type using
+the C ABI for the underlying type when the type would otherwise be
+considered non-trivial for the purposes of calls.
+
+The attribute can be specified either as @code{__attribute__
+((trivial_abi))} or @code{[[clang::trivial_abi]]} for compatibility
+with the original implementation in Clang.  To avoid portability
+complications, @code{[[gnu::trivial_abi]]} is ignored with a warning.
+
+A class annotated with @code{trivial_abi} can have non-trivial destructors
+or copy/move constructors without automatically becoming non-trivial for
+the purposes of calls.  For example:
+
+@smallexample
+// A is trivial for the purposes of calls despite the user-provided
+// special member functions.
+struct __attribute__ ((trivial_abi)) A @{
+  ~A();
+  A(const A &);
+  A(A &&);
+  int x;
+@};
+
+// B is trivial for the purposes of calls because A is.
+struct B @{
+  A a;
+@};
+@end smallexample
+
+If a type is trivial for the purposes of calls, has a non-trivial destructor,
+and is passed as an argument by value, the convention is that the callee will
+destroy the object before returning.  The lifetime of the copy of the parameter
+in the caller ends without a destructor call when the call begins.
+
+When a type marked with @code{trivial_abi} is used as a function argument,
+the compiler may omit the call to the copy constructor.  Thus, side effects
+of the copy constructor are potentially not performed.  For example, objects
+that contain pointers to themselves or otherwise depend on their address
+(or the address of their subobjects) should not be declared with
+@code{trivial_abi}.
+
+Attribute @code{trivial_abi} has no effect in the following cases:
+
+@itemize @bullet
+@item
+The class has a virtual base or virtual member function.
+
+@item
+Copy constructors and move constructors of the class are all deleted.
+
+@item
+The class has a base class that is non-trivial for the purposes of calls.
+
+@item
+The class has a non-static data member whose type is non-trivial for the
+purposes of calls, which includes:
+
+@itemize @bullet
+@item
+classes that are non-trivial for the purposes of calls
+
+@item
+arrays of any of the above
+@end itemize
+@end itemize
 
 @end table
 

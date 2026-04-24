@@ -3,7 +3,7 @@
  *
  * Also used to convert AST nodes to D code in general, e.g. for error messages or `printf` debugging.
  *
- * Copyright:   Copyright (C) 1999-2025 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2026 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/compiler/src/dmd/hdrgen.d, _hdrgen.d)
@@ -58,6 +58,7 @@ struct HdrGenState
     bool fullDump;      /// true if generating a full AST dump file
     bool importcHdr;    /// true if generating a .di file from an ImportC file
     bool inCAlias;      /// Set to prevent ImportC translating typedefs as `alias X = X`
+    bool inFuncReturn;  /// Set when printing function return type to avoid typedef name
     bool doFuncBodies;  /// include function bodies in output
     bool vcg_ast;       /// write out codegen-ast
     bool skipConstraints;  // skip constraints when doing templates
@@ -1751,17 +1752,16 @@ void toCBuffer(Dsymbol s, ref OutBuffer buf, ref HdrGenState hgs)
             /*
                 https://issues.dlang.org/show_bug.cgi?id=23223
                 https://issues.dlang.org/show_bug.cgi?id=23222
-                This special case (initially just for modules) avoids some segfaults
-                and nicer -vcg-ast output.
+                https://github.com/dlang/dmd/issues/21707
+                For named symbols (modules, functions, templates, aggregates),
+                print just the name to avoid segfaults, infinite recursion,
+                and for nicer -vcg-ast output. Anonymous symbols (function
+                literals) are printed in full.
             */
-            if (d.aliassym.isModule())
-            {
+            if (!d.aliassym.isFuncLiteralDeclaration() && d.aliassym.ident)
                 buf.put(d.aliassym.ident.toString());
-            }
             else
-            {
                 toCBuffer(d.aliassym, buf, hgs);
-            }
         }
         else if (d.type.ty == Tfunction)
         {
@@ -2799,6 +2799,9 @@ private void expressionPrettyPrint(Expression e, ref OutBuffer buf, ref HdrGenSt
 
     void visitAssert(AssertExp e)
     {
+        if (e.loweredFrom)
+            return e.loweredFrom.expressionPrettyPrint(buf, hgs);
+
         buf.put("assert(");
         expToBuffer(e.e1, PREC.assign, buf, hgs);
         if (e.msg)
@@ -4093,7 +4096,9 @@ private void visitFuncIdentWithPostfix(TypeFunction t, const char[] ident, ref O
         buf.write("static ");
     if (t.next)
     {
+        hgs.inFuncReturn = true;
         typeToBuffer(t.next, null, buf, hgs);
+        hgs.inFuncReturn = false;
         if (ident)
             buf.put(' ');
     }
@@ -4162,7 +4167,9 @@ private void visitFuncIdentWithPrefix(TypeFunction t, const Identifier ident, Te
     }
     else if (t.next)
     {
+        hgs.inFuncReturn = true;
         typeToBuffer(t.next, null, buf, hgs);
+        hgs.inFuncReturn = false;
         if (ident)
             buf.put(' ');
     }
@@ -4544,7 +4551,7 @@ private void typeToBufferx(Type t, ref OutBuffer buf, ref HdrGenState hgs)
         buf.put("noreturn");
     }
 
-    if (hgs.importcHdr && !hgs.inCAlias && t.mcache && t.mcache.typedefIdent)
+    if (hgs.importcHdr && !hgs.inCAlias && !hgs.inFuncReturn && t.mcache && t.mcache.typedefIdent)
     {
         buf.put(t.mcache.typedefIdent.toString());
         return;

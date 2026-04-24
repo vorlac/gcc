@@ -73,7 +73,7 @@ TypeCheckPattern::visit (HIR::PathInExpression &pattern)
       HirId def_id = definition_id.value ();
 
       tl::optional<HIR::Item *> hir_item = mappings.lookup_hir_item (def_id);
-      // If the path refrerences an item, it must be constants or structs.
+      // If the path references an item, it must be constants or structs.
       if (hir_item.has_value ())
 	{
 	  HIR::Item *item = hir_item.value ();
@@ -127,7 +127,9 @@ TypeCheckPattern::visit (HIR::PathInExpression &pattern)
 	  rust_assert (ok);
 	}
 
-      if (variant->get_variant_type () != TyTy::VariantDef::VariantType::NUM)
+      if (variant->get_variant_type () != TyTy::VariantDef::VariantType::NUM
+	  && variant->get_variant_type ()
+	       != TyTy::VariantDef::VariantType::UNIT)
 	{
 	  std::string variant_type = TyTy::VariantDef::variant_type_string (
 	    variant->get_variant_type ());
@@ -135,7 +137,7 @@ TypeCheckPattern::visit (HIR::PathInExpression &pattern)
 	  rich_location rich_locus (line_table,
 				    pattern.get_final_segment ().get_locus ());
 	  rich_locus.add_fixit_replace (
-	    "not a unit struct, unit variant or constatnt");
+	    "not a unit struct, unit variant or constant");
 	  rust_error_at (rich_locus, ErrorCode::E0532,
 			 "expected unit struct, unit variant or constant, "
 			 "found %s variant %<%s::%s%>",

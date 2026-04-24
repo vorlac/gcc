@@ -12225,7 +12225,8 @@ aarch64_start_call_args (cumulative_args_t ca_v)
     emit_insn (gen_aarch64_start_private_za_call ());
 
   /* If this is a call to a shared-ZA function that doesn't share ZT0,
-     save and restore ZT0 around the call.  */
+     save and restore ZT0 around the call.  If ZA is not shared, then the
+     save/restore is instead emitted by aarch64_mode_emit_local_sme_state.  */
   if (aarch64_cfun_has_state ("zt0")
       && (ca->isa_mode & AARCH64_ISA_MODE_ZA_ON)
       && ca->shared_zt0_flags == 0)
@@ -16282,8 +16283,24 @@ cost_plus:
     case GEU:
     case LE:
     case LEU:
-
-      return false; /* All arguments must be in registers.  */
+      {
+	op0 = XEXP (x, 0);
+	op1 = XEXP (x, 1);
+	machine_mode inner_mode = GET_MODE (op0);
+	*cost += rtx_cost (op0, inner_mode, code, 0, speed);
+	if (op1 != CONST0_RTX (inner_mode))
+	  {
+	    unsigned int vec_flags = aarch64_classify_vector_mode (mode);
+	    bool unsigned_p = code == LTU || code == LEU || code == GTU
+			      || code == GEU;
+	    if ((vec_flags & VEC_SVE_DATA) == 0
+		|| !aarch64_sve_cmp_immediate_p (op1, !unsigned_p))
+	      *cost += rtx_cost (op1, inner_mode, code, 1, speed);
+	    if (code == NE && (vec_flags & VEC_ADVSIMD))
+	      *cost += COSTS_N_INSNS (1);
+	  }
+	return true;
+      }
 
     case FMA:
       op0 = XEXP (x, 0);
@@ -19876,11 +19893,11 @@ aarch64_override_options_internal (struct gcc_options *opts)
       & AARCH64_EXTRA_TUNE_DISPATCH_SCHED)
     gcc_assert (aarch64_tune_params.dispatch_constraints != NULL);
 
-  /* Set scalar costing to a high value such that we always pick
-     vectorization.  Increase scalar costing by 10000%.  */
+  /* Enable possible unprofitable vectorization.  */
   if (opts->x_flag_aarch64_max_vectorization)
     SET_OPTION_IF_UNSET (opts, &global_options_set,
-			 param_vect_scalar_cost_multiplier, 10000);
+			 param_vect_allow_possibly_not_worthwhile_vectorizations,
+			 1);
 
   /* Synchronize the -mautovec-preference and aarch64_autovec_preference using
      whichever one is not default.  If both are set then prefer the param flag
@@ -30452,7 +30469,7 @@ aarch64_scalar_mode_supported_p (scalar_mode mode)
     return default_decimal_float_supported_p ();
 
   if (mode == TFmode)
-    return true;
+    return TARGET_LONG_DOUBLE_128 != 0;
 
   return ((mode == HFmode || mode == BFmode)
 	  ? true
@@ -30533,7 +30550,7 @@ aarch64_bitint_type_info (int n, struct bitint_info *info)
   else
     info->abi_limb_mode = info->limb_mode;
   info->big_endian = TARGET_BIG_END;
-  info->extended = false;
+  info->extended = bitint_ext_undef;
   return true;
 }
 
@@ -32004,7 +32021,8 @@ aarch64_mode_emit_local_sme_state (aarch64_local_sme_state mode,
       emit_insn (gen_aarch64_tpidr2_save ());
       emit_insn (gen_aarch64_clear_tpidr2 ());
       if (mode == aarch64_local_sme_state::ACTIVE_LIVE
-	  || mode == aarch64_local_sme_state::ACTIVE_DEAD)
+	  || mode == aarch64_local_sme_state::ACTIVE_DEAD
+	  || mode == aarch64_local_sme_state::INACTIVE_LOCAL)
 	{
 	  if (aarch64_cfun_has_state ("za"))
 	    emit_insn (gen_aarch64_initial_zero_za ());
@@ -32086,6 +32104,16 @@ aarch64_mode_emit_local_sme_state (aarch64_local_sme_state mode,
 
   if (mode == aarch64_local_sme_state::INACTIVE_LOCAL)
     {
+      if (prev_mode == aarch64_local_sme_state::INACTIVE_CALLER)
+	/* Enable ZA (if it wasn't already enabled on entry).  Enabling ZA has
+	   the side-effect of zeroing ZA.
+
+	   A functionally correct alternative would be to leave TPIDR2_EL0 null
+	   and zero the save buffer.  However, zeroing the save buffer would require
+	   more code and would optimize for the case in which a callee also
+	   initialises private ZA state (which should be a rare event).  */
+	emit_insn (gen_aarch64_smstart_za ());
+
       if (prev_mode == aarch64_local_sme_state::ACTIVE_LIVE
 	  || prev_mode == aarch64_local_sme_state::ACTIVE_DEAD
 	  || prev_mode == aarch64_local_sme_state::INACTIVE_CALLER)
@@ -32415,7 +32443,7 @@ aarch64_mode_confluence (int entity, int mode1, int mode2)
 }
 
 /* Implement TARGET_MODE_BACKPROP for an entity that either stays
-   NO throughput, or makes one transition from NO to YES.  */
+   NO throughout, or makes one transition from NO to YES.  */
 
 static aarch64_tristate_mode
 aarch64_one_shot_backprop (aarch64_tristate_mode mode1,

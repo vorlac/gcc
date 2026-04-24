@@ -6378,6 +6378,13 @@ push_template_decl (tree decl, bool is_friend)
       if (DECL_TEMPLATE_INFO (tmpl))
 	args = add_outermost_template_args (DECL_TI_ARGS (tmpl), args);
 
+      /* Bug c++/103901.  Let's sorry now rather than ICE later.  */
+      if (TREE_VEC_LENGTH (args) == 0
+	  && ctx && LAMBDA_FUNCTION_P (ctx)
+	  && DECL_IMPLICIT_TYPEDEF_P (decl)
+	  && CLASS_TYPE_P (TREE_TYPE (decl)))
+	sorry ("local class in lambda in template parameter list");
+
       tree info = build_template_info (tmpl, args);
 
       if (DECL_IMPLICIT_TYPEDEF_P (decl))
@@ -6872,6 +6879,14 @@ dependent_alias_template_spec_p (const_tree t, bool transparent_typedefs)
 bool
 dependent_opaque_alias_p (const_tree t)
 {
+  auto any_lambda_targ_p = [] (tree args)
+    {
+      for (tree arg : tree_vec_range (args))
+	if (TREE_CODE (arg) == LAMBDA_EXPR)
+	  return true;
+      return false;
+    };
+
   return (TYPE_P (t)
 	  && typedef_variant_p (t)
 	  && (any_dependent_type_attributes_p (DECL_ATTRIBUTES
@@ -6882,7 +6897,17 @@ dependent_opaque_alias_p (const_tree t)
 		 alias would incorrectly yield a distinct lambda type.  */
 	      || (TREE_CODE (t) == DECLTYPE_TYPE
 		  && TREE_CODE (DECLTYPE_TYPE_EXPR (t)) == LAMBDA_EXPR
-		  && !typedef_variant_p (DECL_ORIGINAL_TYPE (TYPE_NAME (t))))));
+		  && !typedef_variant_p (DECL_ORIGINAL_TYPE (TYPE_NAME (t))))
+	      /* Also treat an alias to A<lambda> as opaque so that it doesn't
+		 "leak" into a deeper template context which would cause us to
+		 over substitute into the lambda.  */
+	      /* FIXME These lambda checks don't recognize deeply nested lambda
+		 subexpressions, and we can't use walk_tree here because it's
+		 slow.  Maybe a tree flag indicating typedef opaqueness?  */
+	      || (TYPE_TEMPLATE_INFO (t)
+		  && PRIMARY_TEMPLATE_P (TYPE_TI_TEMPLATE (t))
+		  && any_lambda_targ_p (INNERMOST_TEMPLATE_ARGS
+					(TYPE_TI_ARGS (t))))));
 }
 
 /* Return the number of innermost template parameters in TMPL.  */
@@ -7121,7 +7146,8 @@ has_value_dependent_address (tree op)
       if (VAR_P (op)
 	  && TREE_STATIC (op)
 	  && TREE_CODE (ctx) == FUNCTION_DECL
-	  && type_dependent_expression_p (ctx))
+	  && DECL_TEMPLATE_INFO (ctx)
+	  && any_dependent_template_arguments_p (DECL_TI_ARGS (ctx)))
 	return true;
     }
 
@@ -7532,6 +7558,8 @@ get_template_parm_object (tree expr, tree name, bool check_init/*=true*/)
   DECL_NAME (decl) = name;
   SET_DECL_ASSEMBLER_NAME (decl, name);
   comdat_linkage (decl);
+  if (check_init)
+    expr = unshare_expr_without_location (expr);
 
   if (!zero_init_p (type))
     {
@@ -14023,6 +14051,89 @@ add_extra_args (tree extra, tree args, tsubst_flags_t complain, tree in_decl)
   return args;
 }
 
+/* We've seen a lambda capture proxy pack PAT in a context outside the body,
+   such as in a trailing requires-clause.  Here we cannot use
+   lookup_init_capture_pack, both because checking satisfaction comes after
+   tsubst_lambda_expr (so the field pack isn't in local_specializations) and
+   before start_lambda_function (so the proxies aren't there to lookup_name).
+
+   However, because satisfy_declaration_constraints pushed into the context of
+   the substituted closure type, we can find it in current_class_type,
+   enumerate the expanded field pack, and then use that to expand the capture
+   proxy pack.
+
+   This seems like cheating, but there's really no alternative since lambdas
+   are not instantiated; we have to use the same closure type.  To address this
+   in the language, probably lambda constraints should be substituted
+   immediately like lambda noexcept.  */
+
+tree
+reconstruct_lambda_capture_pack (tree pat, tree args, tsubst_flags_t complain,
+				 tree in_decl)
+{
+  gcc_assert (cp_unevaluated_operand && !at_function_scope_p ());
+  tree newc = current_class_type;
+
+  /* Look up the pattern FIELD_DECL.  */
+  tree oldfield = TREE_OPERAND (DECL_VALUE_EXPR (pat), 1);
+  gcc_assert (DECL_SOURCE_LOCATION (TYPE_NAME (DECL_CONTEXT (oldfield)))
+	      == DECL_SOURCE_LOCATION (TYPE_NAME (newc)));
+
+  if (!retrieve_local_specialization (oldfield))
+    {
+      /* Look through TYPE_FIELDS to find captures with matching
+	 capture#1 names.  */
+      tree pn = DECL_NAME (oldfield);
+      const char *ps = IDENTIFIER_POINTER (pn);
+      int pl = IDENTIFIER_LENGTH (pn);
+      tree firstcap = NULL_TREE;
+      int ncap = 0;
+      for (tree f = next_subobject_field (TYPE_FIELDS (newc));
+	   f; f = DECL_CHAIN (f))
+	{
+	  const char *s = IDENTIFIER_POINTER (DECL_NAME (f));
+	  if (strncmp (ps, s, pl) == 0 && s[pl] == '#')
+	    {
+	      if (!firstcap)
+		firstcap = f;
+	      ++ncap;
+	    }
+	  else if (firstcap)
+	    break;
+	}
+      tree fpack = make_tree_vec (ncap);
+      for (int i = 0; i < ncap; ++i)
+	{
+	  TREE_VEC_ELT (fpack, i) = firstcap;
+	  firstcap = DECL_CHAIN (firstcap);
+	}
+      tree spec = make_node (NONTYPE_ARGUMENT_PACK);
+      ARGUMENT_PACK_ARGS (spec) = fpack;
+      /* satisfy_declaration_constraints set up local_specializations.  */
+      register_local_specialization (spec, oldfield);
+    }
+
+  /* Now that the field pack is in local_specializations, we can substitute
+     into the DECL_VALUE_EXPR of the proxy.  */
+  tree ve = DECL_VALUE_EXPR (pat);
+  ve = make_pack_expansion (ve);
+  ve = tsubst_pack_expansion (ve, args, complain, in_decl);
+  const int len = TREE_VEC_LENGTH (ve);
+  tree ppack = make_tree_vec (len);
+  for (int i = 0; i < len; ++i)
+    {
+      tree p = copy_decl (pat);
+      tree vei = TREE_VEC_ELT (ve, i);
+      SET_DECL_VALUE_EXPR (p, vei);
+      TREE_TYPE (p) = lambda_proxy_type (vei);
+      TREE_VEC_ELT (ppack, i) = p;
+    }
+  tree spec = make_node (NONTYPE_ARGUMENT_PACK);
+  ARGUMENT_PACK_ARGS (spec) = ppack;
+  register_local_specialization (spec, pat);
+  return spec;
+}
+
 /* Substitute ARGS into T, which is a pack expansion
    (i.e. TYPE_PACK_EXPANSION or EXPR_PACK_EXPANSION).  Returns a
    TREE_VEC with the substituted arguments, a PACK_EXPANSION_* node
@@ -14118,6 +14229,9 @@ tsubst_pack_expansion (tree t, tree args, tsubst_flags_t complain,
       else if (is_capture_proxy (parm_pack))
 	{
 	  arg_pack = retrieve_local_specialization (parm_pack);
+	  if (!arg_pack)
+	    arg_pack = reconstruct_lambda_capture_pack (parm_pack, args,
+							complain, in_decl);
 	  if (DECL_DECOMPOSITION_P (arg_pack))
 	    {
 	      orig_arg = arg_pack;
@@ -14126,6 +14240,9 @@ tsubst_pack_expansion (tree t, tree args, tsubst_flags_t complain,
 	  if (DECL_PACK_P (arg_pack))
 	    arg_pack = NULL_TREE;
 	}
+      else if (TREE_CODE (parm_pack) == FIELD_DECL)
+	/* For reconstruct_lambda_capture_pack.  */
+	arg_pack = retrieve_local_specialization (parm_pack);
       else if (DECL_DECOMPOSITION_P (parm_pack))
 	{
 	  orig_arg = retrieve_local_specialization (parm_pack);
@@ -14416,6 +14533,10 @@ tsubst_pack_index (tree t, tree args, tsubst_flags_t complain, tree in_decl)
   const bool parenthesized_p = (TREE_CODE (t) == PACK_INDEX_EXPR
 				&& PACK_INDEX_PARENTHESIZED_P (t));
   tree r;
+  if (!type_dependent_expression_p (index))
+    index = build_converted_constant_expr (size_type_node, index, complain);
+  if (error_operand_p (index))
+    return error_mark_node;
   if (!value_dependent_expression_p (index) && TREE_CODE (pack) == TREE_VEC)
     r = pack_index_element (index, pack, parenthesized_p, complain);
   else
@@ -16131,6 +16252,9 @@ tsubst_decl (tree t, tree args, tsubst_flags_t complain,
 	      tcomplain |= tf_tst_ok;
 	    if (DECL_DECOMPOSITION_P (t) && DECL_PACK_P (t))
 	      type = NULL_TREE;
+	    else if (is_capture_proxy (t) && WILDCARD_TYPE_P (type))
+	      /* We'll set type from DECL_VALUE_EXPR.  */
+	      type = NULL_TREE;
 	    else
 	      type = tsubst (type, args, tcomplain, in_decl);
 	    /* Substituting the type might have recursively instantiated this
@@ -16160,6 +16284,36 @@ tsubst_decl (tree t, tree args, tsubst_flags_t complain,
 		SET_TYPE_STRUCTURAL_EQUALITY (type);
 		PACK_EXPANSION_PARAMETER_PACKS (type) = r;
 	      }
+	    if (DECL_HAS_VALUE_EXPR_P (t))
+	      {
+		tree ve = DECL_VALUE_EXPR (t);
+		/* If the DECL_VALUE_EXPR is converted to the declared type,
+		   preserve the identity so that gimplify_type_sizes works.  */
+		bool nop = (type && TREE_CODE (ve) == NOP_EXPR);
+		if (nop)
+		  ve = TREE_OPERAND (ve, 0);
+		ve = tsubst_expr (ve, args, complain, in_decl);
+		gcc_assert (ve != error_mark_node);
+		if (REFERENCE_REF_P (ve))
+		  {
+		    gcc_assert (!type || TYPE_REF_P (type));
+		    ve = TREE_OPERAND (ve, 0);
+		  }
+		if (nop)
+		  ve = build_nop (type, ve);
+		else if (!type && is_capture_proxy (t))
+		  type = lambda_proxy_type (ve);
+		else if (DECL_LANG_SPECIFIC (t)
+			 && DECL_OMP_PRIVATIZED_MEMBER (t)
+			 && TREE_CODE (ve) == COMPONENT_REF
+			 && TREE_CODE (TREE_OPERAND (ve, 1)) == FIELD_DECL
+			 && DECL_BIT_FIELD_TYPE (TREE_OPERAND (ve, 1)) == type)
+		  type = TREE_TYPE (ve);
+		else
+		  gcc_checking_assert (TYPE_MAIN_VARIANT (TREE_TYPE (ve))
+				       == TYPE_MAIN_VARIANT (type));
+		SET_DECL_VALUE_EXPR (r, ve);
+	      }
 	    if (TREE_CODE (type) == FUNCTION_TYPE)
 	      {
 		/* It may seem that this case cannot occur, since:
@@ -16187,33 +16341,6 @@ tsubst_decl (tree t, tree args, tsubst_flags_t complain,
 	    DECL_INITIALIZED_BY_CONSTANT_EXPRESSION_P (r) = 0;
 	    type = check_var_type (DECL_NAME (r), type,
 				   DECL_SOURCE_LOCATION (r));
-	    if (DECL_HAS_VALUE_EXPR_P (t))
-	      {
-		tree ve = DECL_VALUE_EXPR (t);
-		/* If the DECL_VALUE_EXPR is converted to the declared type,
-		   preserve the identity so that gimplify_type_sizes works.  */
-		bool nop = (TREE_CODE (ve) == NOP_EXPR);
-		if (nop)
-		  ve = TREE_OPERAND (ve, 0);
-		ve = tsubst_expr (ve, args, complain, in_decl);
-		if (REFERENCE_REF_P (ve))
-		  {
-		    gcc_assert (TYPE_REF_P (type));
-		    ve = TREE_OPERAND (ve, 0);
-		  }
-		if (nop)
-		  ve = build_nop (type, ve);
-		else if (DECL_LANG_SPECIFIC (t)
-			 && DECL_OMP_PRIVATIZED_MEMBER (t)
-			 && TREE_CODE (ve) == COMPONENT_REF
-			 && TREE_CODE (TREE_OPERAND (ve, 1)) == FIELD_DECL
-			 && DECL_BIT_FIELD_TYPE (TREE_OPERAND (ve, 1)) == type)
-		  type = TREE_TYPE (ve);
-		else
-		  gcc_checking_assert (TYPE_MAIN_VARIANT (TREE_TYPE (ve))
-				       == TYPE_MAIN_VARIANT (type));
-		SET_DECL_VALUE_EXPR (r, ve);
-	      }
 	  }
 	else if (DECL_SELF_REFERENCE_P (t))
 	  SET_DECL_SELF_REFERENCE_P (r);
@@ -16600,6 +16727,7 @@ tsubst_exception_specification (tree fntype,
 					   args);
 	      expr = DEFERRED_NOEXCEPT_PATTERN (expr);
 	    }
+	  cp_unevaluated u;
 	  new_specs = tsubst_expr (expr, args, complain, in_decl);
 	}
       new_specs = build_noexcept_spec (new_specs, complain);
@@ -16773,6 +16901,8 @@ tsubst_splice_scope (tree t, tree args, tsubst_flags_t complain, tree in_decl)
     return r;
   if (dependent_splice_p (r))
     return make_splice_scope (r, SPLICE_SCOPE_TYPE_P (t));
+  if (SPLICE_SCOPE_TYPE_P (t) && ctad_template_p (r))
+    r = make_template_placeholder (r);
   if (SPLICE_SCOPE_TYPE_P (t)
       ? !valid_splice_type_p (r)
       : !valid_splice_scope_p (r))
@@ -16810,23 +16940,31 @@ tsubst_splice_expr (tree t, tree args, tsubst_flags_t complain, tree in_decl)
 	SET_SPLICE_EXPR_MEMBER_ACCESS_P (op, true);
       if (SPLICE_EXPR_ADDRESS_P (t))
 	SET_SPLICE_EXPR_ADDRESS_P (op, true);
+      if (SPLICE_EXPR_TEMPLATE_P (t))
+	SET_SPLICE_EXPR_TEMPLATE_P (op, true);
+      if (SPLICE_EXPR_TARGS_P (t))
+	SET_SPLICE_EXPR_TARGS_P (op, true);
       return op;
     }
   if (SPLICE_EXPR_EXPRESSION_P (t)
       && !check_splice_expr (input_location, UNKNOWN_LOCATION, op,
 			     SPLICE_EXPR_ADDRESS_P (t),
 			     SPLICE_EXPR_MEMBER_ACCESS_P (t),
+			     SPLICE_EXPR_TEMPLATE_P (t),
+			     SPLICE_EXPR_TARGS_P (t),
 			     (complain & tf_error)))
     return error_mark_node;
 
   if (SPLICE_EXPR_ADDRESS_P (t))
     {
+      push_deferring_access_checks (dk_no_check);
       if (BASELINK_P (op))
 	op = build_offset_ref (BINFO_TYPE (BASELINK_ACCESS_BINFO (op)), op,
 			       /*address_p=*/true, complain);
       else if (DECL_NONSTATIC_MEMBER_P (op))
 	op = build_offset_ref (DECL_CONTEXT (op), op,
 			       /*address_p=*/true, complain);
+      pop_deferring_access_checks ();
     }
 
   if (outer_automatic_var_p (op))
@@ -16835,15 +16973,7 @@ tsubst_splice_expr (tree t, tree args, tsubst_flags_t complain, tree in_decl)
      cp_parser_postfix_dot_deref_expression wants to see only
      certain kind of entities.  */
   if (SPLICE_EXPR_MEMBER_ACCESS_P (t))
-    gcc_assert (TREE_CODE (op) == FIELD_DECL
-		|| VAR_P (op)
-		|| TREE_CODE (op) == CONST_DECL
-		|| TREE_CODE (op) == FUNCTION_DECL
-		|| DECL_FUNCTION_TEMPLATE_P (OVL_FIRST (op))
-		|| variable_template_p (op)
-		|| BASELINK_P (op)
-		|| TREE_CODE (op) == TEMPLATE_ID_EXPR
-		|| TREE_CODE (op) == TREE_BINFO);
+    gcc_assert (valid_splice_for_member_access_p (op, /*decls_only_p=*/false));
 
   return op;
 }
@@ -16999,6 +17129,19 @@ tsubst (tree t, tree args, tsubst_flags_t complain, tree in_decl)
     case ENUMERAL_TYPE:
       if (TYPE_TEMPLATE_INFO (t) && uses_template_parms (t))
 	{
+	  if (LAMBDA_TYPE_P (t))
+	    {
+	      /* In reconstruct_lambda_capture_pack we need to be able to
+		 rebuild the lambda closure parm, which means looking up the
+		 closure type.  See the comment for that function about using
+		 current_class_type.  */
+	      tree c = current_class_type;
+	      if (LAMBDA_TYPE_P (c)
+		  && (DECL_SOURCE_LOCATION (TYPE_NAME (t))
+		      == DECL_SOURCE_LOCATION (TYPE_NAME (c))))
+		return c;
+	      gcc_unreachable ();
+	    }
 	  /* Figure out what arguments are appropriate for the
 	     type we are trying to find.  For example, given:
 
@@ -18097,12 +18240,12 @@ tsubst_baselink (tree baselink, tree object_type,
    true if the qualified-id will be a postfix-expression in-and-of
    itself; false if more of the postfix-expression follows the
    QUALIFIED_ID.  ADDRESS_P is true if the qualified-id is the operand
-   of "&".  NAME_LOOKUP_P is true if we intend to perform name lookup.  */
+   of "&".  REFLECTING_P is true if this SCOPE_REF is an operand of ^^.  */
 
 static tree
 tsubst_qualified_id (tree qualified_id, tree args,
 		     tsubst_flags_t complain, tree in_decl,
-		     bool done, bool address_p, bool name_lookup_p = true)
+		     bool done, bool address_p, bool reflecting_p = false)
 {
   tree expr;
   tree scope;
@@ -18181,7 +18324,9 @@ tsubst_qualified_id (tree qualified_id, tree args,
       else
 	expr = lookup_qualified_name (scope, expr, LOOK_want::NORMAL, false);
       if (TREE_CODE (TREE_CODE (expr) == TEMPLATE_DECL
-		     ? DECL_TEMPLATE_RESULT (expr) : expr) == TYPE_DECL)
+		     ? DECL_TEMPLATE_RESULT (expr) : expr) == TYPE_DECL
+	  /* For ^^T::X, we'll take both types and non-types.  */
+	  && !reflecting_p)
 	{
 	  if (complain & tf_error)
 	    {
@@ -18227,7 +18372,7 @@ tsubst_qualified_id (tree qualified_id, tree args,
 				 expr, input_location);
   /* For ^^S::mem, we do not want to create the dummy object that
      finish_non_static_data_member would give us.  */
-  else if (TYPE_P (scope) && name_lookup_p)
+  else if (TYPE_P (scope) && !reflecting_p)
     {
       expr = (adjust_result_of_qualified_name_lookup
 	      (expr, scope, current_nonlambda_class_type ()));
@@ -19772,6 +19917,11 @@ tsubst_stmt (tree t, tree args, tsubst_flags_t complain, tree in_decl)
 	      orig_decl = TREE_VEC_ELT (orig_decl, 0);
 	    tree decl = tsubst (orig_decl, args, complain, in_decl);
 	    maybe_push_decl (decl);
+	    if (VAR_P (decl))
+	      {
+		retrofit_lang_decl (decl);
+		SET_DECL_DEPENDENT_INIT_P (decl, 1);
+	      }
 
 	    cp_decomp decomp_d, *decomp = NULL;
 	    if (DECL_DECOMPOSITION_P (decl))
@@ -20955,6 +21105,8 @@ tsubst_lambda_expr (tree t, tree args, tsubst_flags_t complain, tree in_decl)
     /* If we're pushed into another scope (PR105652), fix it.  */
     TYPE_CONTEXT (type) = DECL_CONTEXT (TYPE_NAME (type))
       = TYPE_CONTEXT (TREE_TYPE (t));
+  DECL_SOURCE_LOCATION (TYPE_NAME (type))
+    = DECL_SOURCE_LOCATION (TYPE_NAME (TREE_TYPE (t)));
   record_lambda_scope_discriminator (r);
 
   /* Do this again now that LAMBDA_EXPR_EXTRA_SCOPE is set.  */
@@ -22339,7 +22491,7 @@ tsubst_expr (tree t, tree args, tsubst_flags_t complain, tree in_decl)
 						 complain);
 	else if (concept_check_p (function))
 	  /* Calls to concepts should have been previously diagnosed.  */
-	  gcc_assert (false);
+	  gcc_unreachable ();
 	else
 	  ret = finish_call_expr (function, &call_args,
 				  /*disallow_virtual=*/qualified_p,
@@ -22466,6 +22618,16 @@ tsubst_expr (tree t, tree args, tsubst_flags_t complain, tree in_decl)
 	  member = tsubst_baselink (member,
 				    non_reference (TREE_TYPE (object)),
 				    args, complain, in_decl);
+	/* In reconstruct_lambda_capture_pack, handle replacing the FIELD_DECL
+	   pack with an element.  */
+	else if (object_type && LAMBDA_TYPE_P (object_type)
+		 && TREE_CODE (member) == FIELD_DECL
+		 && (r = retrieve_local_specialization (member)))
+	  {
+	    if (TREE_CODE (r) == ARGUMENT_PACK_SELECT)
+	      r = argument_pack_select_arg (r);
+	    member = r;
+	  }
 	else
 	  member = tsubst_name (member, args, complain, in_decl);
 	if (member == error_mark_node)
@@ -23197,7 +23359,7 @@ tsubst_expr (tree t, tree args, tsubst_flags_t complain, tree in_decl)
 	else if (TREE_CODE (h) == SCOPE_REF)
 	  h = tsubst_qualified_id (h, args, complain, in_decl,
 				   /*done=*/true, /*address_p=*/false,
-				   /*name_lookup_p=*/false);
+				   /*reflecting_p=*/true);
 	else
 	  {
 	    /* [expr.reflect] The id-expression of a reflect-expression is
@@ -29794,12 +29956,19 @@ value_dependent_expression_p (tree expression)
 	   is enclosed by a scope corresponding to a templated entity.  */
 	if (flag_reflection
 	    && fn
-	    && metafunction_p (fn)
-	    && id_equal (DECL_NAME (fn), "current")
-	    && DECL_CLASS_SCOPE_P (fn)
-	    && id_equal (TYPE_IDENTIFIER (DECL_CONTEXT (fn)),
-			 "access_context"))
-	  return true;
+	    && metafunction_p (fn))
+	  {
+	    if (id_equal (DECL_NAME (fn), "current")
+		&& DECL_CLASS_SCOPE_P (fn)
+		&& id_equal (TYPE_IDENTIFIER (DECL_CONTEXT (fn)),
+			     "access_context"))
+	      return true;
+	    /* Similarly for these 3 metafns.  */
+	    if (id_equal (DECL_NAME (fn), "current_function")
+		|| id_equal (DECL_NAME (fn), "current_class")
+		|| id_equal (DECL_NAME (fn), "current_namespace"))
+	      return true;
+	  }
 
 	return false;
       }
@@ -33297,6 +33466,7 @@ finish_expansion_stmt (tree expansion_stmt, tree args,
   location_t loc = DECL_SOURCE_LOCATION (range_decl);
   tree begin = NULL_TREE, begin_minus_begin_type = NULL_TREE;
   auto_vec<tree, 8> destruct_decls;
+  bool is_lvalue = false;
   if (BRACE_ENCLOSED_INITIALIZER_P (expansion_init))
     {
       /* Enumerating expansion statements.  */
@@ -33318,34 +33488,52 @@ finish_expansion_stmt (tree expansion_stmt, tree args,
   if (kind == esk_iterating)
     {
       /* Iterating expansion statements.  */
-      tree end;
-      begin = cp_build_range_for_decls (loc, expansion_init, &end, true);
-      if (!error_operand_p (begin) && !error_operand_p (end))
+      tree exprs[2];
+      begin = cp_build_range_for_decls (loc, expansion_init, exprs, range_decl);
+      if (!error_operand_p (begin)
+	  && !error_operand_p (exprs[0])
+	  && !error_operand_p (exprs[1]))
 	{
 	  /* In the standard this is all evaluated inside of a consteval
 	     lambda.  So, force in_immediate_context () around this.  */
 	  in_consteval_if_p_temp_override icip;
 	  in_consteval_if_p = true;
-	  tree i
-	    = build_target_expr_with_type (begin,
-					   cv_unqualified (TREE_TYPE (begin)),
-					   tf_warning_or_error);
+	  tree b = exprs[0], e = exprs[1];
+	  /* The begin-expr and end-expr expressions will be usually wrapped
+	     in TARGET_EXPR if they return a class iterator.  The b
+	     and e artificial variables need to have cv-unqualified type
+	     so that e.g. b can be incremented, so unwrap the TARGET_EXPRs
+	     and force TARGET_EXPR with the cv-unqualified type which is
+	     a hack replacement for a VAR_DECL in a lambda.  */
+	  tree btype = cv_unqualified (TREE_TYPE (b));
+	  tree etype = cv_unqualified (TREE_TYPE (e));
+	  if (TREE_CODE (b) == TARGET_EXPR)
+	    b = TARGET_EXPR_INITIAL (b);
+	  if (TREE_CODE (e) == TARGET_EXPR)
+	    e = TARGET_EXPR_INITIAL (e);
+	  b = force_target_expr (btype, b, tf_warning_or_error);
+	  e = force_target_expr (etype, e, tf_warning_or_error);
 	  tree w = build_stmt (loc, WHILE_STMT, NULL_TREE, NULL_TREE,
 			       NULL_TREE, NULL_TREE, NULL_TREE);
 	  tree r = get_target_expr (build_zero_cst (ptrdiff_type_node));
-	  tree iinc = build_x_unary_op (loc, PREINCREMENT_EXPR,
-					TARGET_EXPR_SLOT (i), NULL_TREE,
+	  tree binc = build_x_unary_op (loc, PREINCREMENT_EXPR,
+					TARGET_EXPR_SLOT (b), NULL_TREE,
 					tf_warning_or_error);
 	  tree rinc = build2 (PREINCREMENT_EXPR, ptrdiff_type_node,
 			      TARGET_EXPR_SLOT (r),
 			      build_int_cst (ptrdiff_type_node, 1));
-	  WHILE_BODY (w) = build_compound_expr (loc, iinc, rinc);
-	  WHILE_COND (w) = build_x_binary_op (loc, NE_EXPR, i, ERROR_MARK,
-					      end, ERROR_MARK, NULL_TREE, NULL,
+	  WHILE_BODY (w) = build_compound_expr (loc, binc, rinc);
+	  WHILE_COND (w) = build_x_binary_op (loc, NE_EXPR, b, ERROR_MARK,
+					      e, ERROR_MARK, NULL_TREE, NULL,
 					      tf_warning_or_error);
-	  tree e = build_compound_expr (loc, r, i);
-	  e = build_compound_expr (loc, e, w);
-	  e = build_compound_expr (loc, e, TARGET_EXPR_SLOT (r));
+	  {
+	    warning_sentinel wur (warn_unused_result);
+	    e = build_compound_expr (loc, b, e);
+	    e = build_compound_expr (loc, r, e);
+	    e = build_compound_expr (loc, e, w);
+	    e = build_compound_expr (loc, e, TARGET_EXPR_SLOT (r));
+	  }
+	  e = fold_build_cleanup_point_expr (TREE_TYPE (e), e);
 	  e = cxx_constant_value (e);
 	  if (tree_fits_uhwi_p (e))
 	    n = tree_to_uhwi (e);
@@ -33359,6 +33547,7 @@ finish_expansion_stmt (tree expansion_stmt, tree args,
       if (sz < 0)
 	return;
       n = sz;
+      is_lvalue = lvalue_p (expansion_init);
       tree auto_node = make_auto ();
       tree decomp_type = cp_build_reference_type (auto_node, true);
       decomp_type = do_auto_deduction (decomp_type, expansion_init, auto_node);
@@ -33470,13 +33659,19 @@ finish_expansion_stmt (tree expansion_stmt, tree args,
 				 tf_warning_or_error);
 	  auto_node = make_auto ();
 	  iter_type = do_auto_deduction (auto_node, iter_init, auto_node);
-	  if (!TYPE_REF_P (iter_type))
+	  if (DECL_DECLARED_CONSTEXPR_P (range_decl)
+	      && !TYPE_REF_P (iter_type))
 	    iter_type = cp_build_qualified_type (iter_type, TYPE_QUAL_CONST);
-	  iter = build_decl (loc, VAR_DECL, NULL_TREE, iter_type);
+	  iter = build_decl (loc, VAR_DECL, get_identifier ("__for_iter "),
+			     iter_type);
 	  TREE_USED (iter) = 1;
 	  DECL_ARTIFICIAL (iter) = 1;
-	  TREE_STATIC (iter) = 1;
-	  DECL_DECLARED_CONSTEXPR_P (iter) = 1;
+	  if (DECL_DECLARED_CONSTEXPR_P (range_decl))
+	    {
+	      TREE_STATIC (iter) = 1;
+	      DECL_DECLARED_CONSTEXPR_P (iter) = 1;
+	      TREE_READONLY (iter) = 1;
+	    }
 	  pushdecl (iter);
 	  cp_finish_decl (iter, iter_init, /*is_constant_init*/false,
 			  NULL_TREE, LOOKUP_ONLYCONVERTING);
@@ -33485,6 +33680,18 @@ finish_expansion_stmt (tree expansion_stmt, tree args,
 	  break;
 	case esk_destructuring:
 	  init = convert_from_reference (destruct_decls[i]);
+	  if (!is_lvalue)
+	    {
+	      tree ctype;
+	      if (DECL_HAS_VALUE_EXPR_P (destruct_decls[i]))
+		ctype = unlowered_expr_type (destruct_decls[i]);
+	      else
+		ctype = lookup_decomp_type (destruct_decls[i]);
+	      ctype = cp_build_reference_type (ctype, /*rval=*/true);
+	      init = build_static_cast (loc, ctype, init,
+					tf_warning_or_error);
+	      init = convert_from_reference (init);
+	    }
 	  break;
 	default:
 	  gcc_unreachable ();

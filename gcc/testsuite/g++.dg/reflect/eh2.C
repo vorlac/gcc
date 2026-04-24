@@ -52,7 +52,6 @@ static_assert ((is_polymorphic_type (^^i), true)); // { dg-error "non-constant|u
 static_assert ((is_abstract_type (^^i), true)); // { dg-error "non-constant|uncaught exception" }
 static_assert ((is_final_type (^^i), true)); // { dg-error "non-constant|uncaught exception" }
 static_assert ((is_aggregate_type (^^i), true)); // { dg-error "non-constant|uncaught exception" }
-static_assert ((is_consteval_only_type (^^i), true)); // { dg-error "non-constant|uncaught exception" }
 static_assert ((is_signed_type (^^i), true)); // { dg-error "non-constant|uncaught exception" }
 static_assert ((is_unsigned_type (^^i), true)); // { dg-error "non-constant|uncaught exception" }
 static_assert ((is_bounded_array_type (^^i), true)); // { dg-error "non-constant|uncaught exception" }
@@ -89,3 +88,4 @@ static_assert ((is_swappable_type (^^i), true)); // { dg-error "non-constant|unc
 static_assert ((is_nothrow_swappable_type (^^i), true)); // { dg-error "non-constant|uncaught exception" }
 static_assert ((unwrap_reference (^^i), true)); // { dg-error "non-constant|uncaught exception" }
 static_assert ((unwrap_ref_decay (^^i), true)); // { dg-error "non-constant|uncaught exception" }
+static_assert ((is_structural_type (^^i), true)); // { dg-error "non-constant|uncaught exception" }

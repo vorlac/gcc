@@ -1,7 +1,7 @@
 /**
  * Semantic analysis for cast-expressions.
  *
- * Copyright:   Copyright (C) 1999-2025 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2026 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/compiler/src/dmd/dcast.d, _dcast.d)
@@ -49,6 +49,50 @@ import dmd.tokens;
 import dmd.typesem;
 
 enum LOG = false;
+
+IntRange _cast(IntRange _this, Type type)
+{
+    if (!type.isIntegral() || type.toBasetype().isTypeVector())
+        return _this;
+    if (!type.isUnsigned())
+        return _this.castSigned(type.sizemask());
+    if (type.toBasetype().ty == Tdchar)
+        return _this.castDchar();
+        return _this.castUnsigned(type.sizemask());
+}
+
+IntRange castUnsigned(IntRange _this, Type type)
+{
+    if (!type.isIntegral() || type.toBasetype().isTypeVector())
+        return _this.castUnsigned(ulong.max);
+    if (type.toBasetype().ty == Tdchar)
+        return _this.castDchar();
+    return _this.castUnsigned(type.sizemask());
+}
+
+IntRange intRangeFromType(Type type)
+{
+    return intRangeFromType(type, type.isUnsigned());
+}
+
+IntRange intRangeFromType(Type type, bool isUnsigned)
+{
+    if (!type.isIntegral() || type.toBasetype().isTypeVector())
+        return IntRange.widest();
+
+    uinteger_t mask = type.sizemask();
+    auto lower = SignExtendedNumber(0);
+    auto upper = SignExtendedNumber(mask);
+    if (type.toBasetype().ty == Tdchar)
+        upper.value = 0x10FFFFUL;
+    else if (!isUnsigned)
+    {
+        lower.value = ~(mask >> 1);
+        lower.negative = true;
+        upper.value = (mask >> 1);
+    }
+    return IntRange(lower, upper);
+}
 
 /**
  * Attempt to implicitly cast the expression into type `t`.
@@ -304,7 +348,7 @@ MATCH implicitConvTo(Expression e, Type t)
         if (e.type.isIntegral() && t.isIntegral() && e.type.isTypeBasic() && t.isTypeBasic())
         {
             IntRange src = getIntRange(e);
-            IntRange target = IntRange.fromType(t);
+            IntRange target = intRangeFromType(t);
             if (target.contains(src))
             {
                 return MATCH.convert;
@@ -4330,8 +4374,6 @@ void fix16997(Scope* sc, UnaExp ue)
 extern (D) bool keyCompatibleWithoutCasting(Expression ekey, Type t2)
 {
     Type t1 = ekey.type;
-    t1 = t1.toBasetype();
-    t2 = t2.toBasetype();
 
     if ((t1.isStaticOrDynamicArray() || t1.ty == Tpointer) && t2.ty == t1.ty)
     {
@@ -4358,7 +4400,7 @@ IntRange getIntRange(Expression e)
 {
     IntRange visit(Expression e)
     {
-        return IntRange.fromType(e.type);
+        return intRangeFromType(e.type);
     }
 
     IntRange visitInteger(IntegerExp e)
@@ -4462,7 +4504,7 @@ IntRange getIntRange(Expression e)
 
     IntRange visitUshr(UshrExp e)
     {
-        IntRange ir1 = getIntRange(e.e1).castUnsigned(e.e1.type);
+        IntRange ir1 = castUnsigned(getIntRange(e.e1), e.e1.type);
         IntRange ir2 = getIntRange(e.e2);
 
         return (ir1 >>> ir2)._cast(e.type);
@@ -4486,7 +4528,7 @@ IntRange getIntRange(Expression e)
         Expression ie;
         VarDeclaration vd = e.var.isVarDeclaration();
         if (vd && vd.range)
-            return vd.range._cast(e.type);
+            return _cast(*vd.range, e.type);
         if (vd && vd._init && !vd.type.isMutable() && (ie = vd.getConstInitializer()) !is null)
             return getIntRange(ie);
         return visit(e);
@@ -4541,7 +4583,7 @@ IntRange getIntRange(Expression e)
  * However, the dmd backend does not like a naive cast from a noreturn expression
  * (particularly an `assert(0)`) so this function generates:
  *
- * `(assert(0), value)` instead of `cast(to)(assert(0))`.
+ * `(value, assert(0))` instead of `cast(to)(assert(0))`.
  *
  * `value` is currently `to.init` however it cannot be read so could be made simpler.
  * Params:

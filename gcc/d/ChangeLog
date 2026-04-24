@@ -1,3 +1,75 @@
+2026-04-21  Iain Buclaw  <ibuclaw@gdcproject.org>
+
+	* dmd/MERGE: Merge upstream dmd d1fbbb1a2f.
+	* expr.cc (ExprVisitor::visit (StringExp *)): Don't generate a
+	STRING_CST for a mutable array type.
+
+2026-04-20  Iain Buclaw  <ibuclaw@gdcproject.org>
+
+	PR d/123411
+	* types.cc (TypeVisitor::visit (TypeEnum *)): Only call layout_type on
+	the TYPE_MAIN_VARIANT of the enum.
+
+2026-04-20  Iain Buclaw  <ibuclaw@gdcproject.org>
+
+	PR d/124157
+	* expr.cc (ExprVisitor::visit (AssocArrayLiteralExp *)): Return AA
+	constructor with memory returned by _d_assocarrayliteralTX().
+
+2026-04-19  Iain Buclaw  <ibuclaw@gdcproject.org>
+
+	* d-attribs.cc (d_langhook_gnu_attributes): Add no_split_stack
+	attribute.
+	(d_handle_no_split_stack_attribute): New function.
+
+2026-04-18  Iain Buclaw  <ibuclaw@gdcproject.org>
+
+	PR d/124922
+	* d-codegen.cc (build_trap_call): New function.
+	(build_array_bounds_call): Use it.
+	(build_bounds_index_condition): Likewise.
+	(build_bounds_slice_condition): Likewise.
+	(d_build_call): Likewise.
+	* expr.cc (ExprVisitor::visit (HaltExp *)): Likewise.
+	(ExprVisitor::visit (AssertExp *)): Likewise.  Return zero instead of
+	void_node when assert contracts are disabled.
+	* d-tree.h (build_trap_call): New prototype.
+
+2026-04-14  Iain Buclaw  <ibuclaw@gdcproject.org>
+
+	* dmd/MERGE: Merge upstream dmd e145b91245.
+
+2026-04-07  Sandra Loosemore  <sloosemore@baylibre.com>
+
+	PR other/124784
+	* lang.opt.urls: Regenerated.
+
+2026-04-01  Iain Buclaw  <ibuclaw@gdcproject.org>
+
+	* dmd/MERGE: Merge upstream dmd 55e64690bc.
+	* dmd/VERSION: Bump version to v2.113.0-beta.1.
+	* d-codegen.cc (d_build_call): Check if argument is already a
+	TARGET_EXPR.
+	* decl.cc (DeclVisitor::visit (FuncDeclaration *)): Don't use
+	`__result' decl as named return value if it's a ref type.
+	* expr.cc (ExprVisitor::visit (StructLiteralExp *)): Force TARGET_EXPR
+	if init symbol needs to be mutable.
+	* runtime.def (ARRAYSETLENGTHT): Remove.
+	(ARRAYSETLENGTHIT): Remove.
+	(ARRAYCOPY): Remove.
+	(ARRAYAPPENDCTX): Remove.
+	* typeinfo.cc (TypeInfoVisitor::visit (TypeInfoClassDeclaration *)):
+	Only scan class fields for pointer members.
+
+2026-03-31  Iain Buclaw  <ibuclaw@gdcproject.org>
+
+	* dmd/MERGE: Merge upstream dmd e7c34c13de.
+	* d-codegen.cc (build_vthis): Update for new front-end interface.
+	(get_frameinfo): Likewise.
+	* d-lang.cc (d_post_options): Disable null pointer checks.
+	* decl.cc (DeclVisitor::visit (VarDeclaration *)): Ignore ref noreturn
+	variables.
+
 2026-02-08  Iain Buclaw  <ibuclaw@gdcproject.org>
 
 	* d-tree.h (build_libcall): New declaration.

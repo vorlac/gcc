@@ -32,6 +32,9 @@ public:
   static constexpr auto &DERIVE_ATTR = "derive";
   static constexpr auto &DEPRECATED = "deprecated";
   static constexpr auto &ALLOW = "allow";
+  static constexpr auto &DENY = "deny";
+  static constexpr auto &WARN = "warn";
+  static constexpr auto &FORBID = "forbid";
   static constexpr auto &ALLOW_INTERNAL_UNSTABLE = "allow_internal_unstable";
   static constexpr auto &DOC = "doc";
   static constexpr auto &MUST_USE = "must_use";
@@ -81,6 +84,9 @@ public:
 
   static constexpr auto &RUSTC_LAYOUT_SCALAR_VALID_RANGE_START
     = "rustc_layout_scalar_valid_range_start";
+
+  static constexpr auto &COMPILER_BUILTINS = "compiler_builtins";
+  static constexpr auto &NO_BUILTINS = "no_builtins";
 
   static constexpr auto &MAY_DANGLE = "may_dangle";
   static constexpr auto &PRELUDE_IMPORT = "prelude_import";

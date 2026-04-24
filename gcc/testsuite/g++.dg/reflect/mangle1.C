@@ -1,5 +1,5 @@
 // { dg-do compile { target c++26 } }
-// { dg-additional-options "-freflection -O0" }
+// { dg-additional-options "-freflection -O0 -fno-short-enums" }
 
 #include <meta>
 #include <ranges>
@@ -63,6 +63,7 @@ namespace NS2 {
   };
   struct Z {
   };
+  struct AA { int a, b; };
 }
 
 constexpr auto ctx = std::meta::access_context::current ();
@@ -165,6 +166,11 @@ baz (int x)
   bar <332, data_member_spec (^^unsigned short, { .name = "b", .bit_width = 5 })> (); // data member description
   bar <333, data_member_spec (^^long, { .bit_width = 3 })> (); // data member description
   bar <334, data_member_spec (^^int, { .bit_width = 0 })> (); // data member description
+  bar <335, std::meta::data_member_spec (^^int,
+					 { .name = "_",
+					   .annotations = { std::meta::reflect_constant (42),
+							    std::meta::reflect_constant (43L),
+							    std::meta::reflect_constant (NS2::AA { 1, 2 }) } })> (); // data member description
   bar <340, ^^NS2::X::~X> (); // function
 }
 
@@ -206,10 +212,10 @@ baz (int x)
 // { dg-final { scan-assembler "_Z3barILi181ELDmen3NS24Enum1AEEvv" } }
 // { dg-final { scan-assembler "_Z3barILi182ELDmen3NS2Uej1C1CEEvv" } }
 // { dg-final { scan-assembler "_Z3barILi190ELDman_EEvv" } }
-// { dg-final { scan-assembler "_Z3barILi200ELDmta5AliasEEvv" } }
-// { dg-final { scan-assembler "_Z3barILi201ELDmta3NS25AliasEEvv" } }
-// { dg-final { scan-assembler "_Z3barILi202ELDmta6TAliasILi42EEEEvv" } }
-// { dg-final { scan-assembler "_Z3barILi203ELDmta3NS26TAliasILj0EEEEvv" } }
+// { dg-final { scan-assembler "_Z3barILi200ELDmta5Alias_iEEvv" } }
+// { dg-final { scan-assembler "_Z3barILi201ELDmta3NS25Alias_DmEEvv" } }
+// { dg-final { scan-assembler "_Z3barILi202ELDmta6TAliasILi42EE_4TClsILi42EEEEvv" } }
+// { dg-final { scan-assembler "_Z3barILi203ELDmta3NS26TAliasILj0EE_NS0_4TClsILj0EEEEEvv" } }
 // { dg-final { scan-assembler "_Z3barILi210ELDmty1SEEvv" } }
 // { dg-final { scan-assembler "_Z3barILi211ELDmtyN3NS21SEEEvv" } }
 // { dg-final { scan-assembler "_Z3barILi212ELDmtyKiEEvv" } }
@@ -240,7 +246,7 @@ baz (int x)
 // { dg-final { scan-assembler "_Z3barILi291ELDmna3NS27NSAliasEEvv" } }
 // { dg-final { scan-assembler "_Z3barILi300ELDmns2NSEEvv" } }
 // { dg-final { scan-assembler "_Z3barILi301ELDmns3NS23NS3EEvv" } }
-// { dg-final { scan-assembler "_Z3barILi310ELDmngEEvv" } }
+// { dg-final { scan-assembler "_Z3barILi310ELDmgsEEvv" } }
 // { dg-final { scan-assembler "_Z3barILi320ELDmba_1SEEvv" } }
 // { dg-final { scan-assembler "_Z3barILi321ELDmba_N3NS21SEEEvv" } }
 // { dg-final { scan-assembler "_Z3barILi322ELDmba_N3NS21WIiEEEEvv" } }
@@ -250,4 +256,5 @@ baz (int x)
 // { dg-final { scan-assembler "_Z3barILi332ELDmdst_1b__5_EEvv" } }
 // { dg-final { scan-assembler "_Z3barILi333ELDmdsl___3_EEvv" } }
 // { dg-final { scan-assembler "_Z3barILi334ELDmdsi___0_EEvv" } }
+// { dg-final { scan-assembler "_Z3barILi335ELDmdsi_1____Li42ELl43EXtlN3NS22AAELi1ELi2EEEEEvv" } }
 // { dg-final { scan-assembler "_Z3barILi340ELDmfnN3NS21XD4EvEEvv" } }

@@ -3690,6 +3690,20 @@ set_decl_context_in_fn (tree ctx, tree decl)
 void
 push_local_extern_decl_alias (tree decl)
 {
+  if (flag_reflection)
+    {
+      if (lookup_annotation (DECL_ATTRIBUTES (decl)))
+	error_at (DECL_SOURCE_LOCATION (decl),
+		  "annotation applied to block scope extern %qD",
+		  decl);
+      if (TREE_CODE (decl) == FUNCTION_DECL)
+	for (tree arg = DECL_ARGUMENTS (decl); arg; arg = DECL_CHAIN (arg))
+	  if (lookup_annotation (DECL_ATTRIBUTES (arg)))
+	    error_at (DECL_SOURCE_LOCATION (arg),
+		      "annotation applied to parameter %qD of block scope "
+		      "extern", arg);
+    }
+
   if (dependent_type_p (TREE_TYPE (decl))
       || (processing_template_decl
 	  && VAR_P (decl)
@@ -5472,26 +5486,46 @@ check_can_export_using_decl (tree binding)
     not_tmpl = TYPE_NAME (DECL_CONTEXT (not_tmpl));
 
   /* If the using decl is exported, the things it refers to must
-     have external linkage.  decl_linkage returns lk_external for
-     module linkage so also check for attachment.  */
-  if (linkage != lk_external
-      || (DECL_LANG_SPECIFIC (not_tmpl)
-	  && DECL_MODULE_ATTACH_P (not_tmpl)
-	  && !DECL_MODULE_EXPORT_P (not_tmpl)))
+     have external linkage.  */
+  if (linkage != lk_external)
     {
       auto_diagnostic_group d;
-      error ("exporting %q#D that does not have external linkage",
-	     binding);
-      if (linkage == lk_none)
-	inform (DECL_SOURCE_LOCATION (entity),
-		"%q#D declared here with no linkage", entity);
-      else if (linkage == lk_internal)
-	inform (DECL_SOURCE_LOCATION (entity),
-		"%q#D declared here with internal linkage", entity);
+      bool diag = true;
+
+      /* As an extension, we'll allow exposing internal entities from
+	 the GMF, to aid in migration to modules.  For now, we only
+	 support this for functions and variables; see also 
+	 depset::is_tu_local.  */
+      bool relaxed = (VAR_OR_FUNCTION_DECL_P (not_tmpl)
+		      && !(DECL_LANG_SPECIFIC (not_tmpl)
+			   && DECL_MODULE_PURVIEW_P (not_tmpl)));
+      if (relaxed)
+	{
+	  gcc_checking_assert (linkage != lk_external);
+	  diag = (warning_enabled_at (DECL_SOURCE_LOCATION (entity),
+				      OPT_Wexpose_global_module_tu_local)
+		  && pedwarn (input_location,
+			      OPT_Wexpose_global_module_tu_local,
+			      "exporting %q#D that does not have "
+			      "external linkage", binding));
+	}
       else
-	inform (DECL_SOURCE_LOCATION (entity),
-		"%q#D declared here with module linkage", entity);
-      return false;
+	error ("exporting %q#D that does not have external linkage", binding);
+
+      if (diag)
+	{
+	  if (linkage == lk_none)
+	    inform (DECL_SOURCE_LOCATION (entity),
+		    "%q#D declared here with no linkage", entity);
+	  else if (linkage == lk_internal)
+	    inform (DECL_SOURCE_LOCATION (entity),
+		    "%q#D declared here with internal linkage", entity);
+	  else
+	    inform (DECL_SOURCE_LOCATION (entity),
+		    "%q#D declared here with module linkage", entity);
+	}
+
+      return relaxed;
     }
 
   return true;

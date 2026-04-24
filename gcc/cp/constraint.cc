@@ -2826,7 +2826,12 @@ satisfy_declaration_constraints (tree t, tree args, sat_info info)
       tree pattern = DECL_TEMPLATE_RESULT (t);
       push_to_top_level ();
       push_access_scope (pattern);
-      result = satisfy_normalized_constraints (norm, args, info);
+      {
+	/* For reconstruct_lambda_capture_pack.  */
+	local_specialization_stack lss (LAMBDA_FUNCTION_P (t)
+					? lss_blank : lss_nop);
+	result = satisfy_normalized_constraints (norm, args, info);
+      }
       pop_access_scope (pattern);
       pop_from_top_level ();
       pop_tinst_level ();
@@ -3354,8 +3359,9 @@ diagnose_trait_expr (location_t loc, tree expr, tree args)
     case CPTK_IS_VOLATILE:
       inform (loc, "%qT is not a volatile type", t1);
       break;
-    case CPTK_IS_CONSTEVAL_ONLY:
-      inform (decl_loc, "%qT is not consteval-only", t1);
+    case CPTK_IS_STRUCTURAL:
+      inform (decl_loc, "%qT is not a structural type", t1);
+      structural_type_p (t1, /*explain=*/true);
       break;
     case CPTK_RANK:
       inform (loc, "%qT cannot yield a rank", t1);

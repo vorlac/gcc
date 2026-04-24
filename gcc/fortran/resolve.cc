@@ -82,6 +82,9 @@ static int omp_workshare_flag;
 
 /* True if we are resolving a specification expression.  */
 static bool specification_expr = false;
+/* The dummy whose character length or array bounds are currently being
+   resolved as a specification expression.  */
+static gfc_symbol *specification_expr_symbol = NULL;
 
 /* The id of the last entry seen.  */
 static int current_entry_id;
@@ -91,6 +94,24 @@ static bitmap_obstack labels_obstack;
 
 /* True when simplifying a EXPR_VARIABLE argument to an inquiry function.  */
 static bool inquiry_argument = false;
+
+static bool
+entry_dummy_seen_p (gfc_symbol *sym)
+{
+  gfc_entry_list *entry;
+  gfc_formal_arglist *formal;
+
+  gcc_checking_assert (sym->attr.dummy && sym->ns == gfc_current_ns);
+
+  for (entry = gfc_current_ns->entries;
+       entry && entry->id <= current_entry_id;
+       entry = entry->next)
+    for (formal = entry->sym->formal; formal; formal = formal->next)
+      if (formal->sym && sym->name == formal->sym->name)
+	return true;
+
+  return false;
+}
 
 
 /* Is the symbol host associated?  */
@@ -289,6 +310,7 @@ gfc_resolve_formal_arglist (gfc_symbol *proc)
   for (f = proc->formal; f; f = f->next)
     {
       gfc_array_spec *as;
+      gfc_symbol *saved_specification_expr_symbol;
 
       sym = f->sym;
 
@@ -337,9 +359,12 @@ gfc_resolve_formal_arglist (gfc_symbol *proc)
 	   ? CLASS_DATA (sym)->as : sym->as;
 
       saved_specification_expr = specification_expr;
+      saved_specification_expr_symbol = specification_expr_symbol;
       specification_expr = true;
+      specification_expr_symbol = sym;
       gfc_resolve_array_spec (as, 0);
       specification_expr = saved_specification_expr;
+      specification_expr_symbol = saved_specification_expr_symbol;
 
       /* We can't tell if an array with dimension (:) is assumed or deferred
 	 shape until we know if it has the pointer or allocatable attributes.
@@ -2762,17 +2787,22 @@ resolve_global_procedure (gfc_symbol *sym, locus *where, int sub)
 	  /* This can happen if a binding name has been specified.  */
 	  if (gsym->binding_label && gsym->sym_name != def_sym->name)
 	    gfc_find_symbol (gsym->sym_name, gsym->ns, 0, &def_sym);
+	}
 
-	  if (def_sym->attr.entry_master || def_sym->attr.entry)
-	    {
-	      gfc_entry_list *entry;
-	      for (entry = gsym->ns->entries; entry; entry = entry->next)
-		if (strcmp (entry->sym->name, sym->name) == 0)
-		  {
-		    def_sym = entry->sym;
-		    break;
-		  }
-	    }
+      /* Look up the specific entry symbol so that interface checks use
+	 the entry's own formal argument list, not the entry master's.
+	 This must run even when resolved == -1 (recursive resolution in
+	 progress), because def_sym starts as the namespace proc_name
+	 which is the entry master with the combined formals.  */
+      if (def_sym->attr.entry_master || def_sym->attr.entry)
+	{
+	  gfc_entry_list *entry;
+	  for (entry = gsym->ns->entries; entry; entry = entry->next)
+	    if (strcmp (entry->sym->name, sym->name) == 0)
+	      {
+		def_sym = entry->sym;
+		break;
+	      }
 	}
 
       if (sym->attr.function && !gfc_compare_types (&sym->ts, &def_sym->ts))
@@ -4099,6 +4129,55 @@ check_import_status (gfc_expr *e)
 }
 
 
+/* If an elemental call has an INTENT_IN argument that has a dependency on an
+   argument which is not INTENT_IN and requires a temporary, build a temporary
+   for the INTENT_IN actual argument as well.  */
+
+static void
+add_temp_assign_before_call (gfc_code *, gfc_namespace *, gfc_expr **);
+
+static void
+resolve_elemental_dependencies (gfc_code *c)
+{
+  gfc_actual_arglist *arg1 = c->ext.actual;
+  gfc_actual_arglist *arg2 = NULL;
+  gfc_formal_arglist *formal1 = c->resolved_sym->formal;
+  gfc_formal_arglist *formal2 = NULL;
+  gfc_expr *expr1;
+  gfc_expr **expr2;
+
+  for (; arg1 && formal1; arg1 = arg1->next, formal1 = formal1->next)
+    {
+      if (formal1->sym
+	  && (formal1->sym->attr.intent == INTENT_IN
+	      || formal1->sym->attr.value))
+	continue;
+
+      if (!arg1->expr || arg1->expr->expr_type != EXPR_VARIABLE)
+	continue;
+
+      arg2 = c->ext.actual;
+      formal2 = c->resolved_sym->formal;
+      for (; arg2 && formal2; arg2 = arg2->next, formal2 = formal2->next)
+	{
+	  if (arg2 == arg1 || !arg2->expr
+	      || !(formal2->sym && formal2->sym->attr.intent == INTENT_IN))
+	    continue;
+
+	  expr1 = arg1->expr;
+	  expr2 = &arg2->expr;
+
+	  /* If the arg1 has something horrible like a vector index and
+	     there is a dependency between arg1 and arg2, build a
+	     temporary from arg2, assign the arg2 to it and use the
+	     temporary in the call expression.  */
+	  if (expr1->rank && gfc_ref_needs_temporary_p (expr1->ref)
+	      && gfc_check_dependency (expr1, *expr2, false))
+	    add_temp_assign_before_call (c, gfc_current_ns, expr2);
+	}
+    }
+}
+
 /* Resolve a subroutine call.  Although it was tempting to use the same code
    for functions, subroutines and functions are stored differently and this
    makes things awkward.  */
@@ -4258,6 +4337,11 @@ resolve_call (gfc_code *c)
   /* Some checks of elemental subroutine actual arguments.  */
   if (!resolve_elemental_actual (NULL, c))
     return false;
+
+  /* Deal with complicated dependencies that the scalarizer cannot handle.  */
+  if (c->resolved_sym && c->resolved_sym->attr.elemental && !no_formal_args
+      && c->ext.actual && c->ext.actual->next)
+    resolve_elemental_dependencies (c);
 
   if (!c->expr1)
     update_current_proc_array_outer_dependency (csym);
@@ -6669,32 +6753,23 @@ resolve_variable (gfc_expr *e)
       && cs_base->current
       && cs_base->current->op != EXEC_ENTRY)
     {
-      gfc_entry_list *entry;
-      gfc_formal_arglist *formal;
       int n;
-      bool seen, saved_specification_expr;
+      bool saved_specification_expr;
+      gfc_symbol *saved_specification_expr_symbol;
 
       /* If the symbol is a dummy...  */
       if (sym->attr.dummy && sym->ns == gfc_current_ns)
 	{
-	  entry = gfc_current_ns->entries;
-	  seen = false;
-
-	  /* ...test if the symbol is a parameter of previous entries.  */
-	  for (; entry && entry->id <= current_entry_id; entry = entry->next)
-	    for (formal = entry->sym->formal; formal; formal = formal->next)
-	      {
-		if (formal->sym && sym->name == formal->sym->name)
-		  {
-		    seen = true;
-		    break;
-		  }
-	      }
-
 	  /*  If it has not been seen as a dummy, this is an error.  */
-	  if (!seen)
+	  if (!entry_dummy_seen_p (sym))
 	    {
-	      if (specification_expr)
+	      if (specification_expr
+		  && specification_expr_symbol
+		  && specification_expr_symbol->attr.dummy
+		  && specification_expr_symbol->ns == gfc_current_ns
+		  && !entry_dummy_seen_p (specification_expr_symbol))
+		;
+	      else if (specification_expr)
 		gfc_error ("Variable %qs, used in a specification expression"
 			   ", is referenced at %L before the ENTRY statement "
 			   "in which it is a parameter",
@@ -6709,7 +6784,9 @@ resolve_variable (gfc_expr *e)
 
       /* Now do the same check on the specification expressions.  */
       saved_specification_expr = specification_expr;
+      saved_specification_expr_symbol = specification_expr_symbol;
       specification_expr = true;
+      specification_expr_symbol = sym;
       if (sym->ts.type == BT_CHARACTER
 	  && !gfc_resolve_expr (sym->ts.u.cl->length))
 	t = false;
@@ -6725,6 +6802,7 @@ resolve_variable (gfc_expr *e)
 	    }
 	}
       specification_expr = saved_specification_expr;
+      specification_expr_symbol = saved_specification_expr_symbol;
 
       if (t)
 	/* Update the symbol's entry level.  */
@@ -13219,7 +13297,8 @@ resolve_ordinary_assign (gfc_code *code, gfc_namespace *ns)
   /* Assign the 'data' of a class object to a derived type.  */
   if (lhs->ts.type == BT_DERIVED
       && rhs->ts.type == BT_CLASS
-      && rhs->expr_type != EXPR_ARRAY)
+      && (rhs->expr_type != EXPR_ARRAY
+	  && rhs->expr_type != EXPR_OP))
     gfc_add_data_component (rhs);
 
   /* Make sure there is a vtable and, in particular, a _copy for the
@@ -13283,10 +13362,12 @@ build_assignment (gfc_exec_op op, gfc_expr *expr1, gfc_expr *expr2,
 
 
 /* Makes a temporary variable expression based on the characteristics of
-   a given variable expression.  */
+   a given variable expression.  If allocatable is set, the temporary is
+   unconditionally allocatable*/
 
 static gfc_expr*
-get_temp_from_expr (gfc_expr *e, gfc_namespace *ns)
+get_temp_from_expr (gfc_expr *e, gfc_namespace *ns,
+		    bool allocatable = false)
 {
   static int serial = 0;
   char name[GFC_MAX_SYMBOL_LEN];
@@ -13340,7 +13421,7 @@ get_temp_from_expr (gfc_expr *e, gfc_namespace *ns)
   tmp->n.sym->attr.intent = INTENT_UNKNOWN;
 
 
-  if (as)
+  if (as && !allocatable)
     {
       tmp->n.sym->as = gfc_copy_array_spec (as);
       if (!ref)
@@ -13350,7 +13431,7 @@ get_temp_from_expr (gfc_expr *e, gfc_namespace *ns)
     }
   else if ((e->rank || e->corank)
 	   && (e->expr_type == EXPR_ARRAY || e->expr_type == EXPR_FUNCTION
-	       || e->expr_type == EXPR_OP))
+	       || e->expr_type == EXPR_OP || allocatable))
     {
       tmp->n.sym->as = gfc_get_array_spec ();
       tmp->n.sym->as->type = AS_DEFERRED;
@@ -13369,12 +13450,51 @@ get_temp_from_expr (gfc_expr *e, gfc_namespace *ns)
 
   /* Should the lhs be a section, use its array ref for the
      temporary expression.  */
-  if (aref && aref->type != AR_FULL)
+  if (aref && aref->type != AR_FULL && !allocatable)
     {
       gfc_free_ref_list (e->ref);
       e->ref = gfc_copy_ref (ref);
     }
   return e;
+}
+
+
+/* Helper function to take an argument in a subroutine call with a dependency
+   on another argument, copy it to an allocatable temporary and use the
+   temporary in the call expression. The new code is embedded in a block to
+   ensure local, automatic deallocation.  */
+
+static void
+add_temp_assign_before_call (gfc_code *code, gfc_namespace *ns,
+			     gfc_expr **rhsptr)
+{
+  gfc_namespace *block_ns;
+  gfc_expr *tmp_var;
+
+  /* Wrap the new code in a block so that the temporary is deallocated.  */
+  block_ns = gfc_build_block_ns (ns);
+
+  /* As it stands, the block_ns does not not stand up to resolution because the
+     the assignment would be converted to a call and, in any case, the modified
+     call fails in gfc_check_conformance.  */
+  block_ns->resolved = 1;
+
+  /* Assign the original expression to the temporary.  */
+  tmp_var = get_temp_from_expr (*rhsptr, block_ns, true);
+  block_ns->code = build_assignment (EXEC_ASSIGN, tmp_var, *rhsptr,
+				     NULL, NULL, (*rhsptr)->where);
+
+  /* Transfer the call to the block and terminate block code.  */
+  *rhsptr = gfc_copy_expr (tmp_var);
+  block_ns->code->next = gfc_get_code (EXEC_NOP);
+  *(block_ns->code->next) = *code;
+  block_ns->code->next->next = NULL;
+
+  /* Convert the original code to execute the block.  */
+  code->op = EXEC_BLOCK;
+  code->ext.block.ns = block_ns;
+  code->ext.block.assoc = NULL;
+  code->expr1 = code->expr2 = NULL;
 }
 
 
@@ -15339,7 +15459,9 @@ resolve_fl_variable (gfc_symbol *sym, int mp_flag)
      This check is effected by the call to gfc_resolve_expr through
      is_non_constant_shape_array.  */
   bool saved_specification_expr = specification_expr;
+  gfc_symbol *saved_specification_expr_symbol = specification_expr_symbol;
   specification_expr = true;
+  specification_expr_symbol = sym;
 
   if (sym->ns->proc_name
       && (sym->ns->proc_name->attr.flavor == FL_MODULE
@@ -15354,6 +15476,7 @@ resolve_fl_variable (gfc_symbol *sym, int mp_flag)
       gfc_error ("The module or main program array %qs at %L must "
 		 "have constant shape", sym->name, &sym->declared_at);
       specification_expr = saved_specification_expr;
+      specification_expr_symbol = saved_specification_expr_symbol;
       return false;
     }
 
@@ -15379,6 +15502,7 @@ resolve_fl_variable (gfc_symbol *sym, int mp_flag)
 	  gfc_error ("Entity with assumed character length at %L must be a "
 		     "dummy argument or a PARAMETER", &sym->declared_at);
 	  specification_expr = saved_specification_expr;
+	  specification_expr_symbol = saved_specification_expr_symbol;
 	  return false;
 	}
 
@@ -15386,6 +15510,7 @@ resolve_fl_variable (gfc_symbol *sym, int mp_flag)
 	{
 	  gfc_error (auto_save_msg, sym->name, &sym->declared_at);
 	  specification_expr = saved_specification_expr;
+	  specification_expr_symbol = saved_specification_expr_symbol;
 	  return false;
 	}
 
@@ -15400,6 +15525,7 @@ resolve_fl_variable (gfc_symbol *sym, int mp_flag)
 	      gfc_error ("%qs at %L must have constant character length "
 			"in this context", sym->name, &sym->declared_at);
 	      specification_expr = saved_specification_expr;
+	      specification_expr_symbol = saved_specification_expr_symbol;
 	      return false;
 	    }
 	  if (sym->attr.in_common)
@@ -15407,6 +15533,7 @@ resolve_fl_variable (gfc_symbol *sym, int mp_flag)
 	      gfc_error ("COMMON variable %qs at %L must have constant "
 			 "character length", sym->name, &sym->declared_at);
 	      specification_expr = saved_specification_expr;
+	      specification_expr_symbol = saved_specification_expr_symbol;
 	      return false;
 	    }
 	}
@@ -15439,6 +15566,7 @@ resolve_fl_variable (gfc_symbol *sym, int mp_flag)
 	{
 	  gfc_error (auto_save_msg, sym->name, &sym->declared_at);
 	  specification_expr = saved_specification_expr;
+	  specification_expr_symbol = saved_specification_expr_symbol;
 	  return false;
 	}
     }
@@ -15472,6 +15600,7 @@ resolve_fl_variable (gfc_symbol *sym, int mp_flag)
       else
 	goto no_init_error;
       specification_expr = saved_specification_expr;
+      specification_expr_symbol = saved_specification_expr_symbol;
       return false;
     }
 
@@ -15480,10 +15609,12 @@ no_init_error:
     {
       bool res = resolve_fl_variable_derived (sym, no_init_flag);
       specification_expr = saved_specification_expr;
+      specification_expr_symbol = saved_specification_expr_symbol;
       return res;
     }
 
   specification_expr = saved_specification_expr;
+  specification_expr_symbol = saved_specification_expr_symbol;
   return true;
 }
 
@@ -18058,11 +18189,14 @@ resolve_symbol_array_spec (gfc_symbol *sym, int check_constant)
   gfc_current_ns = gfc_get_spec_ns (sym);
 
   bool saved_specification_expr = specification_expr;
+  gfc_symbol *saved_specification_expr_symbol = specification_expr_symbol;
   specification_expr = true;
+  specification_expr_symbol = sym;
 
   bool result = gfc_resolve_array_spec (sym->as, check_constant);
 
   specification_expr = saved_specification_expr;
+  specification_expr_symbol = saved_specification_expr_symbol;
   gfc_current_ns = orig_current_ns;
 
   return result;

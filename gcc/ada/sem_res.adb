@@ -90,6 +90,7 @@ with Strub;          use Strub;
 with Style;          use Style;
 with Targparm;       use Targparm;
 with Tbuild;         use Tbuild;
+with Ttypes;         use Ttypes;
 with Uintp;          use Uintp;
 with Urealp;         use Urealp;
 with Warnsw;         use Warnsw;
@@ -2329,9 +2330,16 @@ package body Sem_Res is
             Set_Is_Static_Expression (N);
 
          elsif Nkind (N) = N_Real_Literal and then Is_Integer_Type (Typ) then
-            Rewrite (N,
-              Make_Integer_Literal (Sloc (N),
-                Intval => UR_To_Uint (Realval (N))));
+            if UR_Abs (Realval (N)) < Ureal_2_63
+              or else (System_Max_Integer_Size = 128
+                        and then UR_Abs (Realval (N)) < Ureal_2_127)
+            then
+               Rewrite (N,
+                 Make_Integer_Literal (Sloc (N),
+                   Intval => UR_To_Uint (Realval (N))));
+            else
+               Rewrite (N, Make_Integer_Literal (Sloc (N), Intval => Uint_0));
+            end if;
             Set_Etype (N, Universal_Integer);
             Set_Is_Static_Expression (N);
 
@@ -4038,23 +4046,6 @@ package body Sem_Res is
                  and then Has_Discriminants (Etype (Actval))
                then
                   Analyze_And_Resolve (Actval, Base_Type (Etype (Actval)));
-
-               --  Resolve entities with their own type, which may differ from
-               --  the type of a reference in a generic context because of the
-               --  trick used in Save_Global_References.Set_Global_Type to set
-               --  full views forcefully, which did not anticipate the need to
-               --  re-analyze default values in calls.
-
-               elsif Is_Entity_Name (Actval) then
-                  Analyze_And_Resolve (Actval, Etype (Entity (Actval)));
-
-               --  Ditto for calls whose name is an entity, for the same reason
-
-               elsif Nkind (Actval) = N_Function_Call
-                 and then Is_Entity_Name (Name (Actval))
-               then
-                  Analyze_And_Resolve (Actval, Etype (Entity (Name (Actval))));
-
                else
                   Analyze_And_Resolve (Actval, Etype (Actval));
                end if;
@@ -12283,12 +12274,13 @@ package body Sem_Res is
          end if;
       end if;
 
-      --  If we got here we meed to transform the string literal into the
+      --  If we got here, we need to transform the string literal into the
       --  equivalent qualified positional array aggregate. This is rather
       --  heavy artillery for this situation, but it is hard work to avoid.
 
       declare
          Lits : constant List_Id := New_List;
+         Lit  : Node_Id;
          P    : Source_Ptr := Loc + 1;
          C    : Char_Code;
 
@@ -12301,10 +12293,12 @@ package body Sem_Res is
             C := Get_String_Char (Str, J);
             Set_Character_Literal_Name (C);
 
-            Append_To (Lits,
+            Lit :=
               Make_Character_Literal (P,
                 Chars              => Name_Find,
-                Char_Literal_Value => UI_From_CC (C)));
+                Char_Literal_Value => UI_From_CC (C));
+            Preserve_Comes_From_Source (Lit, N);
+            Append_To (Lits, Lit);
 
             if In_Character_Range (C) then
                P := P + 1;

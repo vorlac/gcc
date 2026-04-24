@@ -165,7 +165,6 @@ static reg_class_t xtensa_secondary_reload (bool, rtx, reg_class_t,
 					    machine_mode,
 					    struct secondary_reload_info *);
 
-static bool constantpool_address_p (const_rtx addr);
 static bool xtensa_legitimate_constant_p (machine_mode, rtx);
 static void xtensa_reorg (void);
 static bool xtensa_can_use_doloop_p (const widest_int &, const widest_int &,
@@ -367,9 +366,6 @@ static rtx_insn *xtensa_md_asm_adjust (vec<rtx> &, vec<rtx> &,
 #undef TARGET_MAX_ANCHOR_OFFSET
 #define TARGET_MAX_ANCHOR_OFFSET 1020
 
-#undef TARGET_DIFFERENT_ADDR_DISPLACEMENT_P
-#define TARGET_DIFFERENT_ADDR_DISPLACEMENT_P hook_bool_void_true
-
 #undef TARGET_IRA_CHANGE_PSEUDO_ALLOCNO_CLASS
 #define TARGET_IRA_CHANGE_PSEUDO_ALLOCNO_CLASS xtensa_ira_change_pseudo_allocno_class
 
@@ -563,32 +559,31 @@ xtensa_valid_move (machine_mode mode, rtx *operands)
 }
 
 
-int
-smalloffset_mem_p (rtx op)
+bool
+smalloffset_address_p (const_rtx addr)
 {
-  if (MEM_P (op))
-    {
-      rtx addr = XEXP (op, 0);
-      if (REG_P (addr))
-	return BASE_REG_P (addr, 0);
-      if (GET_CODE (addr) == PLUS)
-	{
-	  rtx offset = XEXP (addr, 0);
-	  HOST_WIDE_INT val;
-	  if (! CONST_INT_P (offset))
-	    offset = XEXP (addr, 1);
-	  if (! CONST_INT_P (offset))
-	    return FALSE;
+  if (REG_P (addr))
+    return BASE_REG_P (addr, 0);
 
-	  val = INTVAL (offset);
-	  return (val & 3) == 0 && IN_RANGE (val, 0, 60);
-	}
+  if (GET_CODE (addr) == PLUS)
+    {
+      rtx offset = XEXP (addr, 0);
+      HOST_WIDE_INT val;
+
+      if (! CONST_INT_P (offset))
+	offset = XEXP (addr, 1);
+      if (! CONST_INT_P (offset))
+	return false;
+
+      val = INTVAL (offset);
+      return (val & 3) == 0 && IN_RANGE (val, 0, 60);
     }
-  return FALSE;
+
+  return false;
 }
 
 
-static bool
+bool
 constantpool_address_p (const_rtx addr)
 {
   const_rtx sym = addr;
@@ -2318,32 +2313,42 @@ xtensa_legitimize_address (rtx x,
 			   rtx oldx ATTRIBUTE_UNUSED,
 			   machine_mode mode)
 {
+  rtx plus0, plus1, temp;
+  HOST_WIDE_INT offset, mem_offset, addmi_offset;
+
   if (xtensa_tls_symbol_p (x))
     return xtensa_legitimize_tls_address (x);
 
-  if (GET_CODE (x) == PLUS)
+  if (GET_CODE (x) != PLUS)
+    return x;
+
+  plus0 = XEXP (x, 0), plus1 = XEXP (x, 1);
+  if (! REG_P (plus0) && REG_P (plus1))
+    std::swap (plus0, plus1);
+
+  /* Try to split up the offset to use up to two ADDMI instructions.  */
+  if (REG_P (plus0) && CONST_INT_P (plus1)
+      && ! xtensa_mem_offset (offset = INTVAL (plus1), mode)
+      && ! xtensa_simm8 (offset)
+      && xtensa_mem_offset (mem_offset = offset & 0xff, mode))
     {
-      rtx plus0 = XEXP (x, 0);
-      rtx plus1 = XEXP (x, 1);
+      /* The two ADDMIs are slightly more efficient than
+	 "L32R w/litpool + ADD" or "CONST16 pair + ADD", if applicable.  */
+      addmi_offset = offset & ~0xff;
+      if (addmi_offset > 32512)
+	offset = 32512, addmi_offset -= 32512;
+      else if (addmi_offset < -32768)
+	offset = -32768, addmi_offset += 32768;
+      else
+	offset = 0;
 
-      if (! REG_P (plus0) && REG_P (plus1))
+      if (xtensa_simm8x256 (addmi_offset))
 	{
-	  plus0 = XEXP (x, 1);
-	  plus1 = XEXP (x, 0);
-	}
-
-      /* Try to split up the offset to use an ADDMI instruction.  */
-      if (REG_P (plus0) && CONST_INT_P (plus1)
-	  && !xtensa_mem_offset (INTVAL (plus1), mode)
-	  && !xtensa_simm8 (INTVAL (plus1))
-	  && xtensa_mem_offset (INTVAL (plus1) & 0xff, mode)
-	  && xtensa_simm8x256 (INTVAL (plus1) & ~0xff))
-	{
-	  rtx temp = gen_reg_rtx (Pmode);
-	  rtx addmi_offset = GEN_INT (INTVAL (plus1) & ~0xff);
-	  emit_insn (gen_rtx_SET (temp, gen_rtx_PLUS (Pmode, plus0,
-						      addmi_offset)));
-	  return gen_rtx_PLUS (Pmode, temp, GEN_INT (INTVAL (plus1) & 0xff));
+	  emit_insn (gen_addsi3 (temp = gen_reg_rtx (Pmode),
+				 plus0, GEN_INT (addmi_offset)));
+	  if (offset)
+	    emit_insn (gen_addsi3 (temp, temp, GEN_INT (offset)));
+	  return gen_rtx_PLUS (Pmode, temp, GEN_INT (mem_offset));
 	}
     }
 
@@ -3837,6 +3842,7 @@ xtensa_build_builtin_va_list (void)
   TYPE_FIELDS (record) = f_stk;
   DECL_CHAIN (f_stk) = f_reg;
   DECL_CHAIN (f_reg) = f_ndx;
+  TREE_PUBLIC (type_decl) = 1;
 
   layout_type (record);
   return record;

@@ -240,6 +240,7 @@ static void write_local_name (tree, const tree, const tree);
 static void dump_substitution_candidates (void);
 static tree mangle_decl_string (const tree);
 static void maybe_check_abi_tags (tree, tree = NULL_TREE, int = 10);
+static void write_splice (tree);
 
 /* Control functions.  */
 
@@ -767,13 +768,13 @@ unmangled_name_p (const tree decl)
     }
   else if (VAR_P (decl))
     {
+      /* extern "C" declarations aren't mangled.  */
+      if (DECL_NAMESPACE_SCOPE_P (decl) && DECL_EXTERN_C_P (decl))
+	return true;
+
       /* static variables are mangled.  */
       if (!DECL_EXTERNAL_LINKAGE_P (decl))
 	return false;
-
-      /* extern "C" declarations aren't mangled.  */
-      if (DECL_EXTERN_C_P (decl))
-	return true;
 
       /* Other variables at non-global scope are mangled.  */
       if (CP_DECL_CONTEXT (decl) != global_namespace)
@@ -1299,7 +1300,8 @@ write_nested_name (const tree decl)
 	    ::= <template-prefix> <template-args>
 	    ::= <decltype>
 	    ::= # empty
-	    ::= <substitution>  */
+	    ::= <substitution>
+	    ::= <splice>	    # C++26 dependent splice [proposed]  */
 
 static void
 write_prefix (const tree node)
@@ -1316,6 +1318,12 @@ write_prefix (const tree node)
       || TREE_CODE (node) == TRAIT_TYPE)
     {
       write_type (node);
+      return;
+    }
+
+  if (TREE_CODE (node) == SPLICE_SCOPE)
+    {
+      write_splice (node);
       return;
     }
 
@@ -2444,7 +2452,7 @@ write_local_name (tree function, const tree local_entity,
 	    ::= G <type>    # imaginary (C 2000)     [not supported]
 	    ::= U <source-name> <type>   # vendor extended type qualifier
 
-   C++0x extensions
+   C++11 extensions
 
      <type> ::= RR <type>   # rvalue reference-to
      <type> ::= Dt <expression> # decltype of an id-expression or
@@ -2452,6 +2460,7 @@ write_local_name (tree function, const tree local_entity,
      <type> ::= DT <expression> # decltype of an expression
      <type> ::= Dn              # decltype of nullptr
      <type> ::= Dm		# decltype of ^^int
+     <type> ::= <splice>	# C++26 dependent splice [proposed]
 
    TYPE is a type node.  */
 
@@ -2734,6 +2743,10 @@ write_type (tree type)
 	      ++is_builtin_type;
 	      break;
 
+	    case SPLICE_SCOPE:
+	      write_splice (type);
+	      break;
+
 	    case TYPEOF_TYPE:
 	      sorry ("mangling %<typeof%>, use %<decltype%> instead");
 	      break;
@@ -2744,9 +2757,21 @@ write_type (tree type)
 	      break;
 
 	    case PACK_INDEX_TYPE:
-	      /* TODO Mangle pack indexing
-		 <https://github.com/itanium-cxx-abi/cxx-abi/issues/175>.  */
-	      sorry ("mangling type pack index");
+	      /* https://github.com/itanium-cxx-abi/cxx-abi/issues/175.  */
+	      write_string ("Dy");
+	      if (TREE_CODE (PACK_INDEX_PACK (type)) == TREE_VEC)
+		{
+		  write_char ('J');
+		  for (int i = 0; i < TREE_VEC_LENGTH (PACK_INDEX_PACK (type));
+		       ++i)
+		    write_template_arg (TREE_VEC_ELT (PACK_INDEX_PACK (type),
+						      i));
+		  write_char ('E');
+		}
+	      else
+		/* Dy rather than DyDp.  */
+		write_type (PACK_EXPANSION_PATTERN (PACK_INDEX_PACK (type)));
+	      write_expression (PACK_INDEX_INDEX (type));
 	      break;
 
 	    case LANG_TYPE:
@@ -3429,7 +3454,10 @@ range_expr_nelts (tree expr)
 		  ::= L <mangled-name> E		# external name
 		  ::= st <type>				# sizeof
 		  ::= sr <type> <unqualified-name>	# dependent name
-		  ::= sr <type> <unqualified-name> <template-args> */
+		  ::= sr <type> <unqualified-name> <template-args>
+		  ::= L Dm <value reflection> E		# C++26 reflection
+							# value [proposed]
+		  ::= <splice>		# C++26 dependent splice [proposed]  */
 
 static void
 write_expression (tree expr)
@@ -3602,6 +3630,23 @@ write_expression (tree expr)
       else
 	goto normal_expr;
     }
+  else if (code == PACK_INDEX_EXPR)
+    {
+      /* https://github.com/itanium-cxx-abi/cxx-abi/issues/175.  */
+      write_string ("sy");
+      if (TREE_CODE (PACK_INDEX_PACK (expr)) == TREE_VEC)
+	{
+	  write_char ('J');
+	  for (int i = 0; i < TREE_VEC_LENGTH (PACK_INDEX_PACK (expr));
+	       ++i)
+	    write_template_arg (TREE_VEC_ELT (PACK_INDEX_PACK (expr), i));
+	  write_char ('E');
+	}
+      else
+	/* sy rather than sysp.  */
+	write_expression (PACK_EXPANSION_PATTERN (PACK_INDEX_PACK (expr)));
+      write_expression (PACK_INDEX_INDEX (expr));
+    }
   else if (TREE_CODE (expr) == ALIGNOF_EXPR)
     {
       if (!ALIGNOF_EXPR_STD_P (expr))
@@ -3670,6 +3715,8 @@ write_expression (tree expr)
 	write_string ("on");
       write_unqualified_id (expr);
     }
+  else if (dependent_splice_p (expr))
+    write_splice (expr);
   else if (TREE_CODE (expr) == TEMPLATE_ID_EXPR)
     {
       tree fn = TREE_OPERAND (expr, 0);
@@ -4134,7 +4181,8 @@ write_expression (tree expr)
 		  ::= pa [ <nonnegative number> ] _ <encoding>	# fn param
 		  ::= en <prefix> <unqualified-name>	# enumerator
 		  ::= an [ <nonnegative number> ] _	# annotation
-		  ::= ta <alias prefix>			# type alias
+		  ::= ta <alias prefix> <alias unqualified-name>
+		      [ <alias template-args> ] _ <type> # type alias
 		  ::= ty <type>				# type
 		  ::= dm <prefix> <unqualified-name>	# ns data member
 		  ::= un <prefix> [ <nonnegative number> ] _ # unnamed bitfld
@@ -4145,11 +4193,13 @@ write_expression (tree expr)
 		  ::= co [ <prefix> ] <unqualified-name> # concept
 		  ::= na [ <prefix> ] <unqualified-name> # namespace alias
 		  ::= ns [ <prefix> ] <unqualified-name> # namespace
-		  ::= ng				# ^^::
+		  ::= gs				 # ^^::
+		  ::= tt <template-template-param>	 # templ templ param
+		  ::= de <expression>			 # dependent expr
 		  ::= ba [ <nonnegative number> ] _ <type> # dir. base cls rel
 		  ::= ds <type> _ [ <unqualified-name> ] _
 		      [ <alignment number> ] _ [ <bit-width number> ] _
-		      [ n ]				# data member spec  */
+		      [ n ] [ <template-arg>* ]		# data member spec  */
 
 static void
 write_reflection (tree refl)
@@ -4189,7 +4239,17 @@ write_reflection (tree refl)
   else if (strcmp (prefix, "ta") == 0)
     {
       arg = TYPE_NAME (arg);
-      write_prefix (arg);
+      /* Can't use write_prefix (arg) here instead of
+	 write_prefix + write_unqualified_name + optional
+	 write_template_args, it shouldn't be
+	 remembered among substitutions.  */
+      write_prefix (decl_mangling_context (arg));
+      write_unqualified_name (arg);
+      tree template_info = maybe_template_info (arg);
+      if (template_info)
+	write_template_args (TI_ARGS (template_info));
+      write_char ('_');
+      write_type (DECL_ORIGINAL_TYPE (arg));
     }
   else if (strcmp (prefix, "ty") == 0)
     write_type (arg);
@@ -4254,7 +4314,44 @@ write_reflection (tree refl)
       write_char ('_');
       if (integer_nonzerop (TREE_VEC_ELT (arg, 4)))
 	write_char ('n');
+      for (int i = 5; i < TREE_VEC_LENGTH (arg); ++i)
+	write_template_arg (REFLECT_EXPR_HANDLE (TREE_VEC_ELT (arg, i)));
     }
+  else if (strcmp (prefix, "tt") == 0)
+    {
+      gcc_assert (DECL_TEMPLATE_TEMPLATE_PARM_P (arg));
+      write_template_template_param (TREE_TYPE (arg));
+    }
+  else if (strcmp (prefix, "de") == 0)
+    write_expression (arg);
+  else
+    gcc_unreachable ();
+}
+
+/* Mangle a dependent splice.
+
+     <splice> ::= DS <expression> [ <template-args> ] E
+
+   TODO: This is only a proposed mangling.
+   See <https://github.com/itanium-cxx-abi/cxx-abi/issues/208>.  */
+
+static void
+write_splice (tree sp)
+{
+  write_string ("DS");
+
+  if (TREE_CODE (sp) == SPLICE_SCOPE)
+    sp = SPLICE_SCOPE_EXPR (sp);
+  gcc_assert (dependent_splice_p (sp));
+  if (TREE_CODE (sp) == TEMPLATE_ID_EXPR)
+    {
+      write_expression (TREE_OPERAND (TREE_OPERAND (sp, 0), 0));
+      write_template_args (TREE_OPERAND (sp, 1));
+    }
+  else
+    write_expression (TREE_OPERAND (sp, 0));
+
+  write_char ('E');
 }
 
 /* Literal subcase of non-terminal <template-arg>.

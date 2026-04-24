@@ -655,39 +655,29 @@ version (linux)
         {
             // Matches struct stat from musl arch/arm/bits/stat.h
             // See: https://git.musl-libc.org/cgit/musl/tree/arch/arm/bits/stat.h?h=v1.2.3
-            //
-            // Type definitions from https://git.musl-libc.org/cgit/musl/tree/include/alltypes.h.in?h=v1.2.3
-            // with ARM-specific _Int64=long long and _Reg=int from
-            // https://git.musl-libc.org/cgit/musl/tree/arch/arm/bits/alltypes.h.in?h=v1.2.3#n3
-            //
-            // Key 64-bit LFS types (always 64-bit on musl):
-            //   dev_t     = unsigned _Int64 = unsigned long long  (line 31)
-            //   off_t     = _Int64          = long long           (line 29)
-            //   ino_t     = unsigned _Int64 = unsigned long long  (line 30)
-            //   blkcnt_t  = _Int64          = long long           (line 33)
-            //   blksize_t = long            = long (32-bit)       (line 32)
-            //   nlink_t   = unsigned _Reg   = unsigned int        (line 28)
             struct stat_t
             {
-                ulong st_dev;
+                dev_t st_dev;
                 int __st_dev_padding;
                 c_long __st_ino_truncated;
                 mode_t st_mode;
-                uint st_nlink;
+                nlink_t st_nlink;
                 uid_t st_uid;
                 gid_t st_gid;
-                ulong st_rdev;
+                dev_t st_rdev;
                 int __st_rdev_padding;
-                long st_size;
-                c_long st_blksize;
-                long st_blocks;
-                struct __timespec32
+                off_t st_size;
+                blksize_t st_blksize;
+                blkcnt_t st_blocks;
+                private struct __timespec32
                 {
                     c_long tv_sec;
                     c_long tv_nsec;
                 }
-                __timespec32 __st_atim32, __st_mtim32, __st_ctim32;
-                ulong st_ino;
+                __timespec32 __st_atim32;
+                __timespec32 __st_mtim32;
+                __timespec32 __st_ctim32;
+                ino_t st_ino;
                 timespec st_atim;
                 timespec st_mtim;
                 timespec st_ctim;
@@ -964,7 +954,7 @@ version (linux)
             c_ulong __unused4;
             c_ulong __unused5;
         }
-        static if (__USE_LARGEFILE64) alias stat_t stat64_t;
+        static if (__USE_LARGEFILE64) alias stat64_t = stat_t;
 
         static if (__WORDSIZE == 64)
             static assert(stat_t.sizeof == 144);
@@ -1468,7 +1458,7 @@ else version (Solaris)
             char[_ST_FSTYPSZ] st_fstype = 0;
         }
 
-        static if (__USE_LARGEFILE64) alias stat_t stat64_t;
+        static if (__USE_LARGEFILE64) alias stat64_t = stat_t;
     }
     else
     {
@@ -1540,9 +1530,9 @@ else version (Solaris)
         }
 
         static if (__USE_FILE_OFFSET64)
-            alias stat64_t stat_t;
+            alias stat_t = stat64_t;
         else
-            alias stat32_t stat_t;
+            alias stat_t = stat32_t;
 
     }
 
@@ -1940,16 +1930,16 @@ version (CRuntime_Glibc)
   static if ( __USE_LARGEFILE64 )
   {
     int   fstat64(int, stat_t*) @trusted;
-    alias fstat64 fstat;
+    alias fstat = fstat64;
 
     int   lstat64(const scope char*, stat_t*);
-    alias lstat64 lstat;
+    alias lstat = lstat64;
 
     int   stat64(const scope char*, stat_t*);
-    alias stat64 stat;
+    alias stat = stat64;
 
     int   fstatat64(int, const scope char*, stat_t*, int);
-    alias fstatat64 fstatat;
+    alias fstatat = fstatat64;
 
   }
   else
@@ -1975,10 +1965,10 @@ else version (Solaris)
 
         static if (__USE_LARGEFILE64)
         {
-            alias fstat fstat64;
-            alias lstat lstat64;
-            alias stat stat64;
-            alias fstatat fstatat64;
+            alias fstat64 = fstat;
+            alias lstat64 = lstat;
+            alias stat64 = stat;
+            alias fstatat64 = fstatat;
         }
     }
     else
@@ -1986,16 +1976,16 @@ else version (Solaris)
         static if (__USE_LARGEFILE64)
         {
             int   fstat64(int, stat_t*) @trusted;
-            alias fstat64 fstat;
+            alias fstat = fstat64;
 
             int   lstat64(const scope char*, stat_t*);
-            alias lstat64 lstat;
+            alias lstat = lstat64;
 
             int   stat64(const scope char*, stat_t*);
-            alias stat64 stat;
+            alias stat = stat64;
 
             int fstatat64(int, const scope char*, stat_t*, int);
-            alias fstatat64 fstatat;
+            alias fstatat = fstatat64;
         }
         else
         {
@@ -2020,12 +2010,14 @@ else version (Darwin)
         version (AArch64)
         {
             int fstat(int, stat_t*);
+            int fstatat(int, const scope char*, stat_t*, int);
             int lstat(const scope char*, stat_t*);
             int stat(const scope char*, stat_t*);
         }
         else
         {
             pragma(mangle, "fstat$INODE64") int fstat(int, stat_t*);
+            pragma(mangle, "fstatat$INODE64") int fstatat(int, const scope char*, stat_t*, int);
             pragma(mangle, "lstat$INODE64") int lstat(const scope char*, stat_t*);
             pragma(mangle, "stat$INODE64")  int stat(const scope char*, stat_t*);
         }
@@ -2033,15 +2025,17 @@ else version (Darwin)
     else
     {
         int fstat(int, stat_t*);
+        int fstatat(int, const scope char*, stat_t*, int);
         int lstat(const scope char*, stat_t*);
         int stat(const scope char*, stat_t*);
     }
     int   fchmodat(int, const scope char*, mode_t, int);
-    int   fstatat(int, const scope char*, stat_t*, int);
-    int   futimens(int, ref const(timespec)[2]);
     int   mkdirat(int, const scope char*, mode_t);
-    int   mkfifoat(int, const scope char*, mode_t);
-    int   utimensat(int, const scope char*, ref const(timespec)[2], int);
+    // OSX available starting 10.12
+    //int   futimens(int, ref const(timespec)[2]);
+    //int   utimensat(int, const scope char*, ref const(timespec)[2], int);
+    // OSX available starting 13
+    //int   mkfifoat(int, const scope char*, mode_t);
 }
 else version (FreeBSD)
 {
@@ -2084,9 +2078,9 @@ else version (NetBSD)
     int   __fstat50(int, stat_t*);
     int   __lstat50(const scope char*, stat_t*);
     int   __stat50(const scope char*, stat_t*);
-    alias __fstat50 fstat;
-    alias __lstat50 lstat;
-    alias __stat50 stat;
+    alias fstat = __fstat50;
+    alias lstat = __lstat50;
+    alias stat = __stat50;
     int   fchmodat(int, const scope char*, mode_t, int);
     int   fstatat(int, const scope char*, stat_t*, int);
     int   futimens(int, ref const(timespec)[2]);
@@ -2141,9 +2135,9 @@ else version (CRuntime_Musl)
     pragma(mangle, muslRedirTime64Mangle!("fstatat", "__fstatat_time64"))
     int   fstatat(int, const scope char*, stat_t*, int);
 
-    alias fstat fstat64;
-    alias lstat lstat64;
-    alias stat stat64;
+    alias fstat64 = fstat;
+    alias lstat64 = lstat;
+    alias stat64 = stat;
     int   fchmodat(int, const scope char*, mode_t, int);
     int   futimens(int, ref const(timespec)[2]);
     int   mkdirat(int, const scope char*, mode_t);
@@ -2155,16 +2149,16 @@ else version (CRuntime_UClibc)
   static if ( __USE_LARGEFILE64 )
   {
     int   fstat64(int, stat_t*) @trusted;
-    alias fstat64 fstat;
+    alias fstat = fstat64;
 
     int   lstat64(const scope char*, stat_t*);
-    alias lstat64 lstat;
+    alias lstat = lstat64;
 
     int   stat64(const scope char*, stat_t*);
-    alias stat64 stat;
+    alias stat = stat64;
 
     int   fstatat64(int, const scope char*, stat_t*, int);
-    alias fstatat64 fstatat;
+    alias fstatat = fstatat64;
   }
   else
   {
@@ -2362,7 +2356,7 @@ else version (FreeBSD)
 }
 else version (NetBSD)
 {
-    int mknod(const scope char*, mode_t, dev_t);
+    pragma(mangle, "__mknod50") int mknod(const scope char*, mode_t, dev_t);
     int mknodat(int, const scope char*, mode_t, dev_t);
 }
 else version (OpenBSD)

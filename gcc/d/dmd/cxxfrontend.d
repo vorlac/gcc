@@ -1,7 +1,7 @@
 /**
  * Contains C++ interfaces for interacting with DMD as a library.
  *
- * Copyright:   Copyright (C) 1999-2025 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2026 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/compiler/src/dmd/cxxfrontend.d, _cxxfrontend.d)
@@ -430,6 +430,12 @@ bool isLvalue(Expression exp)
     return dmd.expressionsem.isLvalue(exp);
 }
 
+bool canElideCopy(Expression exp, Type to, bool checkMod)
+{
+    import dmd.expressionsem;
+    return dmd.expressionsem.canElideCopy(exp, to, checkMod);
+}
+
 int getFieldIndex(ClassReferenceExp cre, Type fieldtype, uint fieldoffset)
 {
     import dmd.expressionsem;
@@ -527,6 +533,24 @@ bool needsClosure(FuncDeclaration fd)
 {
     import dmd.funcsem;
     return dmd.funcsem.needsClosure(fd);
+}
+
+bool hasNestedFrameRefs(FuncDeclaration fd)
+{
+    import dmd.funcsem;
+    return dmd.funcsem.hasNestedFrameRefs(fd);
+}
+
+bool isVirtualMethod(FuncDeclaration fd)
+{
+    import dmd.funcsem;
+    return dmd.funcsem.isVirtualMethod(fd);
+}
+
+bool isVirtual(const FuncDeclaration fd)
+{
+    import dmd.funcsem;
+    return dmd.funcsem.isVirtual(fd);
 }
 
 /***********************************************************

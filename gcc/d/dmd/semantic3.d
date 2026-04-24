@@ -3,7 +3,7 @@
  * function bodies and late semantic checks for templates, mixins,
  * aggregates, and special members.
  *
- * Copyright:   Copyright (C) 1999-2025 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2026 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/compiler/src/dmd/semantic3.d, _semantic3.d)
@@ -76,6 +76,12 @@ import dmd.targetcompiler;
 import dmd.templateparamsem;
 import dmd.typesem;
 import dmd.visitor;
+
+version (IN_GCC) { /* Not using Fast DFA */ }
+else version = FastDFA;
+
+version (FastDFA)
+    import dmd.dfa.entry;
 
 enum LOG = false;
 
@@ -288,7 +294,7 @@ private extern(C++) final class Semantic3Visitor : Visitor
             return;
         funcdecl.semanticRun = PASS.semantic3;
         funcdecl.hasSemantic3Errors = false;
-        funcdecl.saferD = sc.previews.safer;
+        funcdecl.saferD = sc.previews.safer && !sc.inCfile;
 
         if (!funcdecl.type || funcdecl.type.ty != Tfunction)
             return;
@@ -955,8 +961,10 @@ private extern(C++) final class Semantic3Visitor : Visitor
 
                             /* https://issues.dlang.org/show_bug.cgi?id=10789
                              * If NRVO is not possible, all returned lvalues should call their postblits.
+                             * For functions with a __result variable, postblits will be called later
+                             * during initialization of __result.
                              */
-                            if (!funcdecl.isNRVO)
+                            if (!funcdecl.isNRVO && !funcdecl.vresult)
                                 exp = doCopyOrMove(sc2, exp, f.next, true, true);
 
                             if (tret.hasPointers())
@@ -967,13 +975,25 @@ private extern(C++) final class Semantic3Visitor : Visitor
 
                         if (funcdecl.vresult)
                         {
-                            // Create: return vresult = exp;
-                            if (canElideCopy(exp, funcdecl.vresult.type, false))
-                                exp = new ConstructExp(rs.loc, funcdecl.vresult, exp);
-                            else
-                                exp = new BlitExp(rs.loc, funcdecl.vresult, exp);
+                            Scope* scret = sc2;
 
-                            exp.type = funcdecl.vresult.type;
+                            if (rs.fesFunc)
+                            {
+                                // Create a scope with foreach body being `.parent`
+                                // and `funcdecl` as `.func`. So the return value
+                                // is aware of closure access, but picks up
+                                // attributes and instantiates templated copy/move
+                                // ctors in the context of `funcdecl`.
+                                // BUG: remove this fragile hack
+                                scret = rs.fesFunc._scope.push();
+                                scret.parent = rs.fesFunc;
+                                scret.func = funcdecl;
+                            }
+
+                            // Create: return (vresult = exp, vresult);
+                            exp = new ConstructExp(rs.loc, funcdecl.vresult, exp);
+                            exp = exp.expressionSemantic(scret);
+                            exp = Expression.combine(exp, new VarExp(rs.loc, funcdecl.vresult));
 
                             if (rs.caseDim)
                                 exp = Expression.combine(exp, new IntegerExp(rs.caseDim));
@@ -1096,6 +1116,10 @@ private extern(C++) final class Semantic3Visitor : Visitor
             else
             {
                 auto a = new Statements();
+
+                size_t expectedSize = (funcdecl.parameters ? funcdecl.parameters.length : 0) + 7;
+                    a.reserve(expectedSize);
+
                 // Merge in initialization of 'out' parameters
                 if (funcdecl.parameters)
                 {
@@ -1418,6 +1442,16 @@ private extern(C++) final class Semantic3Visitor : Visitor
             funcdecl.type.isTypeFunction().isLive)
         {
             oblive(funcdecl);
+        }
+
+        version (FastDFA)
+        {
+            if (global.params.useFastDFA && global.errors == oldErrors && funcdecl.fbody && funcdecl.type.ty != Terror)
+            {
+                // Don't run DFA if there are errors,
+                //  this is a costly enough operation that it warrents the explicit check.
+                dfaEntry(funcdecl, sc);
+            }
         }
 
         /* If this function had instantiated with gagging, error reproduction will be
@@ -1868,10 +1902,37 @@ extern (D) bool checkClosure(FuncDeclaration fd)
     else
     {
         fd.printGCUsage(fd.loc, "using closure causes GC allocation");
+
+        findClosureVars(fd, (FuncDeclaration f, VarDeclaration v) {
+            if (!fd.vgcEnabled)
+                return;
+
+            .message(f.loc, "vgc: %s `%s` closes over variable `%s`",
+                f.kind, f.toErrMsg(), v.toErrMsg());
+            if (v.ident != Id.This)
+                .message(v.loc, "vgc: `%s` declared here", v.toErrMsg());
+        });
         return false;
     }
 
+    findClosureVars(fd, (FuncDeclaration f, VarDeclaration v) {
+        .errorSupplemental(f.loc, "%s `%s` closes over variable `%s`",
+            f.kind, f.toErrMsg(), v.toErrMsg());
+        if (v.ident != Id.This)
+            .errorSupplemental(v.loc, "`%s` declared here", v.toErrMsg());
+    });
+    return true;
+}
+
+/// For an outer function `fd`, find inner functions that cause a closure to be generated for it.
+/// Pass to `sink` each nested function along with the local variable that closes over `fd`'s stackframe
+private void findClosureVars(FuncDeclaration fd, scope void delegate(FuncDeclaration, VarDeclaration) sink)
+{
     FuncDeclarations a;
+
+    if (fd.closureVars.length > 0)
+        a.reserve(fd.closureVars.length);
+
     foreach (v; fd.closureVars)
     {
         foreach (f; v.nestedrefs)
@@ -1889,16 +1950,11 @@ extern (D) bool checkClosure(FuncDeclaration fd)
                     if (!a.contains(f))
                     {
                         a.push(f);
-                        .errorSupplemental(f.loc, "%s `%s` closes over variable `%s`",
-                            f.kind, f.toErrMsg(), v.toChars());
-                        if (v.ident != Id.This)
-                            .errorSupplemental(v.loc, "`%s` declared here", v.toChars());
+                        sink(f, v);
                     }
                     break LcheckAncestorsOfANestedRef;
                 }
             }
         }
     }
-
-    return true;
 }

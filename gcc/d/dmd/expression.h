@@ -1,6 +1,6 @@
 
 /* Compiler implementation of the D programming language
- * Copyright (C) 1999-2025 by The D Language Foundation, All Rights Reserved
+ * Copyright (C) 1999-2026 by The D Language Foundation, All Rights Reserved
  * written by Walter Bright
  * https://www.digitalmars.com
  * Distributed under the Boost Software License, Version 1.0.
@@ -62,6 +62,7 @@ namespace dmd
     bool isIdentical(const Expression *exp, const Expression *e);
     bool equals(const Expression *exp, const Expression *e);
     bool isLvalue(Expression *exp);
+    bool canElideCopy(Expression *exp, Type *to, bool checkMod = false);
     int32_t getFieldIndex(ClassReferenceExp *cre, Type *fieldtype, uint32_t fieldoffset);
     void fillTupleExpExps(TupleExp *te, TupleDeclaration *tup);
     Optional<bool> toBool(Expression *exp);
@@ -671,6 +672,7 @@ class AssertExp final : public UnaExp
 {
 public:
     Expression *msg;
+    Expression* loweredFrom;
 
     AssertExp *syntaxCopy() override;
 

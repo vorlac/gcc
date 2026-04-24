@@ -164,13 +164,12 @@ listing and explanation of the binary and decimal byte size prefixes.
 * Link Options::        Specifying libraries and so on.
 * Directory Options::   Where to find header files and libraries.
                         Where to find the compiler executable files.
-* Picolibc Options::    Select compile and link options when using picolibc.
 * Code Gen Options::    Specifying conventions for function calls, data layout
                         and register usage.
 * Developer Options::   Printing GCC configuration info, statistics, and
                         debugging dumps.
-* Submodel Options::    Target-specific options, such as compiling for a
-                        specific processor variant.
+* Target-Specific Options:: Options specific to particular architectures or
+                            runtime environments.
 * Environment Variables:: Env vars that affect GCC.
 * Precompiled Headers:: Compiling a header once, and using it many times.
 * C++ Modules::		Experimental C++20 module system.
@@ -770,7 +769,8 @@ Objective-C and Objective-C++ Dialects}.
 -e @var{entry}
 -pie  -pthread  -r  -rdynamic
 -s  -static  -static-pie  -static-libgcc  -static-libstdc++
--static-libasan  -static-libtsan  -static-liblsan  -static-libubsan
+-static-libasan  -static-libhwasan  -static-liblsan
+-static-libtsan  -static-libubsan
 -shared  -shared-libgcc  -symbolic
 -T @var{script}  -Wl,@var{option}  -Xlinker @var{option}
 -u @var{symbol}
@@ -797,11 +797,6 @@ Objective-C and Objective-C++ Dialects}.
 --include-with-prefix-before=@var{prefix}
 --no-canonical-prefixes  --no-standard-includes
 --prefix=@var{prefix}  --sysroot=@var{dir}}
-
-@item Picolibc Options
-@xref{Picolibc Options,,Options for use with Picolibc}.
-@gccoptlist{--oslib=@var{library} --crt0=@r{[}none@r{|}minimal@r{|}hosted@r{|}semihost@r{]}
---printf=@r{[}d@r{|}f@r{|}l@r{|}i@r{|}m@r{]}  --scanf=@r{[}d@r{|}f@r{|}l@r{|}i@r{|}m@r{]}}
 
 @item Code Generation Options
 @xref{Code Gen Options,,Options for Code Generation Conventions}.
@@ -882,8 +877,8 @@ Objective-C and Objective-C++ Dialects}.
 --param @var{name}=@var{value}
 }
 
-@item Machine-Dependent Options
-@xref{Submodel Options,,Machine-Dependent Options}.
+@item Target-Specific Options
+@xref{Target-Specific Options}.
 @c This list is ordered alphanumerically by subsection name.
 @c Try and put the significant identifier (CPU or system) first,
 @c so users have a clue at guessing where the ones they want will be.
@@ -907,7 +902,7 @@ Objective-C and Objective-C++ Dialects}.
 -moverride=@var{string}
 -mstack-protector-guard=@var{guard}  -mstack-protector-guard-reg=@var{sysreg}
 -mstack-protector-guard-offset=@var{offset}  -mtrack-speculation
--moutline-atomics  -mearly-ra  -mearly-ldp-fusion  -mlate-ldp-fusion
+-moutline-atomics  -mearly-ra  -mearly-ldp-fusion  -mlate-ldp-fusion -mnarrow-gp-writes
 -msve-vector-bits=@var{bits}}
 
 @emph{Adapteva Epiphany Options} (@ref{Adapteva Epiphany Options})
@@ -1318,6 +1313,10 @@ Objective-C and Objective-C++ Dialects}.
 @gccoptlist{-mfpu  -msoft-float  -mac0  -m40  -m45  -m10
 -mint32  -mint16
 -msplit  -munix-asm  -mdec-asm  -mgnu-asm  -mlra}
+
+@emph{Picolibc Options} (@ref{Picolibc Options})
+@gccoptlist{--oslib=@var{library} --crt0=@r{[}none@r{|}minimal@r{|}hosted@r{|}semihost@r{]}
+--printf=@r{[}d@r{|}f@r{|}l@r{|}i@r{|}m@r{]}  --scanf=@r{[}d@r{|}f@r{|}l@r{|}i@r{|}m@r{]}}
 
 @emph{PowerPC Options}
 See RS/6000 and PowerPC Options.
@@ -2907,29 +2906,34 @@ declaration does not use either @code{signed} or @code{unsigned}.  By
 default, such a bit-field is signed, because this is consistent: the
 basic integer types such as @code{int} are signed types.
 
+@anchor{@code{char} type signedness}
+@cindex @code{char} type signedness
+@cindex signedness of @code{char} type
 @opindex fsigned-char
 @opindex fno-signed-char
+@opindex funsigned-char
+@opindex fno-unsigned-char
 @item -fsigned-char
-Let the type @code{char} be signed, like @code{signed char}.
+@itemx -funsigned-char
+@option{-fsigned-char} lets the type @code{char} be signed,
+like @code{signed char}, while @option{-funsigned-char} lets
+the type @code{char} be unsigned, like @code{unsigned char}.
 
-Note that this is equivalent to @option{-fno-unsigned-char}, which is
+Note that @option{-fsigned-char}
+is equivalent to @option{-fno-unsigned-char}, which is
 the negative form of @option{-funsigned-char}.  Likewise, the option
 @option{-fno-signed-char} is equivalent to @option{-funsigned-char}.
 
-@opindex funsigned-char
-@opindex fno-unsigned-char
-@item -funsigned-char
-Let the type @code{char} be unsigned, like @code{unsigned char}.
-
-Each kind of machine has a default for what @code{char} should
-be.  It is either like @code{unsigned char} by default or like
-@code{signed char} by default.
+Each target supported by GCC has a default for what @code{char} should
+be, which is typically specified in the processor-specific ABI
+document for that target.  It is either like @code{unsigned char} by
+default or like @code{signed char} by default.
 
 Ideally, a portable program should always use @code{signed char} or
 @code{unsigned char} when it depends on the signedness of an object.
 But many programs have been written to use plain @code{char} and
 expect it to be signed, or expect it to be unsigned, depending on the
-machines they were written for.  This option, and its inverse, let you
+machines they were written for.  These options let you
 make such a program work with the opposite default.
 
 The type @code{char} is always a distinct type from each of
@@ -4895,7 +4899,8 @@ As an extension, GCC allows exposures of internal variables and functions that
 were declared in the global module fragment.  This warning indicates when such
 an invalid exposure has occurred, and can be silenced using diagnostic pragmas
 either at the site of the exposure, or at the point of declaration of the
-internal declaration.
+internal declaration.  This also applies to @code{export using} declarations
+naming such entities.
 
 When combined with @option{-Wtemplate-names-tu-local}, GCC will also warn about
 non-exposure references to TU-local entities in template bodies. Such templates
@@ -7103,8 +7108,13 @@ Both diagnostics are also suppressed by @option{-fms-extensions}.
 @item -Wchar-subscripts
 Warn if an array subscript has type @code{char}.  This is a common cause
 of error, as programmers often forget that this type is signed on some
-machines.
-This warning is enabled by @option{-Wall}.
+machines.  @xref{Characters implementation}, and
+@ref{@code{char} type signedness}.
+
+This warning is enabled by @option{-Wall}.  When enabled, the warning
+is given regardless of whether @code{char} is unsigned by default on
+the target, and it is also not affected by the @option{-fsigned-char}
+or @option{-funsigned-char} options.
 
 @opindex Wno-coverage-mismatch
 @opindex Wcoverage-mismatch
@@ -7181,7 +7191,7 @@ because the floating-point literal is a @code{double}.
 @opindex Wduplicate-decl-specifier
 @opindex Wno-duplicate-decl-specifier
 @item -Wduplicate-decl-specifier @r{(C and Objective-C only)}
-Warn if a declaration has duplicate @code{const}, @code{volatile},
+Warn if a declaration has a duplicate @code{const}, @code{volatile},
 @code{restrict} or @code{_Atomic} specifier.  This warning is enabled by
 @option{-Wall}.
 
@@ -8387,7 +8397,7 @@ header included.
 
 @option{-Wunused-const-variable=1} is enabled by either
 @option{-Wunused-variable} or @option{-Wunused} for C, but not for
-C++. In C this declares variable storage, but in C++ this is not an
+C++. In C, this declares variable storage, but in C++, this is not an
 error since const variables take the place of @code{#define}s.
 
 @item -Wunused-const-variable=2
@@ -9110,7 +9120,7 @@ larger.
 @opindex Wno-alloca
 @opindex Walloca
 @item -Walloca
-This option warns on all uses of @code{alloca} in the source.
+Warn on all uses of @code{alloca} in the source.
 
 @opindex Wno-auto-profile
 @opindex Wauto-profile
@@ -9126,7 +9136,7 @@ a certain function.
 @opindex Walloca-larger-than=
 @opindex Wno-alloca-larger-than
 @item -Walloca-larger-than=@var{byte-size}
-This option warns on calls to @code{alloca} with an integer argument whose
+Warns on calls to @code{alloca} with an integer argument whose
 value is either zero, or that is not bounded by a controlling predicate
 that limits its value to at most @var{byte-size}.  It also warns for calls
 to @code{alloca} where the bound value is unknown.  Arguments of non-integer
@@ -10405,8 +10415,8 @@ Do not warn about stray tokens after @code{#else} and @code{#endif}.
 @opindex Wno-enum-compare
 @item -Wenum-compare
 Warn about a comparison between values of different enumerated types.
-In C++ enumerated type mismatches in conditional expressions are also
-diagnosed and the warning is enabled by default.  In C this warning is
+In C++, enumerated type mismatches in conditional expressions are also
+diagnosed and the warning is enabled by default.  In C, this warning is
 enabled by @option{-Wall}.
 
 @opindex Wenum-conversion
@@ -10613,7 +10623,7 @@ Comparisons against string literals result in unspecified behavior
 and are not portable, and suggest the intent was to call @code{strcmp}.
 The warning is suppressed if the suspicious expression is the result
 of macro expansion.
-@option{-Waddress} warning is enabled by @option{-Wall}.
+@option{-Waddress} is enabled by @option{-Wall}.
 
 @opindex Waddress-of-packed-member
 @opindex Wno-address-of-packed-member
@@ -10801,7 +10811,7 @@ This warning is also enabled by @option{-Wextra}.
 Warn if a function declared with an empty parameter list @samp{()} is
 called with one or more arguments, or if a function definition with one
 or more parameters is encountered after such a declaration.  Both cases
-are errors in C23 and later dialects  of C.
+are errors in C23 and later dialects of C.
 
 This warning is also enabled by @option{-Wc11-c23-compat}.
 
@@ -12910,6 +12920,12 @@ parts of the program that you don't plan to debug.  This includes
 descriptions of functions and external variables, and line number
 tables, but no information about local variables.
 
+Level 2 is the normal setting to produce debuggable code.  The debug output
+includes all the information from level 1, plus information about
+local variables and typedefs to allow stepping through code and examining
+its state.  For C++ code, additional information is also emitted to assist
+in debugging namespace, class, and template functions.
+
 Level 3 includes extra information, such as all the macro definitions
 present in the program.  Some debuggers support macro expansion when
 you use @option{-g3}.
@@ -13881,7 +13897,7 @@ This option results in less efficient code, but some strange hacks
 that alter the assembler output may be confused by the optimizations
 performed when this option is not used.
 
-The default is @option{-ffunction-cse}
+The default is @option{-ffunction-cse}.
 
 @opindex ffuse-ops-with-volatile-access
 @opindex fno-fuse-ops-with-volatile-access
@@ -18684,14 +18700,14 @@ option is not used, then this links against the shared version of
 driver to link @file{libasan} statically, without necessarily linking
 other libraries statically.
 
-@opindex static-libtsan
-@item -static-libtsan
-When the @option{-fsanitize=thread} option is used to link a program,
-the GCC driver automatically links against @option{libtsan}.  If
-@file{libtsan} is available as a shared library, and the @option{-static}
+@opindex static-libhwasan
+@item -static-libhwasan
+When the @option{-fsanitize=hwaddress} option is used to link a program,
+the GCC driver automatically links against @option{libhwasan}.  If
+@file{libhwasan} is available as a shared library, and the @option{-static}
 option is not used, then this links against the shared version of
-@file{libtsan}.  The @option{-static-libtsan} option directs the GCC
-driver to link @file{libtsan} statically, without necessarily linking
+@file{libhwasan}.  The @option{-static-libhwasan} option directs the GCC
+driver to link @file{libhwasan} statically, without necessarily linking
 other libraries statically.
 
 @opindex static-liblsan
@@ -18702,6 +18718,16 @@ the GCC driver automatically links against @option{liblsan}.  If
 option is not used, then this links against the shared version of
 @file{liblsan}.  The @option{-static-liblsan} option directs the GCC
 driver to link @file{liblsan} statically, without necessarily linking
+other libraries statically.
+
+@opindex static-libtsan
+@item -static-libtsan
+When the @option{-fsanitize=thread} option is used to link a program,
+the GCC driver automatically links against @option{libtsan}.  If
+@file{libtsan} is available as a shared library, and the @option{-static}
+option is not used, then this links against the shared version of
+@file{libtsan}.  The @option{-static-libtsan} option directs the GCC
+driver to link @file{libtsan} statically, without necessarily linking
 other libraries statically.
 
 @opindex static-libubsan
@@ -18909,69 +18935,6 @@ headers may for example be found in
 @file{@var{dir}/@var{suffix}/usr/include} instead of
 @file{@var{dir}/usr/include}.  This option disables the addition of
 such a suffix.
-
-@end table
-
-@node Picolibc Options
-@section Options for use with Picolibc
-@cindex picolibc options
-@cindex options, picolibc
-
-These options control compilation and linking when using picolibc:
-
-@table @gcctabopt
-@opindex oslib
-@item --oslib=@var{library}
-Search the library named @var{library} after the C library, permitting
-symbols undefined by the C library to be defined by this library. The
-C library, libgcc and this library are placed between
-@option{--start-group} and @option{--end-group} flags so that each can
-refer to symbols in the others. For many targets, picolibc provides a
-@samp{semihost} variant (specified with @option{--oslib=semihost})
-which provides enough basic OS functionality to support console and
-file I/O when run in an emulator or when using an in-circuit debugger.
-
-@opindex crt0
-@item --crt0=@r{[}none@r{|}minimal@r{|}hosted@r{|}semihost@r{]}
-Replace the default @file{crt0.o} name with
-@file{crt0-@var{variant}.o}. The @samp{none} variant provides no
-startup code at all, allowing the user to supply their
-own. @samp{minimal} performs basic memory setup but does not invoke
-any constructors. When no @option{-crt0} option is provided, the
-default initialization code adds calls to all
-constructors. @samp{hosted} adds a call to @code{exit} when
-@code{main} returns. @samp{semihost} accesses a command line parameter
-supplied via the semihosting interface and splits that into arguments
-at whitespace boundaries, passing the resulting array of strings to
-main in @code{argc} and @code{argv}. On some targets, including
-aarch64, arc, arm, loongarch, m68k, riscv, super-h and x86,
-@samp{semihost} also traps hardware exceptions and prints information
-to the console. Note that @option{--crt0=semihost} depends upon APIs
-provided by @option{--oslib=semihost}.
-
-@opindex printf
-@item --printf=@r{[}d@r{|}f@r{|}l@r{|}i@r{|}m@r{]}
-Select the printf variant. Picolibc provides five different printf
-variants which offer decreasing levels of functionality along with
-decreasing code size. @samp{d} is the default level, offering full C17
-and POSIX.1-2024 conformance. @samp{f} provides the same feature set,
-but supports @code{float} values instead of @code{double} which are
-passed using the @code{printf_float} macro. @samp{l} elides all
-floating point and POSIX positional parameter support. @samp{i} limits
-integers to those no larger than @code{long}. @samp{m} removes support
-for most formatting options including width and precision. The formats
-and arguments are still parsed correctly, but output does not respect
-those parameters.
-
-@opindex scanf
-@item --scanf=@r{[}d@r{|}f@r{|}l@r{|}i@r{|}m@r{]}
-Select the scanf variant. Picolibc provides five different scanf
-variants which offer decreasing levels of functionality along with
-decreasing code size. @samp{d} is the default level, offering full C17
-and POSIX.1-2024 conformance. @samp{f} removes support for
-@code{double} values. @samp{l} elides all floating point
-support. @samp{i} limits integers to those no larger than
-@code{long}. @samp{m} removes support for @code{%[} conversion specifiers.
 
 @end table
 
@@ -21178,27 +21141,30 @@ problems or, in some cases, to provide workarounds for compiler bugs.
 for documentation of these internal parameters.
 @end table
 
-@node Submodel Options
-@section Machine-Dependent Options
+@anchor{Submodel Options}
+@node Target-Specific Options
+@section Target-Specific Options
 @cindex submodel options
-@cindex specifying hardware config
-@cindex hardware models and configurations, specifying
-@cindex target-dependent options
-@cindex machine-dependent options
+@cindex hardware-specific options
+@cindex target-specific options
+@cindex machine-specific options
+@cindex architecture-specific options
+@cindex operating-system-specific options
 
 Each target machine supported by GCC can have its own options---for
 example, to allow you to compile for a particular processor variant or
-ABI, or to control optimizations specific to that machine.  By
-convention, the names of machine-specific options start with
-@samp{-m}.
+ABI, or to control optimizations specific to that machine.  Similarly,
+GCC also has options that are specific to particular operating systems
+or runtime environments on the target.
 
-Some configurations of the compiler also support additional target-specific
-options, usually for compatibility with other compilers on the same
-platform.
+By convention, the names of machine-specific options start with
+@samp{-m}.  Some configurations of the compiler also support
+additional target-specific options, usually for compatibility with
+other compilers on the same platform.
 
 @c This list is ordered alphanumerically by subsection name.
 @c It should be the same order and spelling as these options are listed
-@c in Machine Dependent Options
+@c in Target-Specific Options
 
 @menu
 * AArch64 Options::
@@ -21239,6 +21205,7 @@ platform.
 * Nvidia PTX Options::
 * OpenRISC Options::
 * PDP-11 Options::
+* Picolibc Options::
 * PowerPC Options::
 * PRU Options::
 * RISC-V Options::
@@ -21554,8 +21521,8 @@ performance of the code.  Permissible values for this option are:
 @samp{oryon-1},
 @samp{neoverse-512tvb}, @samp{neoverse-e1}, @samp{neoverse-n1},
 @samp{neoverse-n2}, @samp{neoverse-v1}, @samp{neoverse-v2}, @samp{grace},
-@samp{neoverse-v3}, @samp{neoverse-v3ae}, @samp{neoverse-n3}, @samp{olympus},
-@samp{cortex-a725}, @samp{cortex-x925},
+@samp{neoverse-v3}, @samp{neoverse-v3ae}, @samp{armagicpu}, @samp{neoverse-n3},
+@samp{olympus}, @samp{cortex-a725}, @samp{cortex-x925},
 @samp{qdf24xx}, @samp{saphira}, @samp{phecda}, @samp{xgene1}, @samp{vulcan},
 @samp{octeontx}, @samp{octeontx81},  @samp{octeontx83},
 @samp{octeontx2}, @samp{octeontx2t98}, @samp{octeontx2t96}
@@ -21573,7 +21540,7 @@ performance of the code.  Permissible values for this option are:
 @samp{cortex-a520}, @samp{cortex-a520ae}, @samp{cortex-a710}, @samp{cortex-a715},
 @samp{cortex-a720}, @samp{cortex-a720ae}, @samp{ampere1}, @samp{ampere1a},
 @samp{ampere1b}, @samp{ampere1c}, @samp{cobalt-100}, @samp{apple-m1},
-@samp{apple-m2}, @samp{apple-m3}, @samp{apple-m4}, @samp{c1-nano},
+@samp{apple-m2}, @samp{apple-m3}, @samp{apple-m4}, @samp{apple-m5}, @samp{c1-nano},
 @samp{c1-pro}, @samp{c1-premium} @samp{c1-ultra} and @samp{native}.
 
 The values @samp{cortex-a57.cortex-a53}, @samp{cortex-a72.cortex-a53},
@@ -21721,6 +21688,13 @@ register allocation.  Enabled by default at @samp{-O} and above.
 @itemx -mno-late-ldp-fusion
 Enable the copy of the AArch64 load/store pair fusion pass that runs after
 register allocation.  Enabled by default at @samp{-O} and above.
+
+@opindex mnarrow-gp-writes
+@item -mnarrow-gp-writes
+Enable conversion of 64-bit general purpose register writes to equivalent 32-bit
+operations when the upper 32 bits are known to be zero.  This pass can be
+controlled with -mnarrow-gp-writes and is active at -O2 and above, but not
+enabled by default, except for @option{-mcpu=olympus}.
 
 @opindex msve-vector-bits
 @item -msve-vector-bits=@var{bits}
@@ -21953,6 +21927,41 @@ Enable the SVE non-widening brain floating-point (@code{bf16}) extension.
 This only has an effect when @code{sve2} or @code{sme2} are also enabled.
 @item sve-bfscale
 Enable the SVE_BFSCALE extension.
+@item poe2
+Enable the Permission Overlays Extension 2.
+@item tev
+Enable the TIndex Exception-like Vector Extension.
+@item tlbid
+Enable the TLBI Domains Extension.
+@item gcie
+Enable the GICv5 (Generic Interrupt Controller) CPU Interface Extension.
+@item mpamv2
+Enable MPAMv2 system registers.
+@item lscp
+Enable the load acquire and store release pair extension.
+@item mops-go
+Enable tag only variants of MOPS instructions.  This also enables the
+instructions to accelerate memory operations and Armv8.5-a Memory
+Tagging Extensions.
+@item sve2p3
+Enable SVE2.3.  This also enables SVE2.2 instructions.
+@item sme2p3
+Enable SME2.3.  This also enables SME2.2 instructions.
+@item f16f32dot
+Enable Armv9.7-a f16f32dot instructions.  This also enables Advanced SIMD,
+floating-point instructions and Armv8.2-a FP16 instructions.
+@item sve-b16mm
+Enable the SVE B16MM Extension.  This also enables SVE instructions, Advanced
+SIMD and floating-point instructions.
+@item mtetc
+Enable Data cache tag block operations.  This also enables Armv8.5-a Memory
+Tagging Extensions.
+@item f16f32mm
+Enable Armv9.7-a f16f32mm instructions.  This also enables Advanced SIMD,
+floating-point instructions and Armv8.2-a FP16 instructions.
+@item f16mm
+Enable f16mm instructions.  This also enables Advanced SIMD,
+floating-point instructions and Armv8.2-a FP16 instructions.
 @end table
 
 Feature @option{crypto} implies @option{aes}, @option{sha2}, and @option{simd},
@@ -23674,7 +23683,7 @@ instructions on @samp{cortex-m52}, @samp{cortex-m55} and @samp{cortex-m85}.
 @item +cdecp0, +cdecp1, ... , +cdecp7
 Enable the Custom Datapath Extension (CDE) on selected coprocessors according
 to the numbers given in the options in the range 0 to 7 on @samp{cortex-m52},
-@samp{cortex-m55} and @samp{star-mc1}.
+@samp{cortex-m55}, @samp{cortex-m85} and @samp{star-mc1}.
 
 @item  +nofp
 Disables the floating-point instructions on @samp{arm9e},
@@ -30584,7 +30593,7 @@ supported.
 Generate code for the specified PTX ISA target architecture.
 Valid architecture strings are
 @samp{sm_30}, @samp{sm_35}, @samp{sm_37},
-@samp{sm_52}, @samp{sm_53},
+@samp{sm_50}, @samp{sm_52}, @samp{sm_53},
 @samp{sm_61},
 @samp{sm_70}, @samp{sm_75},
 @samp{sm_80}, and @samp{sm_89}.
@@ -30611,7 +30620,7 @@ capable.  For instance, for @option{-march-map=sm_50} select
 Generate code for the specified PTX ISA version.
 Valid version strings are
 @samp{3.1},
-@samp{4.1}, @samp{4.2},
+@samp{4.0}, @samp{4.1}, @samp{4.2},
 @samp{5.0},
 @samp{6.0}, @samp{6.3},
 @samp{7.0}, @samp{7.3}, and @samp{7.8}.
@@ -30859,6 +30868,71 @@ Use GNU assembler syntax.  This is the default.
 @item -mlra
 Use the new LRA register allocator.  By default, the old ``reload''
 allocator is used.
+@end table
+
+@node Picolibc Options
+@subsection Picolibc Options
+@cindex Picolibc options
+@cindex options, Picolibc
+
+These options control compilation and linking when using Picolibc:
+
+@table @gcctabopt
+@opindex oslib
+@item --oslib=@var{library}
+Search the library named @var{library} after the C library, permitting
+symbols undefined by the C library to be defined by this library. The
+C library, libgcc and this library are placed between
+@option{--start-group} and @option{--end-group} flags so that each can
+refer to symbols in the others. For many targets, Picolibc provides a
+@samp{semihost} variant (specified with @option{--oslib=semihost})
+which provides enough basic OS functionality to support console and
+file I/O when run in an emulator or when using an in-circuit debugger.
+
+@opindex crt0
+@item --crt0=@r{[}none@r{|}minimal@r{|}hosted@r{|}semihost@r{]}
+Replace the default @file{crt0.o} name with
+@file{crt0-@var{variant}.o}. The @samp{none} variant provides no
+startup code at all, allowing you to supply your
+own. @samp{minimal} performs basic memory setup but does not invoke
+any constructors. When no @option{-crt0} option is provided, the
+default initialization code adds calls to all
+constructors. @samp{hosted} adds a call to @code{exit} when
+@code{main} returns. @samp{semihost} accesses a command-line parameter
+supplied via the semihosting interface and splits that into arguments
+at whitespace boundaries, passing the resulting array of strings to
+@code{main} in @code{argc} and @code{argv}. On some targets, including
+AArch64, ARC, ARM, LoongArch, M680x0, RISC-V, SH, and x86,
+@samp{semihost} also traps hardware exceptions and prints information
+to the console. Note that @option{--crt0=semihost} depends upon APIs
+provided by @option{--oslib=semihost}.
+
+@opindex printf
+@item --printf=@r{[}d@r{|}f@r{|}l@r{|}i@r{|}m@r{]}
+Select the @code{printf} variant.
+Picolibc provides five different @code{printf}
+variants which offer decreasing levels of functionality along with
+decreasing code size. @samp{d} is the default level, offering full C17
+and POSIX.1-2024 conformance. @samp{f} provides the same feature set,
+but supports @code{float} values instead of @code{double} which are
+passed using the @code{printf_float} macro. @samp{l} elides all
+floating-point and POSIX positional parameter support. @samp{i} limits
+integers to those no larger than @code{long}. @samp{m} removes support
+for most formatting options including width and precision. The formats
+and arguments are still parsed correctly, but output does not respect
+those parameters.
+
+@opindex scanf
+@item --scanf=@r{[}d@r{|}f@r{|}l@r{|}i@r{|}m@r{]}
+Select the @code{scanf} variant.
+Picolibc provides five different @code{scanf}
+variants which offer decreasing levels of functionality along with
+decreasing code size. @samp{d} is the default level, offering full C17
+and POSIX.1-2024 conformance. @samp{f} removes support for
+@code{double} values. @samp{l} elides all floating point
+support. @samp{i} limits integers to those no larger than
+@code{long}. @samp{m} removes support for @samp{%[} conversion specifiers.
+
 @end table
 
 @node PowerPC Options
@@ -34837,7 +34911,7 @@ instruction set support.
 
 @item nocona
 Improved version of Intel Pentium 4 CPU with 64-bit extensions, MMX, SSE,
-SSE2, SSE3 and FXSR instruction set support.
+SSE2, SSE3, CX16 and FXSR instruction set support.
 
 @item core2
 Intel Core 2 CPU with 64-bit extensions, MMX, SSE, SSE2, SSE3, SSSE3, CX16,
@@ -34950,7 +35024,8 @@ VPCLMULQDQ, AVX512BITALG, RDPID and AVX512VPOPCNTDQ instruction set support.
 @itemx meteorlake
 @itemx gracemont
 Intel Alder Lake/Raptor Lake/Meteor Lake/Gracemont CPU with 64-bit extensions,
-MOVBE, MMX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, POPCNT, AES, PREFETCHW,
+MOVBE, MMX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, POPCNT, CX16,
+AES, PREFETCHW,
 PCLMUL, RDRND, XSAVE, XSAVEC, XSAVES, XSAVEOPT, FSGSBASE, PTWRITE, RDPID, SGX,
 GFNI-SSE, CLWB, MOVDIRI, MOVDIR64B, WAITPKG, ADCX, AVX, AVX2, BMI, BMI2, F16C,
 FMA, LZCNT, PCONFIG, PKU, VAES, VPCLMULQDQ, SERIALIZE, HRESET, KL, WIDEKL and
@@ -34958,7 +35033,8 @@ AVX-VNNI instruction set support.
 
 @item arrowlake
 Intel Arrow Lake CPU with 64-bit extensions, MOVBE, MMX, SSE, SSE2, SSE3,
-SSSE3, SSE4.1, SSE4.2, POPCNT, AES, PREFETCHW, PCLMUL, RDRND, XSAVE, XSAVEC,
+SSSE3, SSE4.1, SSE4.2, POPCNT, CX16,
+AES, PREFETCHW, PCLMUL, RDRND, XSAVE, XSAVEC,
 XSAVES, XSAVEOPT, FSGSBASE, PTWRITE, RDPID, SGX, GFNI-SSE, CLWB, MOVDIRI,
 MOVDIR64B, WAITPKG, ADCX, AVX, AVX2, BMI, BMI2, F16C, FMA, LZCNT, PCONFIG, PKU,
 VAES, VPCLMULQDQ, SERIALIZE, HRESET, KL, WIDEKL, AVX-VNNI, UINTR, AVXIFMA,
@@ -34967,7 +35043,7 @@ AVXVNNIINT8, AVXNECONVERT and CMPCCXADD instruction set support.
 @item arrowlake-s
 @itemx lunarlake
 Intel Arrow Lake S/Lunar Lake CPU with 64-bit extensions, MOVBE, MMX, SSE,
-SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, POPCNT, AES, PREFETCHW, PCLMUL, RDRND,
+SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, POPCNT, CX16, AES, PREFETCHW, PCLMUL, RDRND,
 XSAVE, XSAVEC, XSAVES, XSAVEOPT, FSGSBASE, PTWRITE, RDPID, SGX, GFNI-SSE, CLWB,
 MOVDIRI, MOVDIR64B, WAITPKG, ADCX, AVX, AVX2, BMI, BMI2, F16C, FMA, LZCNT,
 PCONFIG, PKU, VAES, VPCLMULQDQ, SERIALIZE, HRESET, KL, WIDEKL, AVX-VNNI, UINTR,
@@ -34977,7 +35053,7 @@ SM4 instruction set support.
 @item pantherlake
 @itemx wildcatlake
 Intel Panther Lake/Wildcat Lake CPU with 64-bit extensions, MOVBE, MMX, SSE,
-SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, POPCNT, AES, PREFETCHW, PCLMUL, RDRND,
+SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, POPCNT, CX16, AES, PREFETCHW, PCLMUL, RDRND,
 XSAVE, XSAVEC, XSAVES, XSAVEOPT, FSGSBASE, PTWRITE, RDPID, SGX, GFNI-SSE,
 CLWB, MOVDIRI, MOVDIR64B, WAITPKG, ADCX, AVX, AVX2, BMI, BMI2, F16C, FMA,
 LZCNT, PCONFIG, PKU, VAES, VPCLMULQDQ, SERIALIZE, HRESET, AVX-VNNI, UINTR,
@@ -34986,7 +35062,8 @@ SM4 instruction set support.
 
 @item novalake
 Intel Nova Lake CPU with 64-bit extensions, MOVBE, MMX, SSE, SSE2, SSE3,
-SSSE3, SSE4.1, SSE4.2, POPCNT, AES, PREFETCHW, PCLMUL, RDRND, XSAVE, XSAVEC,
+SSSE3, SSE4.1, SSE4.2, POPCNT, CX16,
+AES, PREFETCHW, PCLMUL, RDRND, XSAVE, XSAVEC,
 XSAVES, XSAVEOPT, FSGSBASE, PTWRITE, RDPID, SGX, GFNI-SSE, CLWB, MOVDIRI,
 MOVDIR64B, WAITPKG, ADCX, AVX, AVX2, BMI, BMI2, F16C, FMA, LZCNT, PCONFIG, PKU,
 VAES, VPCLMULQDQ, SERIALIZE, HRESET, AVX-VNNI, UINTR, AVXIFMA, AVXVNNIINT8,
@@ -35042,8 +35119,8 @@ AMX-FP8, AMX-TF32, MOVRS and AMX-MOVRS instruction set support.
 
 @item bonnell
 @itemx atom
-Intel Bonnell CPU with 64-bit extensions, MOVBE, MMX, SSE, SSE2, SSE3 and SSSE3
-instruction set support.
+Intel Bonnell CPU with 64-bit extensions, MOVBE, MMX, SSE, SSE2, SSE3, SSSE3
+and CX16 instruction set support.
 
 @item silvermont
 @itemx slm
@@ -35072,7 +35149,8 @@ support.
 
 @item sierraforest
 Intel Sierra Forest CPU with 64-bit extensions, MOVBE, MMX, SSE, SSE2, SSE3,
-SSSE3, SSE4.1, SSE4.2, POPCNT, AES, PREFETCHW, PCLMUL, RDRND, XSAVE, XSAVEC,
+SSSE3, SSE4.1, SSE4.2, POPCNT, CX16,
+AES, PREFETCHW, PCLMUL, RDRND, XSAVE, XSAVEC,
 XSAVES, XSAVEOPT, FSGSBASE, PTWRITE, RDPID, SGX, GFNI-SSE, CLWB, MOVDIRI,
 MOVDIR64B, CLDEMOTE, WAITPKG, ADCX, AVX, AVX2, BMI, BMI2, F16C, FMA, LZCNT,
 PCONFIG, PKU, VAES, VPCLMULQDQ, SERIALIZE, HRESET, KL, WIDEKL, AVX-VNNI,
@@ -35081,7 +35159,8 @@ support.
 
 @item grandridge
 Intel Grand Ridge CPU with 64-bit extensions, MOVBE, MMX, SSE, SSE2, SSE3,
-SSSE3, SSE4.1, SSE4.2, POPCNT, AES, PREFETCHW, PCLMUL, RDRND, XSAVE, XSAVEC,
+SSSE3, SSE4.1, SSE4.2, POPCNT, CX16,
+AES, PREFETCHW, PCLMUL, RDRND, XSAVE, XSAVEC,
 XSAVES, XSAVEOPT, FSGSBASE, PTWRITE, RDPID, SGX, GFNI-SSE, CLWB, MOVDIRI,
 MOVDIR64B, CLDEMOTE, WAITPKG, ADCX, AVX, AVX2, BMI, BMI2, F16C, FMA, LZCNT,
 PCONFIG, PKU, VAES, VPCLMULQDQ, SERIALIZE, HRESET, KL, WIDEKL, AVX-VNNI,
@@ -35090,7 +35169,8 @@ support.
 
 @item clearwaterforest
 Intel Clearwater Forest CPU with 64-bit extensions, MOVBE, MMX, SSE, SSE2,
-SSE3, SSSE3, SSE4.1, SSE4.2, POPCNT, AES, PREFETCHW, PCLMUL, RDRND, XSAVE,
+SSE3, SSSE3, SSE4.1, SSE4.2, POPCNT, CX16,
+AES, PREFETCHW, PCLMUL, RDRND, XSAVE,
 XSAVEC, XSAVES, XSAVEOPT, FSGSBASE, PTWRITE, RDPID, SGX, GFNI-SSE, CLWB,
 MOVDIRI, MOVDIR64B, CLDEMOTE, WAITPKG, ADCX, AVX, AVX2, BMI, BMI2, F16C, FMA,
 LZCNT, PCONFIG, PKU, VAES, VPCLMULQDQ, SERIALIZE, HRESET, AVX-VNNI, ENQCMD,
@@ -35132,7 +35212,7 @@ Improved versions of AMD K8 cores with SSE3 instruction set support.
 @item amdfam10
 @itemx barcelona
 CPUs based on AMD Family 10h cores with x86-64 instruction set support.  (This
-supersets MMX, SSE, SSE2, SSE3, SSE4A, 3DNow!, enhanced 3DNow!, ABM and 64-bit
+supersets CX16, MMX, SSE, SSE2, SSE3, SSE4A, 3DNow!, enhanced 3DNow!, ABM and 64-bit
 instruction set extensions.)
 
 @item bdver1
@@ -37405,27 +37485,24 @@ GNU Compiler Collection (GCC) Internals}.
 @c @itemx LC_TIME
 @itemx LC_ALL
 These environment variables control the way that GCC uses
-localization information which allows GCC to work with different
-national conventions.  GCC inspects the locale categories
+localization information that allows GCC to work with different
+national conventions for diagnostic and informational output.
+GCC inspects the locale categories
 @env{LC_CTYPE} and @env{LC_MESSAGES} if it has been configured to do
 so.  These locale categories can be set to any value supported by your
 installation.  A typical value is @samp{en_GB.UTF-8} for English in the United
 Kingdom encoded in UTF-8.
-
-The @env{LC_CTYPE} environment variable specifies character
-classification.  GCC uses it to determine the character boundaries in
-a string; this is needed for some multibyte encodings that contain quote
-and escape characters that are otherwise interpreted as a string
-end or escape.
-
-The @env{LC_MESSAGES} environment variable specifies the language to
-use in diagnostic messages.
 
 If the @env{LC_ALL} environment variable is set, it overrides the value
 of @env{LC_CTYPE} and @env{LC_MESSAGES}; otherwise, @env{LC_CTYPE}
 and @env{LC_MESSAGES} default to the value of the @env{LANG}
 environment variable.  If none of these variables are set, GCC
 defaults to traditional C English behavior.
+
+These environment variables do not affect the encodings of input files
+and strings in output files produced by GCC, which are controlled by the
+@option{-finput-charset} and @option{-fexec-charset} options, respectively.
+@xref{Preprocessor Options}.
 
 @vindex TMPDIR
 @item TMPDIR
@@ -37502,28 +37579,6 @@ linker files, if it cannot find them using @env{GCC_EXEC_PREFIX}.  Linking
 using GCC also uses these directories when searching for ordinary
 libraries for the @option{-l} option (but directories specified with
 @option{-L} come first).
-
-@vindex LANG
-@cindex locale definition
-@item LANG
-This variable is used to pass locale information to the compiler.  One way in
-which this information is used is to determine the character set to be used
-when character literals, string literals and comments are parsed in C and C++.
-When the compiler is configured to allow multibyte characters,
-the following values for @env{LANG} are recognized:
-
-@table @samp
-@item C-JIS
-Recognize JIS characters.
-@item C-SJIS
-Recognize SJIS characters.
-@item C-EUCJP
-Recognize EUCJP characters.
-@end table
-
-If @env{LANG} is not defined, or if it has some other value, then the
-compiler uses @code{mblen} and @code{mbtowc} as defined by the default locale to
-recognize and translate multibyte characters.
 
 @vindex GCC_EXTRA_DIAGNOSTIC_OUTPUT
 @item GCC_EXTRA_DIAGNOSTIC_OUTPUT
@@ -37663,7 +37718,7 @@ a precompiled header built using @option{-g} can be used in a compilation
 when no debugging information is being output.
 
 @item The same @option{-m} options must generally be used when building
-and using the precompiled header.  @xref{Submodel Options},
+and using the precompiled header.  @xref{Target-Specific Options},
 for any cases where this rule is relaxed.
 
 @item Each of the following options must be the same when building and using

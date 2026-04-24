@@ -2550,7 +2550,7 @@ start_over:
 
   /* Check the costings of the loop make vectorizing worthwhile.  */
   res = vect_analyze_loop_costing (loop_vinfo, suggested_unroll_factor);
-  if (res < 0)
+  if (res < 0 && !param_vect_allow_possibly_not_worthwhile_vectorizations)
     {
       ok = opt_result::failure_at (vect_location,
 				   "Loop costings may not be worthwhile.\n");
@@ -4089,8 +4089,7 @@ vect_estimate_min_profitable_iters (loop_vec_info loop_vinfo,
      TODO: Consider assigning different costs to different scalar
      statements.  */
 
-  scalar_single_iter_cost = (loop_vinfo->scalar_costs->total_cost ()
-			     * param_vect_scalar_cost_multiplier) / 100;
+  scalar_single_iter_cost = loop_vinfo->scalar_costs->total_cost ();
 
   /* Add additional cost for the peeled instructions in prologue and epilogue
      loop.  (For fully-masked loops there will be no peeling.)
@@ -8863,7 +8862,13 @@ vectorizable_recurr (loop_vec_info loop_vinfo, stmt_vec_info stmt_info,
   edge le = loop_latch_edge (LOOP_VINFO_LOOP (loop_vinfo));
   gimple *latch_def = SSA_NAME_DEF_STMT (PHI_ARG_DEF_FROM_EDGE (phi, le));
   gimple_stmt_iterator gsi2 = gsi_for_stmt (latch_def);
-  gsi_next (&gsi2);
+  do
+    {
+      gsi_next (&gsi2);
+    }
+  /* Skip inserted vectorized stmts for the latch definition.  We have to
+     insert after those.  */
+  while (gimple_uid (gsi_stmt (gsi2)) == 0);
 
   for (unsigned i = 0; i < ncopies; ++i)
     {

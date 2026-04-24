@@ -759,7 +759,7 @@ public:
        `assert(0)` if ever read.  */
     if (d->type->isTypeNoreturn ())
       {
-	if (!d->isDataseg () && !d->isMember ()
+	if (!d->isDataseg () && !d->isMember () && !d->isRef ()
 	    && d->_init && !d->_init->isVoidInitializer ())
 	  {
 	    /* Evaluate RHS for side effects first.  */
@@ -1053,7 +1053,7 @@ public:
 
 	if (d->isNRVO () && d->nrvo_var)
 	  var = get_symbol_decl (d->nrvo_var);
-	else if (d->vresult)
+	else if (d->vresult && !d->vresult->isRef ())
 	  var = get_symbol_decl (d->vresult);
 
 	if (var != NULL_TREE)

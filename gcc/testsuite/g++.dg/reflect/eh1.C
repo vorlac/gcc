@@ -146,9 +146,6 @@ eval (int n)
     case 46:
       is_aggregate_type (^^n);
       break;
-    case 47:
-      is_consteval_only_type (^^n);
-      break;
     case 48:
       is_signed_type (^^n);
       break;
@@ -257,6 +254,9 @@ eval (int n)
     case 84:
       unwrap_ref_decay (^^n);
       break;
+    case 85:
+      is_structural_type (^^n);
+      break;
    default:
       break;
     }
@@ -316,7 +316,6 @@ static_assert (test (43));
 static_assert (test (44));
 static_assert (test (45));
 static_assert (test (46));
-static_assert (test (47));
 static_assert (test (48));
 static_assert (test (49));
 static_assert (test (50));
@@ -353,3 +352,4 @@ static_assert (test (81));
 static_assert (test (82));
 static_assert (test (83));
 static_assert (test (84));
+static_assert (test (85));

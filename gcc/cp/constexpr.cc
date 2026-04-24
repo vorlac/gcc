@@ -1804,10 +1804,10 @@ enum cxa_builtin {
   CXA_BAD_CAST = 8,
   CXA_BAD_TYPEID = 9,
   CXA_THROW_BAD_ARRAY_NEW_LENGTH = 10,
-  STD_UNCAUGHT_EXCEPTIONS = 11,
-  STD_CURRENT_EXCEPTION = 12,
-  STD_RETHROW_EXCEPTION = 13,
-  BUILTIN_EH_PTR_ADJUST_REF = 14
+  STD_RETHROW_EXCEPTION = 11,
+  BUILTIN_EH_PTR_ADJUST_REF = 12,
+  BUILTIN_UNCAUGHT_EXCEPTIONS = 13,
+  BUILTIN_CURRENT_EXCEPTION = 14
 };
 
 /* Return cxa_builtin if FNDECL is a __cxa_* function handled as
@@ -1822,10 +1822,6 @@ cxx_cxa_builtin_fn_p (tree fndecl)
     {
       if (!decl_in_std_namespace_p (fndecl))
 	return CXA_NONE;
-      if (id_equal (DECL_NAME (fndecl), "uncaught_exceptions"))
-	return STD_UNCAUGHT_EXCEPTIONS;
-      if (id_equal (DECL_NAME (fndecl), "current_exception"))
-	return STD_CURRENT_EXCEPTION;
       if (id_equal (DECL_NAME (fndecl), "rethrow_exception"))
 	return STD_RETHROW_EXCEPTION;
       return CXA_NONE;
@@ -2186,7 +2182,7 @@ cxx_eval_cxa_builtin_fn (const constexpr_ctx *ctx, tree call,
 	  *jump_target = var;
 	}
       return void_node;
-    case STD_UNCAUGHT_EXCEPTIONS:
+    case BUILTIN_UNCAUGHT_EXCEPTIONS:
       if (nargs != 0)
 	goto invalid_nargs;
       /* Similarly to __builtin_is_constant_evaluated (), we don't
@@ -2202,7 +2198,7 @@ cxx_eval_cxa_builtin_fn (const constexpr_ctx *ctx, tree call,
 	}
       return build_int_cst (integer_type_node,
 			    ctx->global->uncaught_exceptions);
-    case STD_CURRENT_EXCEPTION:
+    case BUILTIN_CURRENT_EXCEPTION:
       if (nargs != 0)
 	goto invalid_nargs;
       else
@@ -2489,40 +2485,53 @@ cxx_eval_builtin_function_call (const constexpr_ctx *ctx, tree t, tree fun,
       return t;
     }
 
-  /* For __builtin_is_constant_evaluated, defer it if not
-     ctx->manifestly_const_eval (as sometimes we try to constant evaluate
-     without manifestly_const_eval even expressions or parts thereof which
-     will later be manifestly const_eval evaluated), otherwise fold it to
-     true.  */
-  if (fndecl_built_in_p (fun, CP_BUILT_IN_IS_CONSTANT_EVALUATED,
-			 BUILT_IN_FRONTEND))
-    {
-      if (ctx->manifestly_const_eval == mce_unknown)
+  if (fndecl_built_in_p (fun, BUILT_IN_FRONTEND))
+    switch (DECL_FE_FUNCTION_CODE (fun))
+      {
+      case CP_BUILT_IN_IS_CONSTANT_EVALUATED:
+	/* For __builtin_is_constant_evaluated, defer it if not
+	   ctx->manifestly_const_eval (as sometimes we try to constant evaluate
+	   without manifestly_const_eval even expressions or parts thereof
+	   which will later be manifestly const_eval evaluated), otherwise fold
+	   it to true.  */
+	if (ctx->manifestly_const_eval == mce_unknown)
+	  {
+	    *non_constant_p = true;
+	    return t;
+	  }
+	return constant_boolean_node (ctx->manifestly_const_eval == mce_true,
+				      boolean_type_node);
+
+      case CP_BUILT_IN_SOURCE_LOCATION:
 	{
-	  *non_constant_p = true;
-	  return t;
+	  temp_override<tree> ovr (current_function_decl);
+	  if (ctx->call && ctx->call->fundef)
+	    current_function_decl = ctx->call->fundef->decl;
+	  return fold_builtin_source_location (t);
 	}
-      return constant_boolean_node (ctx->manifestly_const_eval == mce_true,
-				    boolean_type_node);
-    }
 
-  if (fndecl_built_in_p (fun, CP_BUILT_IN_SOURCE_LOCATION, BUILT_IN_FRONTEND))
-    {
-      temp_override<tree> ovr (current_function_decl);
-      if (ctx->call && ctx->call->fundef)
-	current_function_decl = ctx->call->fundef->decl;
-      return fold_builtin_source_location (t);
-    }
+      case CP_BUILT_IN_EH_PTR_ADJUST_REF:
+	return cxx_eval_cxa_builtin_fn (ctx, t, BUILTIN_EH_PTR_ADJUST_REF,
+					fun, non_constant_p, overflow_p,
+					jump_target);
 
-  if (fndecl_built_in_p (fun, CP_BUILT_IN_EH_PTR_ADJUST_REF,
-			 BUILT_IN_FRONTEND))
-    return cxx_eval_cxa_builtin_fn (ctx, t, BUILTIN_EH_PTR_ADJUST_REF,
-				    fun, non_constant_p, overflow_p,
-				    jump_target);
+      case CP_BUILT_IN_CURRENT_EXCEPTION:
+	return cxx_eval_cxa_builtin_fn (ctx, t, BUILTIN_CURRENT_EXCEPTION,
+					fun, non_constant_p, overflow_p,
+					jump_target);
 
-  if (fndecl_built_in_p (fun, CP_BUILT_IN_CONSTEXPR_DIAG, BUILT_IN_FRONTEND))
-    return cxx_eval_constexpr_diag (ctx, t, non_constant_p, overflow_p,
-				    jump_target);
+      case CP_BUILT_IN_UNCAUGHT_EXCEPTIONS:
+	return cxx_eval_cxa_builtin_fn (ctx, t, BUILTIN_UNCAUGHT_EXCEPTIONS,
+					fun, non_constant_p, overflow_p,
+					jump_target);
+
+      case CP_BUILT_IN_CONSTEXPR_DIAG:
+	return cxx_eval_constexpr_diag (ctx, t, non_constant_p, overflow_p,
+					jump_target);
+
+      default:
+	break;
+      }
 
   int strops = 0;
   int strret = 0;
@@ -4386,6 +4395,16 @@ cxx_eval_call_expression (const constexpr_ctx *ctx, tree t,
 	      *entry = new_call;
 	      entry->result (ctx->manifestly_const_eval) = unknown_type_node;
 	      fb.preserve ();
+
+	      /* Unshare args going into the hash table to separate them
+		 from the caller's context, for better GC and to avoid
+		 problems with verify_gimple.  */
+	      tree bound = new_call.bindings;
+	      for (int i = 0; i < TREE_VEC_LENGTH (bound); ++i)
+		{
+		  tree &arg = TREE_VEC_ELT (bound, i);
+		  arg = unshare_expr_without_location (arg);
+		}
 	    }
 	}
       /* Calls that are in progress have their result set to unknown_type_node,
@@ -4444,13 +4463,7 @@ cxx_eval_call_expression (const constexpr_ctx *ctx, tree t,
 	      tree arg = TREE_VEC_ELT (bound, i);
 	      if (entry)
 		{
-		  /* Unshare args going into the hash table to separate them
-		     from the caller's context, for better GC and to avoid
-		     problems with verify_gimple.  */
-		  arg = unshare_expr_without_location (arg);
-		  TREE_VEC_ELT (bound, i) = arg;
-
-		  /* And then unshare again so the callee doesn't change the
+		  /* Unshare again so the callee doesn't change the
 		     argument values in the hash table. XXX Could we unshare
 		     lazily in cxx_eval_store_expression?  */
 		  arg = unshare_constructor (arg);
@@ -6683,8 +6696,17 @@ init_subob_ctx (const constexpr_ctx *ctx, constexpr_ctx &new_ctx,
   if (!AGGREGATE_TYPE_P (type) && !VECTOR_TYPE_P (type))
     /* A non-aggregate member doesn't get its own CONSTRUCTOR.  */
     return;
+
+  tree ctxtype = NULL_TREE;
+  if (ctx->ctor)
+    ctxtype = TREE_TYPE (ctx->ctor);
+  else if (ctx->object)
+    ctxtype = TREE_TYPE (ctx->object);
+  else
+    gcc_unreachable ();
+
   if (VECTOR_TYPE_P (type)
-      && VECTOR_TYPE_P (TREE_TYPE (ctx->ctor))
+      && VECTOR_TYPE_P (ctxtype)
       && index == NULL_TREE)
     /* A vector inside of a vector CONSTRUCTOR, e.g. when a larger
        vector is constructed from smaller vectors, doesn't get its own
@@ -6703,9 +6725,10 @@ init_subob_ctx (const constexpr_ctx *ctx, constexpr_ctx &new_ctx,
 	new_ctx.object = build_ctor_subob_ref (index, type, ctx->object);
     }
 
-  if (is_empty_class (type))
-    /* Leave ctor null for an empty subobject, they aren't represented in the
-       result of evaluation.  */
+  if (is_empty_class (type)
+      && TREE_CODE (ctxtype) != UNION_TYPE)
+    /* Leave ctor null for an empty subobject of a non-union class, they aren't
+       represented in the result of evaluation.  */
     new_ctx.ctor = NULL_TREE;
   else
     {
@@ -8184,6 +8207,16 @@ cxx_eval_store_expression (const constexpr_ctx *ctx, tree t,
 	  no_zero_init = true;
 	}
 
+      /* Ending the lifetime of the active union member means the union no
+	 longer has an active member.  */
+      if (code == UNION_TYPE && refs->is_empty ()
+	  && TREE_CLOBBER_P (init)
+	  && CLOBBER_KIND (init) >= CLOBBER_OBJECT_END)
+	{
+	  vec_safe_truncate (CONSTRUCTOR_ELTS (*valp), 0);
+	  return void_node;
+	}
+
       ctors.safe_push (valp);
       vec_safe_push (indexes, index);
 
@@ -9495,7 +9528,16 @@ cxx_eval_constant_expression (const constexpr_ctx *ctx, tree t,
 	if (ctx->save_exprs)
 	  ctx->save_exprs->safe_push (slot);
 	if (*jump_target)
-	  return NULL_TREE;
+	  {
+	    if (!is_complex
+		&& !(AGGREGATE_TYPE_P (type) || VECTOR_TYPE_P (type)))
+	      /* If TARGET_EXPR_INITIAL throws exception and slot's value
+		 has not been changed yet, CLEANUP_POINT_EXPR handling
+		 could see there void_node from a previous evaluation
+		 and complain.  */
+	      ctx->global->put_value (slot, NULL_TREE);
+	    return NULL_TREE;
+	  }
 	if (!is_complex)
 	  {
 	    r = unshare_constructor (r);

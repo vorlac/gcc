@@ -1,3 +1,131 @@
+2026-04-22  Eric Botcazou  <ebotcazou@adacore.com>
+
+	PR ada/85766
+	* libgnat/a-direct.adb (Containing_Directory): Streamline and strip
+	a trailing directory separator from the name.
+
+2026-04-22  Jakub Jelinek  <jakub@redhat.com>
+
+	* gnatvsn.ads: Bump Library_Version to 17.  Bump Current_Year to 2026.
+
+2026-04-20  Eric Botcazou  <ebotcazou@adacore.com>
+
+	PR ada/124918
+	* gcc-interface/Makefile.in (TOOLS1_LIBS): Restore.
+	(../../gnatmake$(exeext)): Link with $(TOOLS1_LIBS).
+	(../../gnatlink$(exeext)): Likewise.
+
+2026-04-19  Eric Botcazou  <ebotcazou@adacore.com>
+
+	PR ada/124918
+	* gcc-interface/Makefile.in (TGT_LIB): Move up.
+	(LIBBACKTRACE): Likewise.
+	(LIBIBERTY): Likewise.
+	(LIBGNAT): Likewise.
+	(LIBS): Likewise.
+	(TOOLS_LIBS): Use $(LIBS).
+	(TOOLS1_LIBS): Delete.
+	(../../gnatmake$(exeext)): Do not link with $(TOOLS1_LIBS).
+	(../../gnatlink$(exeext)): Likewise.
+
+2026-04-17  Eric Botcazou  <ebotcazou@adacore.com>
+
+	PR ada/107392
+	* sem_res.adb: Add clauses for Ttypes.
+	(Resolve.Patch_Up_Value): Do not try to convert real literals that
+	do not fit in Universal_Integer.
+
+2026-04-17  Eric Botcazou  <ebotcazou@adacore.com>
+
+	PR ada/107391
+	* urealp.adb (Decimal_Exponent_Hi): Check that the denominator is
+	in range before invoking UI_To_Int on it, and cope with failure.
+	(Decimal_Exponent_Lo): Likewise.
+
+2026-04-15  Eric Botcazou  <ebotcazou@adacore.com>
+
+	PR ada/105212
+	* exp_aggr.adb (Build_Array_Aggr_Code): If the aggregate comes from
+	source, call Set_Referenced_Modified on the target.
+
+2026-04-15  Eric Botcazou  <ebotcazou@adacore.com>
+
+	PR ada/87170
+	* sem_res.adb (Resolve_String_Literal): Copy Comes_From_Source from
+	the string literal to the character literals.
+
+2026-04-13  Eric Botcazou  <ebotcazou@adacore.com>
+
+	PR ada/95452
+	* libgnat/g-heasor.adb (Sort.Sift): Add guard against overflow.
+	* libgnat/g-hesorg.adb (Sort.Sift): Likewise.
+	* libgnat/g-hesora.adb (Sort.Sift): Likewise.  Restore consistency.
+
+2026-04-13  Eric Botcazou  <ebotcazou@adacore.com>
+
+	PR ada/77535
+	* libgnat/s-pehage.adb (New_Word): Rebase the input.
+
+2026-04-12  Eric Botcazou  <ebotcazou@adacore.com>
+
+	PR ada/124836
+	* adaint.c [__MINGW32__]: Do not include mingw32.h twice, and also
+	include sys/param.h.
+
+2026-04-07  Sandra Loosemore  <sloosemore@baylibre.com>
+
+	PR other/124784
+	* gcc-interface/lang.opt.urls: Regenerated.
+
+2026-04-05  Eric Botcazou  <ebotcazou@adacore.com>
+
+	* exp_ch6.adb (Expand_Simple_Function_Return): Use a constant return
+	object when the simple return is rewritten as an extended one.
+	* libgnat/s-secsta.adb (SS_Allocate): Raise Storage_Error if the
+	requested size is negative.
+	* libgnat/s-secsta__cheri.adb (SS_Allocate): Likewise.
+
+2026-04-03  Tonu Naks  <naks@adacore.com>
+
+	* doc/gnat_rm/gnat_language_extensions.rst: Adjust rules for
+	structural generic instantiations.
+	* gnat_rm.texi: Regenerate.
+
+2026-03-31  Eric Botcazou  <ebotcazou@adacore.com>
+
+	* sem_attr.adb (Analyze_Attribute) <Attribute_Reduce>: Rewrite the
+	analysis of a non-overloaded reducer.  Moreover, when both actuals
+	are overloaded, compute the set of possible interpretations.
+	(Resolve_Attribute) <Attribute_Reduce>: Streamline the processing.
+
+2026-03-27  Eric Botcazou  <ebotcazou@adacore.com>
+
+	* sem_ch12.adb (Analyze_Structural_Associations): Create a local
+	instance instead of a structural instance when a local entity of
+	a library-level package is used in a subprogram instantiation.
+
+2026-03-27  Eric Botcazou  <ebotcazou@adacore.com>
+
+	PR ada/124596
+	* sem_ch12.ads (Check_Private_View): Move around.
+	* sem_ch12.adb (Check_Private_View): Retrieve the partial view
+	by means of a call to Incomplete_Or_Partial_View.
+	(Save_Global_References.Set_Global_Type): Do not force the full
+	view of a type when only the partial declaration is visible.
+	* sem_res.adb (Resolve_Actuals.Insert_Default): Remove obsolete
+	code coping with the above kludge.
+
+2026-03-23  Eric Botcazou  <ebotcazou@adacore.com>
+
+	PR ada/124607
+	* sem_elab.adb (Has_Body.Find_Body): Fix thinko.
+
+2026-03-23  Eric Botcazou  <ebotcazou@adacore.com>
+
+	PR ada/124606
+	* sem_ch12.adb (Find_Actual_Type): Rename formal parameter.
+	(Map_Formal_Package_Entities): Do not register base types.
+
 2026-03-20  Eric Botcazou  <ebotcazou@adacore.com>
 
 	PR ada/120669

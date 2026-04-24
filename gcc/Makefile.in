@@ -1951,6 +1951,12 @@ $(ALL_HOST_BACKEND_OBJS): ALL_COMPILERFLAGS += -fauto-profile=all.fda
 $(ALL_HOST_BACKEND_OBJS): all.fda
 endif
 
+# Path to the perf utility
+PERF = @PERF@
+
+# The profiler to be used by autoprofiledbootstrap
+AFDO_PROFILER = @AFDO_PROFILER@
+
 # This lists all host object files, whether they are included in this
 # compilation or not.
 ALL_HOST_OBJS = $(ALL_HOST_FRONTEND_OBJS) $(ALL_HOST_BACKEND_OBJS)
@@ -3809,7 +3815,7 @@ TEXI_GCCINT_FILES = gccint.texi gcc-common.texi gcc-vers.texi		\
 	 sourcebuild.texi gty.texi libgcc.texi cfg.texi tree-ssa.texi	\
 	 loop.texi generic.texi gimple.texi plugins.texi optinfo.texi   \
 	 match-and-simplify.texi analyzer.texi ux.texi poly-int.texi	\
-	 params.texi specs.texi
+	 params.texi specs.texi ifn.texi
 
 TEXI_GCCINSTALL_FILES = install.texi fdl.texi		\
 	 gcc-common.texi gcc-vers.texi
@@ -4167,7 +4173,7 @@ PLUGIN_HEADERS = $(TREE_H) $(CONFIG_H) $(SYSTEM_H) coretypes.h $(TM_H) \
   lcm.h cfgloopmanip.h file-prefix-map.h builtins.def $(INSN_ATTR_H) \
   pass-instances.def params.list $(srcdir)/../include/gomp-constants.h \
   $(EXPR_H) $(srcdir)/analyzer/*.h $(srcdir)/diagnostics/*.h \
-  $(srcdir)/text-art/*.h
+  $(srcdir)/text-art/*.h $(srcdir)/topics/*.h
 
 # generate the 'build fragment' b-header-vars
 s-header-vars: Makefile
@@ -4207,6 +4213,7 @@ install-plugin: installdirs lang.install-plugin s-header-vars install-gengtype
 	  "$(srcdir)"/analyzer/* \
 	  | "$(srcdir)"/diagnostics/* \
 	  | "$(srcdir)"/text-art/* \
+	  | "$(srcdir)"/topics/* \
 	  | "$(srcdir)"/config/* | "$(srcdir)"/common/config/* \
 	  | "$(srcdir)"/c-family/* | "$(srcdir)"/*.def ) \
 	    base=`echo "$$path" | sed -e "s|$$srcdirstrip/||"`;; \

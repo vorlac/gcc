@@ -1,7 +1,7 @@
 /**
  * Template semantics.
  *
- * Copyright:   Copyright (C) 1999-2025 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2026 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/compiler/src/dmd/templatesem.d, _templatesem.d)
@@ -47,6 +47,7 @@ import dmd.mtype;
 import dmd.opover;
 import dmd.optimize;
 import dmd.root.array;
+import dmd.root.string : toDString;
 import dmd.common.outbuffer;
 import dmd.rootobject;
 import dmd.semantic2;
@@ -452,6 +453,44 @@ void computeOneMember(TemplateDeclaration td)
             td.computeIsTrivialAlias(s);
         }
         td.haveComputedOneMember = true;
+    }
+}
+
+private void computeIsTrivialAlias(TemplateDeclaration td, Dsymbol s)
+{
+    /* Set isTrivialAliasSeq if this fits the pattern:
+     *   template AliasSeq(T...) { alias AliasSeq = T; }
+     * or set isTrivialAlias if this fits the pattern:
+     *   template Alias(T) { alias Alias = qualifiers(T); }
+     */
+    if (!(td.parameters && td.parameters.length == 1))
+        return;
+
+    auto ad = s.isAliasDeclaration();
+    if (!ad || !ad.type)
+        return;
+
+    auto ti = ad.type.isTypeIdentifier();
+
+    if (!ti || ti.idents.length != 0)
+        return;
+
+    if (auto ttp = (*td.parameters)[0].isTemplateTupleParameter())
+    {
+        if (ti.ident is ttp.ident &&
+            ti.mod == 0)
+        {
+            //printf("found isTrivialAliasSeq %s %s\n", s.toChars(), ad.type.toChars());
+            td.isTrivialAliasSeq = true;
+        }
+    }
+    else if (auto ttp = (*td.parameters)[0].isTemplateTypeParameter())
+    {
+        if (ti.ident is ttp.ident)
+        {
+            //printf("found isTrivialAlias %s %s\n", s.toChars(), ad.type.toChars());
+            td.isTrivialAlias = true;
+        }
     }
 }
 
@@ -873,11 +912,10 @@ void templateInstanceSemantic(TemplateInstance tempinst, Scope* sc, ArgumentList
     }
 
     timeTraceBeginEvent(TimeTraceEventType.sema1TemplateInstance);
-    scope (exit) timeTraceEndEvent(TimeTraceEventType.sema1TemplateInstance, tempinst);
-
+    scope (exit) timeTraceEndEvent(TimeTraceEventType.sema1TemplateInstance, tempinst,
+        () => tempinst.toPrettyChars().toDString());
     // Get the enclosing template instance from the scope tinst
     tempinst.tinst = sc.tinst;
-
     // Get the instantiating module from the scope minst
     tempinst.minst = sc.minst;
     // https://issues.dlang.org/show_bug.cgi?id=10920
@@ -2778,7 +2816,9 @@ private MATCH matchArg(TemplateParameter tp, Scope* sc, RootObject oarg, size_t 
             if (!sa || si != sa)
                 return matchArgNoMatch();
         }
-        dedtypes[i] = sa;
+        // Note: Dsymbol can't have type qualifiers, so use type if it has them
+        // https://github.com/dlang/dmd/issues/17959
+        dedtypes[i] = ta && ta.mod ? ta : sa;
 
         if (psparam)
         {
@@ -5569,7 +5609,7 @@ bool TemplateInstance_semanticTiargs(Loc loc, Scope* sc, Objects* tiargs, int fl
  *      errorHelper = delegate to send error message to if not null
  */
 void functionResolve(ref MatchAccumulator m, Dsymbol dstart, Loc loc, Scope* sc, Objects* tiargs,
-    Type tthis, ArgumentList argumentList, void delegate(const(char)*) scope errorHelper = null)
+    Type tthis, ArgumentList argumentList, void delegate(const(char)*, Loc argloc = Loc.initial) scope errorHelper = null)
 {
     version (none)
     {
@@ -7510,12 +7550,7 @@ MATCH deduceType(scope RootObject o, scope Scope* sc, scope Type tparam,
         override void visit(ArrayLiteralExp e)
         {
             // https://issues.dlang.org/show_bug.cgi?id=20092
-            if (e.elements && e.elements.length && e.type.toBasetype().nextOf().ty == Tvoid)
-            {
-                result = deduceEmptyArrayElement();
-                return;
-            }
-            if ((!e.elements || !e.elements.length) && e.type.toBasetype().nextOf().ty == Tvoid && tparam.ty == Tarray)
+            if (e.type.toBasetype().nextOf().ty == Tvoid && tparam.ty == Tarray)
             {
                 // tparam:T[] <- e:[] (void[])
                 result = deduceEmptyArrayElement();
@@ -7598,7 +7633,39 @@ MATCH deduceType(scope RootObject o, scope Scope* sc, scope Type tparam,
                 //printf("\ttf  = %s\n", tf.toChars());
                 const dim = tf.parameterList.length;
 
-                if (tof.parameterList.length != dim || tof.parameterList.varargs != tf.parameterList.varargs)
+                if (tof.parameterList.varargs != tf.parameterList.varargs)
+                    return;
+
+                // https://github.com/dlang/dmd/issues/19905
+                // Resolve and expand TypeTuples (e.g. from AliasSeq) in tof's parameters
+                // before comparing counts. We can't call TypeFunction.typeSemantic because
+                // the return type may contain unresolved template parameters.
+                Types* expandedTypes;
+                foreach (pto; *tof.parameterList.parameters)
+                {
+                    Type pt = pto.type;
+                    if (!reliesOnTemplateParameters(pt, parameters[inferStart .. parameters.length]))
+                    {
+                        pt = pt.syntaxCopy().typeSemantic(e.loc, sc);
+                        if (pt.ty == Terror)
+                            return;
+                    }
+                    if (auto tt = pt.isTypeTuple())
+                    {
+                        if (!expandedTypes)
+                            expandedTypes = new Types();
+                        foreach (arg; *tt.arguments)
+                            expandedTypes.push(arg.type);
+                    }
+                    else
+                    {
+                        if (!expandedTypes)
+                            expandedTypes = new Types();
+                        expandedTypes.push(pt);
+                    }
+                }
+
+                if (!expandedTypes || expandedTypes.length != dim)
                     return;
 
                 auto tiargs = new Objects();
@@ -7614,15 +7681,19 @@ MATCH deduceType(scope RootObject o, scope Scope* sc, scope Type tparam,
                         ++u;
                     }
                     assert(u < dim);
-                    Parameter pto = tof.parameterList[u];
-                    if (!pto)
+                    Type t = (*expandedTypes)[u];
+                    if (!t)
                         break;
-                    Type t = pto.type.syntaxCopy(); // https://issues.dlang.org/show_bug.cgi?id=11774
                     if (reliesOnTemplateParameters(t, parameters[inferStart .. parameters.length]))
                         return;
-                    t = t.typeSemantic(e.loc, sc);
-                    if (t.ty == Terror)
-                        return;
+                    // https://issues.dlang.org/show_bug.cgi?id=11774
+                    t = t.syntaxCopy();
+                    if (!t.deco)
+                    {
+                        t = t.typeSemantic(e.loc, sc);
+                        if (t.ty == Terror)
+                            return;
+                    }
                     tiargs.push(t);
                 }
 

@@ -8971,11 +8971,11 @@ print_operand (FILE *file, rtx x, int code)
 	}
       return;
     case 'C':
-      fprintf (file, s390_branch_condition_mnemonic (x, FALSE));
+      fputs (s390_branch_condition_mnemonic (x, FALSE), file);
       return;
 
     case 'D':
-      fprintf (file, s390_branch_condition_mnemonic (x, TRUE));
+      fputs (s390_branch_condition_mnemonic (x, TRUE), file);
       return;
 
     case 'E':
@@ -18851,7 +18851,7 @@ s390_bitint_type_info (int n, struct bitint_info *info)
     info->limb_mode = DImode;
   info->abi_limb_mode = info->limb_mode;
   info->big_endian = true;
-  info->extended = true;
+  info->extended = bitint_ext_full;
   return true;
 }
 

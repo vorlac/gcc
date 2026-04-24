@@ -4575,6 +4575,18 @@ outer_automatic_var_p (tree decl)
 	  && !TREE_STATIC (decl));
 }
 
+/* Note whether capture proxy D is only used in a contract condition.  */
+
+static void
+set_contract_capture_flag (tree d, bool val)
+{
+  gcc_checking_assert (DECL_HAS_VALUE_EXPR_P (d));
+  tree proxy = DECL_VALUE_EXPR (d);
+  gcc_checking_assert (TREE_CODE (proxy) == COMPONENT_REF
+		       && TREE_CODE (TREE_OPERAND (proxy, 1)) == FIELD_DECL);
+  DECL_CONTRACT_CAPTURE_P (TREE_OPERAND (proxy, 1)) = val;
+}
+
 /* DECL satisfies outer_automatic_var_p.  Possibly complain about it or
    rewrite it for lambda capture.
 
@@ -4619,6 +4631,11 @@ process_outer_var_ref (tree decl, tsubst_flags_t complain, bool odr_use)
 
       if (d && d != decl && is_capture_proxy (d))
 	{
+	  if (flag_contracts && !processing_contract_condition)
+	    /* We might have created a capture for a contract_assert ref. to
+	       some var, if that is now captured 'normally' then this is OK.
+	       Otherwise we leave the capture marked as incorrect.  */
+	    set_contract_capture_flag (d, false);
 	  if (DECL_CONTEXT (d) == containing_function)
 	    /* We already have an inner proxy.  */
 	    return d;
@@ -4667,10 +4684,14 @@ process_outer_var_ref (tree decl, tsubst_flags_t complain, bool odr_use)
       return error_mark_node;
     }
   /* Do lambda capture when processing the id-expression, not when
-     odr-using a variable.  */
+     odr-using a variable, but uses in a contract must not cause a capture.  */
   if (!odr_use && context == containing_function)
-    decl = add_default_capture (lambda_stack,
-				/*id=*/DECL_NAME (decl), initializer);
+    {
+      decl = add_default_capture (lambda_stack,
+				  /*id=*/DECL_NAME (decl), initializer);
+      if (flag_contracts && processing_contract_condition)
+	set_contract_capture_flag (decl, true);
+    }
   /* Only an odr-use of an outer automatic variable causes an
      error, and a constant variable can decay to a prvalue
      constant without odr-use.  So don't complain yet.  */
@@ -14170,8 +14191,8 @@ trait_expr_value (cp_trait_kind kind, tree type1, tree type2)
     case CPTK_IS_DEDUCIBLE:
       return type_targs_deducible_from (type1, type2);
 
-    case CPTK_IS_CONSTEVAL_ONLY:
-      return consteval_only_p (type1);
+    case CPTK_IS_STRUCTURAL:
+      return structural_type_p (type1);
 
     /* __array_rank, __builtin_type_order and __builtin_structured_binding_size
        are handled in finish_trait_expr.  */
@@ -14353,7 +14374,7 @@ finish_trait_expr (location_t loc, cp_trait_kind kind, tree type1, tree type2)
     case CPTK_IS_STD_LAYOUT:
     case CPTK_IS_TRIVIAL:
     case CPTK_IS_TRIVIALLY_COPYABLE:
-    case CPTK_IS_CONSTEVAL_ONLY:
+    case CPTK_IS_STRUCTURAL:
     case CPTK_HAS_UNIQUE_OBJ_REPRESENTATIONS:
       if (!check_trait_type (type1, /* kind = */ 2))
 	return error_mark_node;

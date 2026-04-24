@@ -1,3 +1,56 @@
+2026-04-17  Steven G. Kargl  <kargl@gcc.gnu.org>
+
+	PR libfortran/120431
+	* m4/spread.m4: Fix scalar source case with ncopies < 0.
+	* generated/spread_c10.c: Regenerated.
+	* generated/spread_c16.c: Ditto.
+	* generated/spread_c17.c: Ditto.
+	* generated/spread_c4.c: Ditto.
+	* generated/spread_c8.c: Ditto.
+	* generated/spread_i1.c: Ditto.
+	* generated/spread_i16.c: Ditto.
+	* generated/spread_i2.c: Ditto.
+	* generated/spread_i4.c: Ditto.
+	* generated/spread_i8.c: Ditto.
+	* generated/spread_r10.c: Ditto.
+	* generated/spread_r16.c: Ditto.
+	* generated/spread_r17.c: Ditto.
+	* generated/spread_r4.c: Ditto.
+	* generated/spread_r8.c: Ditto.
+
+2026-04-07  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
+
+	PR libfortran/124543
+	* io/inquire.c (inquire_via_unit): Change the returned
+	encoding value to 'DEFAULT' when not specified in the OPEN
+	statement.
+
+2026-04-04  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
+
+	PR libfortran/124543
+	* io/inquire.c (inquire_via_unit): Adjust the logic to
+	treat formatted vs unformatted correctly.
+
+2026-03-30  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
+
+	PR libfortran/124543
+	* io/inquire.c (inquire_via_unit): Fix return value for
+	NAMED. Add check for ACTION. Fix return values for
+	ENCODING, PENDING, READ, WRITE, READWRITE.
+	(inquire_via_filename): Add checks for ACTION, DELIM,
+	ASYNCHRONOUS, and PENDING. Fix return value for
+	ENCODING.
+	* io/unix.c (inquire_access): Change return value from no
+	to unknown.
+
+2026-03-22  Christopher Albert  <albert@tugraz.at>
+
+	PR fortran/124512
+	* Makefile.am: Adjust the dependencies.
+	* Makefile.in: Regenerate.
+	* configure: Regenerate.
+	* configure.ac: Add new check.
+
 2026-03-06  Andre Vehreschild  <vehre@gcc.gnu.org>
 
 	PR libfortran/124371

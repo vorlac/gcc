@@ -3684,6 +3684,83 @@ struct Nullable(T)
     private bool _isNull = true;
 
     /**
+     * Compares two Nullable values.
+     *
+     * - If one is null and the other is not, the null one is considered smaller.
+     * - If both are null, they are equal.
+     * - If both are non-null, compares the payloads.
+     *
+     * Returns:
+     *     Negative if `this < rhs`, zero if equal, positive if `this > rhs`.
+     */
+    int opCmp(this This, Rhs)(auto ref Rhs rhs)
+    if (is(Rhs == Nullable!U, U) && is(typeof(this.get < rhs.get)))
+    {
+        if (_isNull)
+            return rhs.isNull ? 0 : -1;
+        else if (rhs.isNull)
+            return 1;
+        else if (_value.payload < rhs.get)
+            return -1;
+        else if (_value.payload > rhs.get)
+            return 1;
+        else
+            return 0;
+    }
+
+    /// Basic `Nullable` comparison test
+    @safe unittest
+    {
+        Nullable!int a = 5;
+        Nullable!int b = 0;
+        assert(a > b);
+        assert(b < a);
+
+        Nullable!int c;
+        assert(c < a);
+        assert(c < b);
+    }
+
+    // Not suitable for documentation.
+    @safe unittest
+    {
+        Nullable!int a = 5;
+        Nullable!int b = 0;
+        Nullable!int c;
+        assert(a.opCmp(a) == 0); // Do not use `opEquals`, i.e. no `a == a`.
+        assert(b.opCmp(b) == 0);
+        assert(c.opCmp(c) == 0);
+        assert(b.opCmp(c) != 0);
+    }
+
+    // Advanced `Nullable` comparison test
+    @safe unittest
+    {
+        Nullable!int  a = 5;
+        Nullable!byte b = 0;
+
+        assert(a > b);
+        assert(b < a);
+        assert(a.opCmp(a) == 0);
+        assert(b.opCmp(b) == 0);
+
+        Nullable!float f = 2;
+        assert(a > f);
+        assert(b < f);
+        assert(f.opCmp(f) == 0);
+
+        Nullable!short s = 5;
+        assert(a == s);
+
+        a.nullify();
+        assert(a.opCmp(s) != 0);
+        assert(a < b);
+
+        b.nullify();
+        assert(a.opCmp(b) == 0);
+    }
+
+    /**
      * Constructor initializing `this` with `value`.
      *
      * Params:
@@ -7509,12 +7586,12 @@ private template TypeMod(T)
     }
     alias methods = GetOverloadedMethods!A;
 
-    alias int F1();
-    alias @property int F2();
-    alias string F3();
-    alias nothrow @trusted uint F4();
-    alias int F5(Object);
-    alias bool F6(Object);
+    alias F1 = int();
+    alias F2 = @property int();
+    alias F3 = string();
+    alias F4 = nothrow @trusted uint();
+    alias F5 = int(Object);
+    alias F6 = bool(Object);
     static assert(methods.length == 3 + 4);
     static assert(__traits(identifier, methods[0]) == "draw"     && is(typeof(&methods[0]) == F1*));
     static assert(__traits(identifier, methods[1]) == "value"    && is(typeof(&methods[1]) == F2*));
@@ -7598,49 +7675,49 @@ package template DerivedFunctionType(T...)
 @safe unittest
 {
     // attribute covariance
-    alias int F1();
+    alias F1 = int();
     static assert(is(DerivedFunctionType!(F1, F1) == F1));
-    alias int F2() pure nothrow;
+    alias F2 = int() pure nothrow;
     static assert(is(DerivedFunctionType!(F1, F2) == F2));
-    alias int F3() @safe;
-    alias int F23() @safe pure nothrow;
+    alias F3 = int() @safe;
+    alias F23 = int() @safe pure nothrow;
     static assert(is(DerivedFunctionType!(F2, F3) == F23));
 
     // return type covariance
-    alias long F4();
+    alias F4 = long();
     static assert(is(DerivedFunctionType!(F1, F4) == void));
     class C {}
     class D : C {}
-    alias C F5();
-    alias D F6();
+    alias F5 = C();
+    alias F6 = D();
     static assert(is(DerivedFunctionType!(F5, F6) == F6));
-    alias typeof(null) F7();
-    alias int[] F8();
-    alias int* F9();
+    alias F7 = typeof(null)();
+    alias F8 = int[]();
+    alias F9 = int*();
     static assert(is(DerivedFunctionType!(F5, F7) == F7));
     static assert(is(DerivedFunctionType!(F7, F8) == void));
     static assert(is(DerivedFunctionType!(F7, F9) == F7));
 
     // variadic type equality
-    alias int F10(int);
-    alias int F11(int...);
-    alias int F12(int, ...);
+    alias F10 = int(int);
+    alias F11 = int(int...);
+    alias F12 = int(int, ...);
     static assert(is(DerivedFunctionType!(F10, F11) == void));
     static assert(is(DerivedFunctionType!(F10, F12) == void));
     static assert(is(DerivedFunctionType!(F11, F12) == void));
 
     // linkage equality
-    alias extern(C) int F13(int);
-    alias extern(D) int F14(int);
-    alias extern(Windows) int F15(int);
+    alias F13 = extern(C) int(int);
+    alias F14 = extern(D) int(int);
+    alias F15 = extern(Windows) int(int);
     static assert(is(DerivedFunctionType!(F13, F14) == void));
     static assert(is(DerivedFunctionType!(F13, F15) == void));
     static assert(is(DerivedFunctionType!(F14, F15) == void));
 
     // ref & @property equality
-    alias int F16(int);
-    alias ref int F17(int);
-    alias @property int F18(int);
+    alias F16 = int(int);
+    alias F17 = ref int(int);
+    alias F18 = @property int(int);
     static assert(is(DerivedFunctionType!(F16, F17) == void));
     static assert(is(DerivedFunctionType!(F16, F18) == void));
     static assert(is(DerivedFunctionType!(F17, F18) == void));
@@ -11237,6 +11314,32 @@ unittest
     assert(s.get().i == 1);
     s = S(2);
     assert(s.get().i == 2);
+}
+
+/*
+    `Nullable` comparison with a user-defined type whose `opCmp` is not `const`
+
+    This tests for the following pitfall:
+        template `opCmp` is not callable using argument types `!()(Nullable!(NonConstOpCmp))`
+    This test cannot embedded into `Nullable` because of the following issue:
+        template instance `core.internal.traits._hasIndirections!(NonConstOpCmp)` recursive expansion
+ */
+@safe unittest
+{
+    static struct NonConstOpCmp
+    {
+        int value;
+
+        // non-const on purpose!
+        int opCmp(NonConstOpCmp b) => (this.value > b.value) - (this.value < b.value);
+    }
+
+    auto a = nullable(NonConstOpCmp(0));
+    auto b = nullable(NonConstOpCmp(1));
+    assert(a < b);
+
+    Nullable!NonConstOpCmp c;
+    assert(c < a);
 }
 
 /// The old version of $(LREF SafeRefCounted), before $(LREF borrow) existed.

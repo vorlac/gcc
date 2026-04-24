@@ -3,7 +3,7 @@
  *
  * Specification: $(LINK2 https://dlang.org/spec/function.html#function-safety, Function Safety)
  *
- * Copyright:   Copyright (C) 1999-2025 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2026 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/compiler/src/dmd/safe.d, _safe.d)
@@ -25,10 +25,11 @@ import dmd.dscope;
 import dmd.dsymbol;
 import dmd.dsymbolsem : determineSize;
 import dmd.errors;
+import dmd.errorsink;
 import dmd.expression;
 import dmd.func;
 import dmd.funcsem : isRootTraitsCompilesScope;
-import dmd.globals : FeatureState;
+import dmd.globals : FeatureState, global;
 import dmd.id;
 import dmd.identifier;
 import dmd.location;
@@ -365,19 +366,15 @@ bool isTrusted(FuncDeclaration fd)
  *   fd    = function we are gonna rat on
  *   gag   = suppress error message (used in escape.d)
  *   loc   = location of error
+ *   scopeVar = if not null, is the variable whose scope status caused the violation
  *   format = printf-style format string
  *   args  = arguments for %s format specifier
  */
-extern (D) void reportSafeError(FuncDeclaration fd, bool gag, Loc loc,
-    const(char)* format, RootObject[] args...)
-{
-    reportSafeError(fd, gag, loc, null, format, args);
-}
-
-/// Overload that also stores the variable whose scope status caused the violation
-extern (D) void reportSafeError(FuncDeclaration fd, bool gag, Loc loc,
+private
+void reportSafeError(FuncDeclaration fd, bool gag, Loc loc,
     VarDeclaration scopeVar, const(char)* format, RootObject[] args...)
 {
+    ErrorSink eSink = global.errorSink;
     if (fd.type.toTypeFunction().trust == TRUST.system) // function was just inferred to be @system
     {
         if (format)
@@ -407,7 +404,7 @@ extern (D) void reportSafeError(FuncDeclaration fd, bool gag, Loc loc,
             {
                 buf.printf(" is not allowed in a function with default safety with `-%spreview=safer`", SwitchPrefix.ptr);
             }
-            .error(loc, "%s", buf.extractChars());
+            eSink.error(loc, "%s", buf.extractChars());
         }
     }
 }
@@ -451,7 +448,7 @@ extern (D) bool setUnsafeCall(FuncDeclaration fd, FuncDeclaration f)
 {
     if (setFunctionToUnsafe(fd))
     {
-        reportSafeError(fd, false, f.loc, null, f, null);
+        reportSafeError(fd, false, f.loc, null, null, f, null);
         return fd.isSafe();
     }
     return false;

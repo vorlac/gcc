@@ -5,7 +5,7 @@
  *
  * Specification: $(LINK2 https://dlang.org/spec/float.html#fp_const_folding, Floating Point Constant Folding)
  *
- * Copyright:   Copyright (C) 1999-2025 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2026 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/compiler/src/dmd/constfold.d, _constfold.d)
@@ -1267,7 +1267,7 @@ UnionExp Slice(Type type, Expression e1, Expression lwr, Expression upr)
         {
             auto elements = new Expressions(cast(size_t)(iupr - ilwr));
             memcpy(elements.tdata(), es1.elements.tdata() + ilwr, cast(size_t)(iupr - ilwr) * ((*es1.elements)[0]).sizeof);
-            emplaceExp!(ArrayLiteralExp)(&ue, e1.loc, type, elements);
+            emplaceExp!(ArrayLiteralExp)(&ue, e1.loc, type, es1.basis, elements);
         }
     }
     else

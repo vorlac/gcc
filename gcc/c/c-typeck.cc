@@ -379,13 +379,28 @@ c_verify_type (tree type)
     {
     case POINTER_TYPE:
     case FUNCTION_TYPE:
-      /* Pointer and funcions can not have variable size.  */
-      if (C_TYPE_VARIABLE_SIZE (type))
+    case ARRAY_TYPE:
+      /* Pointer, array, functions are variably modified if and only if the
+	 target, element, return type is variably modified.  */
+      if (!TYPE_STRUCTURAL_EQUALITY_P (type)
+	  && (C_TYPE_VARIABLY_MODIFIED (type)
+	      != C_TYPE_VARIABLY_MODIFIED (TREE_TYPE (type))))
 	return false;
-      /* Pointer and funcions are variably modified if and only if the
-	 return / target type is variably modified.  */
-      if (C_TYPE_VARIABLY_MODIFIED (type)
-	  != C_TYPE_VARIABLY_MODIFIED (TREE_TYPE (type)))
+      /* If the target type is structural equality, the type should also. */
+      if (!TYPE_STRUCTURAL_EQUALITY_P (type)
+	  && TYPE_STRUCTURAL_EQUALITY_P (TREE_TYPE (type)))
+	return false;
+
+     default:
+       break;
+    }
+
+  switch (TREE_CODE (type))
+    {
+    case POINTER_TYPE:
+    case FUNCTION_TYPE:
+      /* Pointer and functions can not have variable size.  */
+      if (C_TYPE_VARIABLE_SIZE (type))
 	return false;
       break;
     case ARRAY_TYPE:
@@ -407,11 +422,6 @@ c_verify_type (tree type)
 	  if (!C_TYPE_VARIABLY_MODIFIED (type))
 	    return false;
 	}
-      /* If the element type is variably modified, then also the array.  */
-      if (C_TYPE_VARIABLY_MODIFIED (TREE_TYPE (type))
-	  && !C_TYPE_VARIABLY_MODIFIED (type))
-	return false;
-      break;
     default:
       break;
     }
@@ -426,7 +436,7 @@ c_set_type_bits (tree new_type, tree old_type)
 {
   gcc_checking_assert (c_verify_type (old_type));
 
-  if (C_TYPE_VARIABLY_MODIFIED (old_type))
+  if (c_type_variably_modified_p (old_type))
     C_TYPE_VARIABLY_MODIFIED (new_type) = true;
 
   if (TREE_CODE (new_type) == ARRAY_TYPE && C_TYPE_VARIABLE_SIZE (old_type))
@@ -538,8 +548,14 @@ c_reconstruct_complex_type (tree type, tree bottom)
     }
   else if (TREE_CODE (type) == ARRAY_TYPE)
     {
+      bool rso = TYPE_REVERSE_STORAGE_ORDER (type);
       inner = c_reconstruct_complex_type (TREE_TYPE (type), bottom);
       outer = c_build_array_type (inner, TYPE_DOMAIN (type));
+      if (rso)
+	{
+	  outer = build_distinct_type_copy (outer);
+	  TYPE_REVERSE_STORAGE_ORDER (outer) = 1;
+	}
 
       gcc_checking_assert (C_TYPE_VARIABLE_SIZE (type)
 			   == C_TYPE_VARIABLE_SIZE (outer));
@@ -3254,8 +3270,10 @@ build_access_with_size_for_counted_by (location_t loc, tree ref,
 
   tree element_type = TREE_TYPE (TREE_TYPE (ref));
   tree element_size = VOID_TYPE_P (element_type)
-		      ? build_one_cst (size_type_node)
+		      ? size_one_node
 		      : TYPE_SIZE_UNIT (element_type);
+  if (element_size == NULL_TREE)
+    return ref;
 
   tree first_param = is_fam
 		     ? c_fully_fold (array_to_pointer_conversion (loc, ref),
@@ -3785,7 +3803,7 @@ mark_decl_used (tree ref, bool address)
 
   /* Filter out the cases where referencing a non-local variable does not
      require a non-local context passed via the static chain.  */
-  if (!C_TYPE_VARIABLY_MODIFIED (TREE_TYPE (ref)))
+  if (!c_type_variably_modified_p (TREE_TYPE (ref)))
     switch (TREE_CODE (ref))
       {
       case FUNCTION_DECL:
@@ -4452,7 +4470,7 @@ build_function_call_vec (location_t loc, vec<location_t> arg_loc,
   /* In this improbable scenario, a nested function returns a VM type.
      Create a TARGET_EXPR so that the call always has a LHS, much as
      what the C++ FE does for functions returning non-PODs.  */
-  if (C_TYPE_VARIABLY_MODIFIED (TREE_TYPE (fntype)))
+  if (c_type_variably_modified_p (TREE_TYPE (fntype)))
     {
       tree tmp = create_tmp_var_raw (TREE_TYPE (fntype));
       result = build4 (TARGET_EXPR, TREE_TYPE (fntype), tmp, result,
@@ -18698,8 +18716,8 @@ c_build_qualified_type (tree type, int type_quals, tree orig_qual_type,
 
   gcc_checking_assert (C_TYPE_VARIABLE_SIZE (var_type)
 		       == C_TYPE_VARIABLE_SIZE (type));
-  gcc_checking_assert (C_TYPE_VARIABLY_MODIFIED (var_type)
-		       == C_TYPE_VARIABLY_MODIFIED (type));
+  gcc_checking_assert (c_type_variably_modified_p (var_type)
+		       == c_type_variably_modified_p (type));
 
   /* A variant type does not inherit the list of incomplete vars from the
      type main variant.  */

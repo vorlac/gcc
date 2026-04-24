@@ -215,6 +215,8 @@ first_ptx_version_supporting_sm (enum ptx_isa sm)
       return /* PTX_VERSION_3_0 not defined */ PTX_VERSION_3_1;
     case PTX_ISA_SM35:
       return PTX_VERSION_3_1;
+    case PTX_ISA_SM50:
+      return PTX_VERSION_4_0;
     case PTX_ISA_SM37:
     case PTX_ISA_SM52:
       return PTX_VERSION_4_1;
@@ -266,6 +268,8 @@ ptx_version_to_string (enum ptx_version v)
     {
     case PTX_VERSION_3_1:
       return "3.1";
+    case PTX_VERSION_4_0:
+      return "4.0";
     case PTX_VERSION_4_1:
       return "4.1";
     case PTX_VERSION_4_2:
@@ -294,6 +298,8 @@ ptx_version_to_number (enum ptx_version v, bool major_p)
     {
     case PTX_VERSION_3_1:
       return major_p ? 3 : 1;
+    case PTX_VERSION_4_0:
+      return major_p ? 4 : 0;
     case PTX_VERSION_4_1:
       return major_p ? 4 : 1;
     case PTX_VERSION_4_2:

@@ -1,7 +1,7 @@
 /**
  * Defines a D type.
  *
- * Copyright:   Copyright (C) 1999-2025 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2026 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/compiler/src/dmd/mtype.d, _mtype.d)
@@ -404,6 +404,10 @@ extern (C++) abstract class Type : ASTNode
          * we bank on the idea that usually only one of variants exist.
          * It will also speed up code because these are rarely referenced and
          * so need not be in the cache.
+         *
+         * NOTE: The cache stores the naked type at the "identity" position.
+         * For example, a "shared const T" type will have its naked "T" type
+         * in the field "scto". See also: dmd.typesem.nakedOf(Type).
          */
         Type cto;       // MODFlags.const_
         Type ito;       // MODFlags.immutable_

@@ -923,11 +923,11 @@ merge_blocks (basic_block a, basic_block b)
 
 /* Split BB into entry part and the rest (the rest is the newly created block).
    Redirect those edges for that REDIRECT_EDGE_P returns true to the entry
-   part.  Returns the edge connecting the entry part to the rest.  */
+   part.  Returns the edge connecting the entry part to the rest.
+   DATA gets passed on to REDIRECT_EDGE_P.  */
 
 edge
-make_forwarder_block (basic_block bb, bool (*redirect_edge_p) (edge),
-		      void (*new_bb_cbk) (basic_block))
+make_forwarder_block (basic_block bb, bool (*redirect_edge_p) (edge, void*), void *data)
 {
   edge e, fallthru;
   edge_iterator ei;
@@ -948,7 +948,7 @@ make_forwarder_block (basic_block bb, bool (*redirect_edge_p) (edge),
     {
       basic_block e_src;
 
-      if (redirect_edge_p (e))
+      if (redirect_edge_p (e, data))
 	{
 	  dummy->count += e->count ();
 	  ei_next (&ei);
@@ -966,9 +966,6 @@ make_forwarder_block (basic_block bb, bool (*redirect_edge_p) (edge),
               && dummy->loop_father->header == dummy
               && dummy->loop_father->latch == e_src)
             dummy->loop_father->latch = jump;
-
-          if (new_bb_cbk != NULL)
-            new_bb_cbk (jump);
         }
     }
 

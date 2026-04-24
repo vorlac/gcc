@@ -336,7 +336,7 @@ static int const x86_64_ms_abi_int_parameter_registers[4] =
 };
 
 /* Similar as Clang's preserve_none function parameter passing.
-   NB: Use DI_REG and SI_REG, see ix86_function_value_regno_p.  */
+   NB: Use DI_REG and SI_REG, see ix86_function_arg_regno_p.  */
 
 static int const x86_64_preserve_none_int_parameter_registers[6] =
 {
@@ -744,7 +744,10 @@ ix86_in_large_data_p (tree exp)
     {
       const char *section = DECL_SECTION_NAME (exp);
       if (strcmp (section, ".ldata") == 0
-	  || strcmp (section, ".lbss") == 0)
+	  || startswith (section, ".ldata.")
+	  || strcmp (section, ".lbss") == 0
+	  || startswith (section, ".lbss.")
+	  || startswith (section, ".gnu.linkonce.lb."))
 	return true;
       return false;
     }
@@ -852,7 +855,12 @@ x86_64_elf_section_type_flags (tree decl, const char *name, int reloc)
   if (strcmp (name, ".lbss") == 0
       || startswith (name, ".lbss.")
       || startswith (name, ".gnu.linkonce.lb."))
-    flags |= SECTION_BSS;
+    {
+      flags |= SECTION_BSS;
+      /* Clear SECTION_NOTYPE so .lbss etc. are marked @nobits in
+	 default_elf_asm_named_section.  */
+      flags &= ~SECTION_NOTYPE;
+    }
 
   return flags;
 }
@@ -1175,7 +1183,7 @@ ix86_get_callcvt (const_tree type)
       else if (lookup_attribute ("thiscall", attrs))
 	ret |= IX86_CALLCVT_THISCALL;
 
-      /* Regparam isn't allowed for thiscall and fastcall.  */
+      /* Regparm isn't allowed for thiscall and fastcall.  */
       if ((ret & (IX86_CALLCVT_THISCALL | IX86_CALLCVT_FASTCALL)) == 0)
 	{
 	  if (lookup_attribute ("regparm", attrs))
@@ -4070,6 +4078,17 @@ ix86_zero_call_used_regs (HARD_REG_SET need_zeroed_hardregs)
     {
       emit_insn (zero_all_vec_insn);
       all_sse_zeroed = true;
+      if (TARGET_64BIT && TARGET_AVX512F)
+	{
+	  rtx zero = CONST0_RTX (V4SFmode);
+	  for (unsigned int regno = XMM16_REG;
+	       regno <= XMM31_REG;
+	       regno++)
+	    {
+	      rtx reg = gen_rtx_REG (V4SFmode, regno);
+	      emit_move_insn (reg, zero);
+	    }
+	}
     }
 
   /* mm/st registers are shared registers set, we should follow the following
@@ -8599,6 +8618,20 @@ struct stack_access_data
   unsigned int *stack_alignment;
 };
 
+/* Return true if OP references an argument passed on stack.  */
+
+static bool
+ix86_argument_passed_on_stack_p (const_rtx op)
+{
+  tree mem_expr = MEM_EXPR (op);
+  if (mem_expr)
+    {
+      tree var = get_base_address (mem_expr);
+      return TREE_CODE (var) == PARM_DECL;
+    }
+  return false;
+}
+
 /* Update the maximum stack slot alignment from memory alignment in PAT.  */
 
 static void
@@ -8614,7 +8647,11 @@ ix86_update_stack_alignment (rtx, const_rtx pat, void *data)
       auto op = *iter;
       if (MEM_P (op))
 	{
-	  if (reg_mentioned_p (p->reg, XEXP (op, 0)))
+	  /* NB: Ignore arguments passed on stack since caller is
+	     responsible to align the outgoing stack for arguments
+	     passed on stack.  */
+	  if (reg_mentioned_p (p->reg, XEXP (op, 0))
+	      && !ix86_argument_passed_on_stack_p (op))
 	    {
 	      unsigned int alignment = MEM_ALIGN (op);
 
@@ -8755,19 +8792,38 @@ ix86_access_stack_p (unsigned int regno, basic_block bb,
   return false;
 }
 
-/* Helper function for ix86_symbolic_const_load_p.  */
+/* Return true if OP isn't a memory operand with SYMBOLIC_CONST and
+   needs alignment > ALIGNMENT.  */
 
 static bool
-ix86_symbolic_const_load_p_1 (rtx set)
+ix86_need_alignment_p_2 (const_rtx op, unsigned int alignment)
+{
+  bool need_alignment = MEM_ALIGN (op) > alignment;
+  tree mem_expr = MEM_EXPR (op);
+  if (!mem_expr)
+    return need_alignment;
+
+  tree var = get_base_address (mem_expr);
+  if (!VAR_P (var) || !DECL_RTL_SET_P (var))
+    return need_alignment;
+
+  rtx x = DECL_RTL (var);
+  if (!MEM_P (x))
+    return need_alignment;
+
+  x = XEXP (x, 0);
+  return !SYMBOLIC_CONST (x) && need_alignment;
+}
+
+/* Return true if SET needs alignment > ALIGNMENT.  */
+
+static bool
+ix86_need_alignment_p_1 (rtx set, unsigned int alignment)
 {
   rtx dest = SET_DEST (set);
 
-  if (!REG_P (dest))
-    return false;
-
-  /* Reject non-Pmode modes.  */
-  if (GET_MODE (dest) != Pmode)
-    return false;
+  if (MEM_P (dest))
+    return ix86_need_alignment_p_2 (dest, alignment);
 
   const_rtx src = SET_SRC (set);
 
@@ -8777,22 +8833,20 @@ ix86_symbolic_const_load_p_1 (rtx set)
       auto op = *iter;
 
       if (MEM_P (op))
-	iter.skip_subrtxes ();
-      else if (SYMBOLIC_CONST (op))
-	return true;
+	return ix86_need_alignment_p_2 (op, alignment);
     }
 
   return false;
 }
 
-/* Return true if INSN loads a symbolic constant into register REGNO.  */
+/* Return true if INSN needs alignment > ALIGNMENT.  */
 
 static bool
-ix86_symbolic_const_load_p (rtx_insn *insn, unsigned int regno)
+ix86_need_alignment_p (rtx_insn *insn, unsigned int alignment)
 {
   rtx set = single_set (insn);
   if (set)
-    return ix86_symbolic_const_load_p_1 (set);
+    return ix86_need_alignment_p_1 (set, alignment);
 
   rtx pat = PATTERN (insn);
   if (GET_CODE (pat) != PARALLEL)
@@ -8802,15 +8856,9 @@ ix86_symbolic_const_load_p (rtx_insn *insn, unsigned int regno)
     {
       rtx exp = XVECEXP (pat, 0, i);
 
-      if (GET_CODE (exp) == SET)
-	{
-	  rtx dest = SET_DEST (exp);
-	  if (REG_P (dest)
-	      && GET_MODE (dest) == Pmode
-	      && REGNO (dest) == regno
-	      && ix86_symbolic_const_load_p_1 (exp))
-	    return true;
-	}
+      if (GET_CODE (exp) == SET
+	  && ix86_need_alignment_p_1 (exp, alignment))
+	return true;
     }
 
   return false;
@@ -8876,6 +8924,7 @@ ix86_find_max_used_stack_alignment (unsigned int &stack_alignment,
       bitmap_set_bit (worklist, HARD_FRAME_POINTER_REGNUM);
     }
 
+  /* Registers on HARD_STACK_SLOT_ACCESS always access stack.  */
   HARD_REG_SET hard_stack_slot_access = stack_slot_access;
 
   calculate_dominance_info (CDI_DOMINATORS);
@@ -8899,25 +8948,6 @@ ix86_find_max_used_stack_alignment (unsigned int &stack_alignment,
 
   EXECUTE_IF_SET_IN_HARD_REG_SET (stack_slot_access, 0, regno, hrsi)
     {
-      /* Set to true if there is a symbolic constant load into REGNO.  */
-      bool symbolic_const_load_p = false;
-
-      if (!TEST_HARD_REG_BIT (hard_stack_slot_access, regno))
-	for (df_ref def = DF_REG_DEF_CHAIN (regno);
-	     def;
-	     def = DF_REF_NEXT_REG (def))
-	  if (!DF_REF_IS_ARTIFICIAL (def)
-	      && !DF_REF_FLAGS_IS_SET (def, DF_REF_MAY_CLOBBER)
-	      && !DF_REF_FLAGS_IS_SET (def, DF_REF_MUST_CLOBBER))
-	    {
-	      rtx_insn *insn = DF_REF_INSN (def);
-	      if (ix86_symbolic_const_load_p (insn, regno))
-		{
-		  symbolic_const_load_p = true;
-		  break;
-		}
-	    }
-
       for (df_ref ref = DF_REG_USE_CHAIN (regno);
 	   ref != NULL;
 	   ref = DF_REF_NEXT_REG (ref))
@@ -8930,13 +8960,15 @@ ix86_find_max_used_stack_alignment (unsigned int &stack_alignment,
 	  if (!NONJUMP_INSN_P (insn))
 	    continue;
 
-	  /* If there is no symbolic constant load into the register,
-	     don't call ix86_access_stack_p.  */
-	  if (!symbolic_const_load_p
-	      || ix86_access_stack_p (regno, BLOCK_FOR_INSN (insn),
-				      set_up_by_prologue, prologue_used,
-				      reg_dominate_bbs_known,
-				      reg_dominate_bbs))
+	  /* Call ix86_access_stack_p only if INSN needs alignment >
+	     STACK_ALIGNMENT.  */
+	  if (ix86_need_alignment_p (insn, stack_alignment)
+	      && (TEST_HARD_REG_BIT (hard_stack_slot_access, regno)
+		  || ix86_access_stack_p (regno, BLOCK_FOR_INSN (insn),
+					  set_up_by_prologue,
+					  prologue_used,
+					  reg_dominate_bbs_known,
+					  reg_dominate_bbs)))
 	    {
 	      /* Update stack alignment if REGNO is used for stack
 		 access.  */
@@ -23170,36 +23202,71 @@ ix86_rtx_costs (rtx x, machine_mode mode, int outer_code_i, int opno,
       return false;
 
     case UNSPEC:
-      if (XINT (x, 1) == UNSPEC_TP)
-	*total = 0;
-      else if (XINT (x, 1) == UNSPEC_VTERNLOG)
+      switch (XINT (x, 1))
 	{
+	case UNSPEC_TP:
+	  *total = 0;
+	  break;
+
+	case UNSPEC_VTERNLOG:
 	  *total = cost->sse_op;
-	  *total += rtx_cost (XVECEXP (x, 0, 0), mode, code, 0, speed);
-	  *total += rtx_cost (XVECEXP (x, 0, 1), mode, code, 1, speed);
-	  *total += rtx_cost (XVECEXP (x, 0, 2), mode, code, 2, speed);
+	  if (!REG_P (XVECEXP (x, 0, 0)))
+	    *total += rtx_cost (XVECEXP (x, 0, 0), mode, code, 0, speed);
+	  if (!REG_P (XVECEXP (x, 0, 1)))
+	    *total += rtx_cost (XVECEXP (x, 0, 1), mode, code, 1, speed);
+	  if (!REG_P (XVECEXP (x, 0, 2)))
+	    *total += rtx_cost (XVECEXP (x, 0, 2), mode, code, 2, speed);
 	  return true;
-	}
-      else if (XINT (x, 1) == UNSPEC_PTEST)
-	{
+
+	case UNSPEC_PTEST:
+	  {
+	    *total = cost->sse_op;
+	    rtx test_op0 = XVECEXP (x, 0, 0);
+	    if (!rtx_equal_p (test_op0, XVECEXP (x, 0, 1)))
+	      return false;
+	    if (GET_CODE (test_op0) == AND)
+	      {
+		rtx and_op0 = XEXP (test_op0, 0);
+		if (GET_CODE (and_op0) == NOT)
+		  and_op0 = XEXP (and_op0, 0);
+		*total += rtx_cost (and_op0, GET_MODE (and_op0),
+				    AND, 0, speed)
+			  + rtx_cost (XEXP (test_op0, 1), GET_MODE (and_op0),
+				      AND, 1, speed);
+	     }
+	    else
+	      *total = rtx_cost (test_op0, GET_MODE (test_op0),
+				 UNSPEC, 0, speed);
+	  }
+	  return true;
+
+	case UNSPEC_BLENDV:
 	  *total = cost->sse_op;
-	  rtx test_op0 = XVECEXP (x, 0, 0);
-	  if (!rtx_equal_p (test_op0, XVECEXP (x, 0, 1)))
-	    return false;
-	  if (GET_CODE (test_op0) == AND)
+	  if (!REG_P (XVECEXP (x, 0, 0)))
+	    *total += rtx_cost (XVECEXP (x, 0, 0), mode, code, 0, speed);
+	  if (!REG_P (XVECEXP (x, 0, 1)))
+	    *total += rtx_cost (XVECEXP (x, 0, 1), mode, code, 1, speed);
+	  if (!REG_P (XVECEXP (x, 0, 2)))
 	    {
-	      rtx and_op0 = XEXP (test_op0, 0);
-	      if (GET_CODE (and_op0) == NOT)
-		and_op0 = XEXP (and_op0, 0);
-	      *total += rtx_cost (and_op0, GET_MODE (and_op0),
-				  AND, 0, speed)
-			+ rtx_cost (XEXP (test_op0, 1), GET_MODE (and_op0),
-				    AND, 1, speed);
+	      rtx cond = XVECEXP (x, 0, 2);
+	      if ((GET_CODE (cond) == LT || GET_CODE (cond) == GT)
+		  && CONST_VECTOR_P (XEXP (cond, 1)))
+		{
+		  /* avx2_blendvpd256_gt and friends.  */
+		  if (!REG_P (XEXP (cond, 0)))
+		    *total += rtx_cost (XEXP (cond, 0), mode, code, 2, speed);
+		}
+	      else
+		*total += rtx_cost (cond, mode, code, 2, speed);
 	    }
-	  else
-	    *total = rtx_cost (test_op0, GET_MODE (test_op0),
-			       UNSPEC, 0, speed);
 	  return true;
+
+	case UNSPEC_MOVMSK:
+	  *total = cost->sse_op;
+	  return true;
+
+	default:
+	  break;
 	}
       return false;
 
@@ -23412,6 +23479,70 @@ ix86_rtx_costs (rtx x, machine_mode mode, int outer_code_i, int opno,
 	    *total += rtx_cost (XEXP (x, 1), mode, code, 1, speed);
 	  if (!REG_P (XEXP (x, 2)))
 	    *total += rtx_cost (XEXP (x, 2), mode, code, 2, speed);
+	  return true;
+	}
+      return false;
+
+    case EQ:
+    case GT:
+    case GTU:
+    case LT:
+    case LTU:
+      if (TARGET_SSE2
+	  && GET_MODE_CLASS (mode) == MODE_VECTOR_INT
+	  && GET_MODE_SIZE (mode) >= 8)
+	{
+	  /* vpcmpeq */
+	  *total = speed ? COSTS_N_INSNS (1) : COSTS_N_BYTES (4);
+	  if (!REG_P (XEXP (x, 0)))
+	    *total += rtx_cost (XEXP (x, 0), mode, code, 0, speed);
+	  if (!REG_P (XEXP (x, 1)))
+	    *total += rtx_cost (XEXP (x, 1), mode, code, 1, speed);
+	  return true;
+	}
+      if (TARGET_XOP
+	  && GET_MODE_CLASS (mode) == MODE_VECTOR_INT
+	  && GET_MODE_SIZE (mode) <= 16)
+	{
+	  /* vpcomeq */
+	  *total = speed ? COSTS_N_INSNS (1) : COSTS_N_BYTES (6);
+	  if (!REG_P (XEXP (x, 0)))
+	    *total += rtx_cost (XEXP (x, 0), mode, code, 0, speed);
+	  if (!REG_P (XEXP (x, 1)))
+	    *total += rtx_cost (XEXP (x, 1), mode, code, 1, speed);
+	  return true;
+	}
+      return false;
+
+    case NE:
+    case GE:
+    case GEU:
+      if (TARGET_XOP
+	  && GET_MODE_CLASS (mode) == MODE_VECTOR_INT
+	  && GET_MODE_SIZE (mode) <= 16)
+	{
+	  /* vpcomneq */
+	  *total = speed ? COSTS_N_INSNS (1) : COSTS_N_BYTES (6);
+	  if (!REG_P (XEXP (x, 0)))
+	    *total += rtx_cost (XEXP (x, 0), mode, code, 0, speed);
+	  if (!REG_P (XEXP (x, 1)))
+	    *total += rtx_cost (XEXP (x, 1), mode, code, 1, speed);
+	  return true;
+	}
+      if (TARGET_SSE2
+	  && GET_MODE_CLASS (mode) == MODE_VECTOR_INT
+	  && GET_MODE_SIZE (mode) >= 8)
+	{
+	  if (TARGET_AVX512F && GET_MODE_SIZE (mode) >= 16)
+	    /* vpcmpeq + vpternlog */
+	    *total = speed ? COSTS_N_INSNS (2) : COSTS_N_BYTES (11);
+	  else
+	    /* vpcmpeq + pxor + vpcmpeq */
+	    *total = speed ? COSTS_N_INSNS (3) : COSTS_N_BYTES (12);
+	  if (!REG_P (XEXP (x, 0)))
+	    *total += rtx_cost (XEXP (x, 0), mode, code, 0, speed);
+	  if (!REG_P (XEXP (x, 1)))
+	    *total += rtx_cost (XEXP (x, 1), mode, code, 1, speed);
 	  return true;
 	}
       return false;
@@ -27588,7 +27719,7 @@ ix86_bitint_type_info (int n, struct bitint_info *info)
     info->limb_mode = DImode;
   info->abi_limb_mode = info->limb_mode;
   info->big_endian = false;
-  info->extended = false;
+  info->extended = bitint_ext_undef;
   return true;
 }
 

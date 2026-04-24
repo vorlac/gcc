@@ -3801,6 +3801,27 @@ proc check_fork_available {} {
     return [check_function_available "fork"]
 }
 
+# Returns true iff "fork" is working on the target system.
+
+proc check_fork_runtime {} {
+    if { ![check_fork_available] } {
+	return 0
+    }
+
+    return [check_runtime fork_runtime {
+       #include <unistd.h>
+       #include <stdlib.h>
+
+       int main()
+       {
+	 pid_t p = fork();
+	 if (p < 0)
+	   abort();
+	 return 0;
+       }
+    }]
+}
+
 # Returns true iff "mkfifo" is available on the target system.
 
 proc check_mkfifo_available {} {
@@ -4596,7 +4617,9 @@ proc check_effective_target_vect_cmdline_needed { } {
 	     || ([istarget powerpc*-*-*]
 		 && [check_effective_target_powerpc_altivec])
 	     || ([istarget sparc*-*-*] && [check_effective_target_sparc_vis])
-	     || ([istarget arm*-*-*] && [check_effective_target_arm_neon])
+	     || ([istarget arm*-*-*] && ([check_effective_target_arm_neon]
+					 || [check_effective_target_arm_mve])
+		 )
 	     || [istarget aarch64*-*-*]
 	     || [istarget amdgcn*-*-*]
 	     || [istarget riscv*-*-*]
@@ -6247,6 +6270,7 @@ foreach { armfunc armflag armdefs } {
 	v8_1m_main "-march=armv8.1-m.main+fp -mthumb" __ARM_ARCH_8M_MAIN__
 	v8_1m_main_pacbti "-march=armv8.1-m.main+pacbti+fp -mthumb"
 		"__ARM_ARCH_8M_MAIN__ && __ARM_FEATURE_BTI && __ARM_FEATURE_PAUTH"
+	v8_1m_main_fp_hard "-march=armv8.1-m.main+pacbti+fp -mthumb -mfpu=auto -mfloat-abi=hard" "__ARM_ARCH_8M_MAIN__ && (__ARM_FP & 2)"
 	v9a "-march=armv9-a+simd" __ARM_ARCH_9A__ } {
     eval [string map [list FUNC $armfunc FLAG $armflag DEFS $armdefs ] {
 	proc check_effective_target_arm_arch_FUNC_ok { } {
@@ -6350,6 +6374,22 @@ foreach { armfunc armflag armdefs } {
 	    } [add_options_for_arm_cpu_FUNC ""]]
 	}
     }]
+}
+
+# Return 1 if current target supports both single- and double-precision FP
+proc check_effective_target_arm_mixed_fp { } {
+    if { ![istarget arm*-*-*] } {
+	return 0
+    }
+
+    return [check_no_compiler_messages arm_mixed_fp assembly {
+	#ifndef __ARM_FP
+	# error __ARM_FP not defined
+	#elif ((__ARM_FP & 0xc) == 0xc)
+	# error __ARM_FP indicates that both single- and double-precision FP are supported
+	#endif
+	int main (void) { return 0; }
+    } "" ]
 }
 
 # Return 1 if GCC was configured with --with-mode=
@@ -11045,7 +11085,7 @@ proc check_effective_target_d_runtime_has_std_library { } {
 
 	extern(C) int main() {
 	    import std.math;
-	    real function(real) pcos = &cos;
+	    real function(real) pcos = &acos;
 	    return 0;
 	}
     }]
@@ -12718,14 +12758,9 @@ set exts {
     "fp" "fp8" "fp8dot2" "fp8dot4" "fp8fma" "i8mm" "ls64" "lse" "lut"
     "sb" "simd" "sve-b16b16" "sve" "sve2" "sve-sm4" "sve-aes" "sve-bitperm"
     "sve-sha3" "f8f16mm" "f8f32mm" "sve-f16f32mm"
-}
-
-# We don't support SME without SVE2, so we'll use armv9 as the base
-# archiecture for SME and the features that require it.
-set exts_sve2 {
     "sme-f8f16" "sme-f8f32"
     "sme-b16b16" "sme-f16f16" "sme-i16i64" "sme" "sme2" "sme2p1"
-    "ssve-fp8dot2" "ssve-fp8dot4" "ssve-fp8fma" "sve-bfscale"
+    "ssve-fp8dot2" "ssve-fp8dot4" "ssve-fp8fma" "sve-bfscale" "sme-lutv2"
 }
 
 foreach { aarch64_ext } $exts {
@@ -12735,20 +12770,6 @@ foreach { aarch64_ext } $exts {
 		return [check_no_compiler_messages aarch64_FUNC_assembler object {
 			__asm__ (".arch_extension FUNC");
 		} "-march=armv8-a+FUNC"]
-	  } else {
-		return 0
-	  }
-	}
-    }]
-}
-
-foreach { aarch64_ext } $exts_sve2 {
-    eval [string map [list FUNC $aarch64_ext] {
-	proc check_effective_target_aarch64_asm_FUNC_ok { } {
-	  if { [istarget aarch64*-*-*] } {
-		return [check_no_compiler_messages aarch64_FUNC_assembler object {
-			__asm__ (".arch_extension FUNC");
-		} "-march=armv9-a+FUNC"]
 	  } else {
 		return 0
 	  }
@@ -14311,37 +14332,43 @@ proc check_effective_target___OPTIMIZE__ {} {
 # Return 1 if python3 (>= 3.6) is available.
 
 proc check_effective_target_recent_python3 { } {
-    set result [remote_exec host "python3 -c \"import sys; assert sys.version_info >= (3, 6)\""]
-    set status [lindex $result 0]
-    if { $status == 0 } then {
-	return 1;
-    } else {
-	return 0;
-    }
+    return [check_cached_effective_target recent_python3 {
+	set result [remote_exec host "python3 -c \"import sys; assert sys.version_info >= (3, 6)\""]
+	set status [lindex $result 0]
+	if { $status == 0 } then {
+	    return 1;
+	} else {
+	    return 0;
+	}
+    }]
 }
 
 # Return 1 if python3 contains a module
 
 proc check_effective_target_python3_module { module } {
-    set result [remote_exec host "python3 -c \"import $module\""]
-    set status [lindex $result 0]
-    if { $status == 0 } then {
-	return 1;
-    } else {
-	return 0;
-    }
+    return [check_cached_effective_target python3_module_$module {
+	set result [remote_exec host "python3 -c \"import $module\""]
+	set status [lindex $result 0]
+	if { $status == 0 } then {
+	    return 1;
+	} else {
+	    return 0;
+	}
+    }]
 }
 
 # Return 1 if pytest module is available for python3.
 
 proc check_effective_target_pytest3 { } {
-    set result [remote_exec host "python3 -m pytest --color=no -rap -s --tb=no --version"]
-    set status [lindex $result 0]
-    if { $status == 0 } then {
-	return 1;
-    } else {
-	return 0;
-    }
+    return [check_cached_effective_target pytest3 {
+	set result [remote_exec host "python3 -m pytest --color=no -rap -s --tb=no --version"]
+	set status [lindex $result 0]
+	if { $status == 0 } then {
+	    return 1;
+	} else {
+	    return 0;
+	}
+    }]
 }
 
 proc check_effective_target_property_1_needed { } {

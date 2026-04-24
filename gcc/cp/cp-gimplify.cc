@@ -979,6 +979,32 @@ cp_gimplify_expr (tree *expr_p, gimple_seq *pre_p, gimple_seq *post_p)
 			  "__builtin_eh_ptr_adjust_ref");
 		*expr_p = void_node;
 		break;
+	      case CP_BUILT_IN_CURRENT_EXCEPTION:
+	      case CP_BUILT_IN_UNCAUGHT_EXCEPTIONS:
+		{
+		  const char *name
+		    = (DECL_FE_FUNCTION_CODE (decl)
+		       == CP_BUILT_IN_CURRENT_EXCEPTION
+		       ? "current_exception" : "uncaught_exceptions");
+		  tree newdecl = lookup_qualified_name (std_node, name);
+		  if (error_operand_p (newdecl))
+		    *expr_p = build_zero_cst (TREE_TYPE (*expr_p));
+		  else if (TREE_CODE (newdecl) != FUNCTION_DECL
+			   || !same_type_p (TREE_TYPE (TREE_TYPE (newdecl)),
+					    TREE_TYPE (TREE_TYPE (decl)))
+			   || (TYPE_ARG_TYPES (TREE_TYPE (newdecl))
+			       != void_list_node))
+		    {
+		      error_at (EXPR_LOCATION (*expr_p),
+				"unexpected %<std::%s%> declaration",
+				name);
+		      *expr_p = build_zero_cst (TREE_TYPE (*expr_p));
+		    }
+		  else
+		    *expr_p = build_call_expr_loc (EXPR_LOCATION (*expr_p),
+						   newdecl, 0);
+		  break;
+		}
 	      case CP_BUILT_IN_IS_STRING_LITERAL:
 		*expr_p
 		  = fold_builtin_is_string_literal (EXPR_LOCATION (*expr_p),
@@ -1691,7 +1717,8 @@ cp_fold_r (tree *stmt_p, int *walk_subtrees, void *data_)
       break;
 
     case TARGET_EXPR:
-      if (!flag_no_inline)
+      if (!flag_no_inline
+	  && (data->flags & ff_genericize))
 	if (tree &init = TARGET_EXPR_INITIAL (stmt))
 	  {
 	    tree folded = maybe_constant_init (init, TARGET_EXPR_SLOT (stmt),
@@ -3743,6 +3770,7 @@ cp_fold (tree x, fold_flags_t flags)
 	if ((OPTION_SET_P (flag_fold_simple_inlines)
 	     ? flag_fold_simple_inlines
 	     : !flag_no_inline)
+	    && !(flags & ff_only_non_odr)
 	    && call_expr_nargs (x) == 1
 	    && decl_in_std_namespace_p (callee)
 	    && DECL_NAME (callee) != NULL_TREE
@@ -3855,6 +3883,7 @@ cp_fold (tree x, fold_flags_t flags)
 	   Do constexpr expansion of expressions where the call itself is not
 	   constant, but the call followed by an INDIRECT_REF is.  */
 	if (callee && DECL_DECLARED_CONSTEXPR_P (callee)
+	    && !(flags & ff_only_non_odr)
 	    && (!flag_no_inline
 		|| lookup_attribute ("always_inline",
 				     DECL_ATTRIBUTES (callee))))

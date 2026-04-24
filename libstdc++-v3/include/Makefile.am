@@ -100,6 +100,7 @@ std_headers = \
 	${std_srcdir}/semaphore \
 	${std_srcdir}/set \
 	${std_srcdir}/shared_mutex \
+	${std_srcdir}/simd \
 	${std_srcdir}/spanstream \
 	${std_srcdir}/sstream \
 	${std_srcdir}/syncstream \
@@ -243,7 +244,9 @@ bits_headers = \
 	${bits_srcdir}/node_handle.h \
 	${bits_srcdir}/ostream.tcc \
 	${bits_srcdir}/ostream_insert.h \
+	${bits_srcdir}/ostream_print.h \
 	${bits_srcdir}/postypes.h \
+	${bits_srcdir}/print.h \
 	${bits_srcdir}/quoted_string.h \
 	${bits_srcdir}/random.h \
 	${bits_srcdir}/random.tcc \
@@ -264,6 +267,16 @@ bits_headers = \
 	${bits_srcdir}/shared_ptr.h \
 	${bits_srcdir}/shared_ptr_atomic.h \
 	${bits_srcdir}/shared_ptr_base.h \
+	${bits_srcdir}/simd_alg.h \
+	${bits_srcdir}/simd_details.h \
+	${bits_srcdir}/simd_flags.h \
+	${bits_srcdir}/simd_iterator.h \
+	${bits_srcdir}/simd_loadstore.h \
+	${bits_srcdir}/simd_mask.h \
+	${bits_srcdir}/simd_mask_reductions.h \
+	${bits_srcdir}/simd_reductions.h \
+	${bits_srcdir}/simd_vec.h \
+	${bits_srcdir}/simd_x86.h \
 	${bits_srcdir}/slice_array.h \
 	${bits_srcdir}/specfun.h \
 	${bits_srcdir}/sstream.tcc \
@@ -296,6 +309,7 @@ bits_headers = \
 	${bits_srcdir}/valarray_array.tcc \
 	${bits_srcdir}/valarray_before.h \
 	${bits_srcdir}/valarray_after.h \
+	${bits_srcdir}/vec_ops.h \
 	${bits_srcdir}/vector.tcc
 endif GLIBCXX_HOSTED
 
