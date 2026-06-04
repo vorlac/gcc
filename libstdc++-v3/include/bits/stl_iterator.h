@@ -1744,7 +1744,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
     inline _GLIBCXX17_CONSTEXPR bool
     operator==(const move_iterator<_Iterator>& __x,
 	       const move_iterator<_Iterator>& __y)
-    // N.B. No contraints, x.base() == y.base() is always well-formed.
+    // N.B. No constraints, x.base() == y.base() is always well-formed.
     { return __x.base() == __y.base(); }
 
 #ifdef __cpp_lib_three_way_comparison
@@ -2619,6 +2619,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
 
   template<input_iterator _It> class basic_const_iterator;
 
+  /// @cond undocumented
   namespace __detail
   {
     template<typename _It>
@@ -2646,11 +2647,13 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
       struct __basic_const_iterator_iter_cat<_It>
       { using iterator_category = __iter_category_t<_It>; };
   } // namespace detail
+  /// @endcond
 
   template<input_iterator _It>
     using const_iterator
       = __conditional_t<__detail::__constant_iterator<_It>, _It, basic_const_iterator<_It>>;
 
+  /// @cond undocumented
   namespace __detail
   {
     template<typename _Sent>
@@ -2661,6 +2664,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
       struct __const_sentinel<_Sent>
       { using type = const_iterator<_Sent>; };
   } // namespace __detail
+  /// @endcond
 
   template<semiregular _Sent>
     using const_sentinel = typename __detail::__const_sentinel<_Sent>::type;
@@ -2691,6 +2695,9 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
     template<input_iterator _It2> friend class basic_const_iterator;
 
   public:
+    // _GLIBCXX_RESOLVE_LIB_DEFECTS
+    // 4253. basic_const_iterator should provide iterator_type
+    using iterator_type = _It;
     using iterator_concept = decltype(_S_iter_concept());
     using value_type = iter_value_t<_It>;
     using difference_type = iter_difference_t<_It>;

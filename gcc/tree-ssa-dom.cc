@@ -42,7 +42,6 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-ssa-scopedtables.h"
 #include "tree-ssa-threadedge.h"
 #include "tree-ssa-dom.h"
-#include "gimplify.h"
 #include "tree-cfgcleanup.h"
 #include "dbgcnt.h"
 #include "alloc-pool.h"
@@ -524,6 +523,11 @@ record_edge_info (basic_block bb)
 	    {
 	      int i;
               int n_labels = gimple_switch_num_labels (switch_stmt);
+	      /* info contains NULL, error_mark_node or a value.
+		 error_mark signifies there are multiple values already.
+		 A NULL signifies there it is uninitialized.
+		 A value signifies that is the only value on that edge
+		 to that bb.  */
 	      tree *info = XCNEWVEC (tree, last_basic_block_for_fn (cfun));
 
 	      for (i = 0; i < n_labels; i++)
@@ -531,23 +535,27 @@ record_edge_info (basic_block bb)
 		  tree label = gimple_switch_label (switch_stmt, i);
 		  basic_block target_bb
 		    = label_to_block (cfun, CASE_LABEL (label));
+		  /* The default case is a case with multiple values.
+		     If the value is already set then it has multiple values.  */
 		  if (CASE_HIGH (label)
 		      || !CASE_LOW (label)
 		      || info[target_bb->index])
 		    info[target_bb->index] = error_mark_node;
 		  else
-		    info[target_bb->index] = label;
+		    /* Record the one value that can be on that edge to the
+		       target_bb.  */
+		    info[target_bb->index] = CASE_LOW (label);
 		}
 
 	      FOR_EACH_EDGE (e, ei, bb->succs)
 		{
 		  basic_block target_bb = e->dest;
-		  tree label = info[target_bb->index];
+		  tree value = info[target_bb->index];
 
-		  if (label != NULL && label != error_mark_node)
+		  if (value != NULL && value != error_mark_node)
 		    {
 		      tree x = fold_convert_loc (loc, TREE_TYPE (index),
-						 CASE_LOW (label));
+						 value);
 		      edge_info = new class edge_info (e);
 		      edge_info->record_simple_equiv (index, x);
 		    }
@@ -817,7 +825,7 @@ private:
   gcond *m_dummy_cond;
 
   /* Optimize a single statement within a basic block using the
-     various tables mantained by DOM.  Returns the taken edge if
+     various tables maintained by DOM.  Returns the taken edge if
      the statement is a conditional with a statically determined
      value.  */
   edge optimize_stmt (basic_block, gimple_stmt_iterator *, bool *);
@@ -1030,7 +1038,7 @@ pass_dominator::execute (function *fun)
   /* Fixup stmts that became noreturn calls.  This may require splitting
      blocks and thus isn't possible during the dominator walk or before
      jump threading finished.  Do this in reverse order so we don't
-     inadvertedly remove a stmt we want to fixup by visiting a dominating
+     inadvertently remove a stmt we want to fixup by visiting a dominating
      now noreturn call first.  */
   while (!need_noreturn_fixup.is_empty ())
     {

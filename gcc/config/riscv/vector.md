@@ -85,10 +85,10 @@
 	 (const_string "true")]
 	(const_string "false")))
 
-;; The default SEW of RVV instruction. This attribute doesn't mean the instruction
-;; is necessary to require SEW check for example vlm.v which require ratio to
-;; check. However, we need default value of SEW for vsetvl instruction since there
-;; is no field for ratio in the vsetvl instruction encoding.
+;; The default SEW of RVV instruction.  This attribute doesn't mean the
+;; instruction is necessary to require SEW check for example vlm.v which require
+;; ratio to check.  However, we need default value of SEW for vsetvl instruction
+;; since there is no field for ratio in the vsetvl instruction encoding.
 (define_attr "sew" ""
   (cond [(eq_attr "mode" "RVVMF8BI,RVVMF4BI,RVVMF2BI,RVVM1BI,\
 			  RVVM8QI,RVVM4QI,RVVM2QI,RVVM1QI,RVVMF2QI,RVVMF4QI,RVVMF8QI,\
@@ -1001,7 +1001,7 @@
 	   (const_int 4)]
 	(const_int INVALID_ATTRIBUTE)))
 
-;; Defines rounding mode of an fixed-point operation.
+;; Defines rounding mode of a fixed-point operation.
 
 (define_attr "vxrm_mode" "rnu,rne,rdn,rod,clobber,none"
   (cond [(eq_attr "type" "vaalu,vsmul,vsshift,vnclip")
@@ -1022,7 +1022,7 @@
 	 (const_string "clobber")]
         (const_string "none")))
 
-;; Defines rounding mode of an floating-point operation.
+;; Defines rounding mode of a floating-point operation.
 (define_attr "frm_mode" ""
   (cond [(eq_attr "type" "vfalu,vfwalu,vfmul,vfdiv,vfwmul")
 	 (symbol_ref "riscv_vector::FRM_DYN")]
@@ -1188,7 +1188,7 @@
 	 registers.
 
        - We can not leave it to TARGET_SECONDARY_RELOAD since it happens
-	 before spilling. The clobber scratch is used by spilling fractional
+	 before spilling.  The clobber scratch is used by spilling fractional
 	 registers in IRA/LRA so it's too early.  */
   if (TARGET_XTHEADVECTOR && reg_or_mem_operand (operands[1], <MODE>mode))
     {
@@ -1223,7 +1223,9 @@
 ;;       (clobber (reg:SI 14 a4 [149]))])
 ;; So that we could be able to emit vsetvl instruction using clobber scratch a4.
 ;; To let LRA generate the expected pattern, we should exclude fractional vector
-;; load/store in "*mov<mode>_whole". Otherwise, it will reload this pattern into:
+;; load/store in "*mov<mode>_whole".  Otherwise, it will reload this pattern
+;; into:
+
 ;;  (insn 20 19 9 2 (set (reg:RVVMF4QI 98 v2 [orig:134 _1 ] [134])
 ;;           (mem/c:RVVMF4QI (reg:SI 13 a3 [155]) [1 %sfp+[-2, -2] S[2, 2] A8])))
 ;; which is not the pattern we want.
@@ -1686,10 +1688,10 @@
 ;; VL/VTYPE global registers status after "insert-vsetvl" PASS.
 
 ;; -  "@vsetvl<mode>_no_side_effects" has no side effects and excludes VL/VTYPE
-;; global registers status (define set). It's only used by GCC standard pattern
-;; expansion. For example: "mov<mode>" pattern for fractional vector modes which
-;; need to set VL/VTYPE. Then we could manually call this pattern to gain benefits
-;; from the optimization of each GCC internal PASS.
+;; global registers status (define set).  It's only used by GCC standard pattern
+;; expansion.  For example: "mov<mode>" pattern for fractional vector modes
+;; which need to set VL/VTYPE.  Then we could manually call this pattern to gain
+;; benefits from the optimization of each GCC internal PASS.
 
 ;; 1. void foo (float *in, float *out)
 ;;    {
@@ -1860,9 +1862,9 @@
 ;; The reason we can remove signe_extend is because currently the vl value
 ;; returned by the vsetvl instruction ranges from 0 to 65536 (uint16_t), and
 ;; bits 17 to 63 (including 31) are always 0, so there is no change after
-;; sign_extend. Note that for HI and QI modes we cannot do this.
+;; sign_extend.  Note that for HI and QI modes we cannot do this.
 ;; Of course, if the range of instructions returned by vsetvl later expands
-;; to 32bits, then this combine pattern needs to be removed. But that could be
+;; to 32 bits, then this combine pattern needs to be removed.  But that could be
 ;; a long time from now.
 (define_insn_and_split "*vsetvldi_no_side_effects_si_extend"
   [(set (match_operand:DI 0 "register_operand")
@@ -1967,7 +1969,16 @@
    vse<sew>.v\t%3,%0%p1
    vmv.v.v\t%0,%3
    vmv.v.v\t%0,%3"
-  "&& riscv_vector::whole_reg_to_reg_move_p (operands, <MODE>mode, 7)"
+  "&& (register_operand (operands[0], <MODE>mode)
+       && register_operand (operands[3], <MODE>mode)
+       && riscv_vector::whole_reg_move_p (operands, <MODE>mode, 7))
+      || ((memory_operand (operands[0], <MODE>mode)
+	  || memory_operand (operands[3], <MODE>mode))
+	 && operands[2] != operands[0]
+	 && !reload_completed
+	 && riscv_vector::whole_reg_loadstore_p (operands[0], operands[3],
+						 operands[1], operands[4],
+						 operands[7]))"
   [(set (match_dup 0) (match_dup 3))]
   ""
   [(set_attr "type" "vlde,vlde,vlde,vste,vimov,vimov")
@@ -1975,7 +1986,7 @@
 
 ;; Dedicated pattern for vse.v instruction since we can't reuse pred_mov pattern to include
 ;; memory operand as input which will produce inferior codegen.
-(define_insn "@pred_store<mode>"
+(define_insn_and_split "@pred_store<mode>"
   [(set (match_operand:V_VLS 0 "memory_operand"                 "+m")
 	(if_then_else:V_VLS
 	  (unspec:<VM>
@@ -1988,6 +1999,12 @@
 	  (match_dup 0)))]
   "TARGET_VECTOR"
   "vse<sew>.v\t%2,%0%p1"
+  "&& !reload_completed
+  && riscv_vector::whole_reg_loadstore_p (operands[0], operands[2],
+					  operands[1], operands[3],
+					  operands[4])"
+  [(set (match_dup 0) (match_dup 2))]
+  ""
   [(set_attr "type" "vste")
    (set_attr "mode" "<MODE>")
    (set (attr "avl_type_idx") (const_int 4))
@@ -2016,7 +2033,7 @@
    vmmv.m\t%0,%3
    vmclr.m\t%0
    vmset.m\t%0"
-  "&& riscv_vector::whole_reg_to_reg_move_p (operands, <MODE>mode, 5)"
+  "&& riscv_vector::whole_reg_move_p (operands, <MODE>mode, 5)"
   [(set (match_dup 0) (match_dup 3))]
   ""
   [(set_attr "type" "vldm,vstm,vmalu,vmalu,vmalu")
@@ -2934,7 +2951,7 @@
   [(set_attr "type" "vialu")
    (set_attr "mode" "<MODE>")])
 
-;; Handle GET_MODE_INNER (mode) = DImode. We need to split them since
+;; Handle GET_MODE_INNER (mode) = DImode.  We need to split them since
 ;; we need to deal with SEW = 64 in RV32 system.
 (define_expand "@pred_<optab><mode>_scalar"
   [(set (match_operand:V_VLSI_D 0 "register_operand")
@@ -4717,7 +4734,7 @@
   [(set_attr "type" "<sat_insn_type>")
    (set_attr "mode" "<MODE>")])
 
-;; Handle GET_MODE_INNER (mode) = DImode. We need to split them since
+;; Handle GET_MODE_INNER (mode) = DImode.  We need to split them since
 ;; we need to deal with SEW = 64 in RV32 system.
 (define_expand "@pred_<sat_op><mode>_scalar"
   [(set (match_operand:V_VLSI_D 0 "register_operand")
@@ -5102,7 +5119,7 @@
    (set_attr "mode" "<MODE>")
    (set_attr "spec_restriction" "none,thv,thv,none,none")])
 
-;; Handle GET_MODE_INNER (mode) = DImode. We need to split them since
+;; Handle GET_MODE_INNER (mode) = DImode.  We need to split them since
 ;; we need to deal with SEW = 64 in RV32 system.
 (define_expand "@pred_cmp<mode>_scalar"
   [(set (match_operand:<VM> 0 "register_operand")
@@ -6163,8 +6180,8 @@
 ;; -------------------------------------------------------------------------------
 
 ;; We keep this pattern same as pred_mov so that we can gain more optimizations.
-;; For example, if we have vmxor.mm v1,v1,v1. It will be optimized as vmclr.m which
-;; is generated by pred_mov.
+;; For example, if we have vmxor.mm v1,v1,v1.  It will be optimized
+;; as vmclr.m which is generated by pred_mov.
 (define_insn "@pred_<optab><mode>"
   [(set (match_operand:VB_VLS 0 "register_operand"                   "=vr")
 	(if_then_else:VB_VLS

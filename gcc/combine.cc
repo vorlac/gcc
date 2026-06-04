@@ -8118,59 +8118,12 @@ make_compound_operation_int (scalar_int_mode mode, rtx *x_ptr,
       break;
 
     case PLUS:
-      lhs = XEXP (x, 0);
-      rhs = XEXP (x, 1);
-      lhs = make_compound_operation (lhs, next_code);
-      rhs = make_compound_operation (rhs, next_code);
-      if (GET_CODE (lhs) == MULT && GET_CODE (XEXP (lhs, 0)) == NEG)
-	{
-	  tem = simplify_gen_binary (MULT, mode, XEXP (XEXP (lhs, 0), 0),
-				     XEXP (lhs, 1));
-	  new_rtx = simplify_gen_binary (MINUS, mode, rhs, tem);
-	}
-      else if (GET_CODE (lhs) == MULT
-	       && (CONST_INT_P (XEXP (lhs, 1)) && INTVAL (XEXP (lhs, 1)) < 0))
-	{
-	  tem = simplify_gen_binary (MULT, mode, XEXP (lhs, 0),
-				     simplify_gen_unary (NEG, mode,
-							 XEXP (lhs, 1),
-							 mode));
-	  new_rtx = simplify_gen_binary (MINUS, mode, rhs, tem);
-	}
-      else
-	{
-	  SUBST (XEXP (x, 0), lhs);
-	  SUBST (XEXP (x, 1), rhs);
-	}
-      maybe_swap_commutative_operands (x);
-      return x;
-
     case MINUS:
-      lhs = XEXP (x, 0);
-      rhs = XEXP (x, 1);
-      lhs = make_compound_operation (lhs, next_code);
-      rhs = make_compound_operation (rhs, next_code);
-      if (GET_CODE (rhs) == MULT && GET_CODE (XEXP (rhs, 0)) == NEG)
-	{
-	  tem = simplify_gen_binary (MULT, mode, XEXP (XEXP (rhs, 0), 0),
-				     XEXP (rhs, 1));
-	  return simplify_gen_binary (PLUS, mode, tem, lhs);
-	}
-      else if (GET_CODE (rhs) == MULT
-	       && (CONST_INT_P (XEXP (rhs, 1)) && INTVAL (XEXP (rhs, 1)) < 0))
-	{
-	  tem = simplify_gen_binary (MULT, mode, XEXP (rhs, 0),
-				     simplify_gen_unary (NEG, mode,
-							 XEXP (rhs, 1),
-							 mode));
-	  return simplify_gen_binary (PLUS, mode, tem, lhs);
-	}
-      else
-	{
-	  SUBST (XEXP (x, 0), lhs);
-	  SUBST (XEXP (x, 1), rhs);
-	  return x;
-	}
+      lhs = make_compound_operation (XEXP (x, 0), next_code);
+      rhs = make_compound_operation (XEXP (x, 1), next_code);
+      if (lhs != XEXP (x, 0) || rhs != XEXP (x, 1))
+	return simplify_gen_binary (code, mode, lhs, rhs);
+      return x;
 
     case AND:
       /* If the second operand is not a constant, we can't do anything
@@ -8436,6 +8389,12 @@ make_compound_operation_int (scalar_int_mode mode, rtx *x_ptr,
 	  subreg_code = SET;
 
 	tem = make_compound_operation (inner, subreg_code);
+
+	/* TEM's code might be CLOBBER if combine_simplify_rtx
+	   could not transform a subexpression, e.g. a volatile MEM.
+	   simplify_subreg cannot be called with clobber, so bail out.  */
+	if (GET_CODE (tem) == CLOBBER)
+	  return NULL_RTX;
 
 	simplified
 	  = simplify_subreg (mode, tem, GET_MODE (inner), SUBREG_BYTE (x));
@@ -11572,12 +11531,42 @@ recog_for_combine_1 (rtx *pnewpat, rtx_insn *insn, rtx *pnotes,
       REG_NOTES (insn) = notes;
       INSN_CODE (insn) = insn_code_number;
 
-      /* Allow targets to reject combined insn.  */
-      if (!targetm.legitimate_combined_insn (insn))
+      /* Do not accept an insn if hard register constraints are used.  For
+	 example, assume that the first insn is combined into the last one:
+
+	 r100=...
+	 %5=...
+	 r101=exp(r100)
+
+	 If the resulting insn has an operand which is constrained to hard
+	 register %5, then this introduces a conflict since register %5 is live
+	 at this point.  Therefore, skip for now.  This is a sledge hammer
+	 approach.  Ideally we would skip based on the fact whether a
+	 combination crosses a hard register assignment and the corresponding
+	 hard register is also referred by a single register constraint of the
+	 resulting insn.  */
+      bool has_hard_reg_cstr = false;
+      extract_insn (insn);
+      for (int nop = recog_data.n_operands - 1; nop >= 0; --nop)
+	if (strchr (recog_data.constraints[nop], '{'))
+	  {
+	    has_hard_reg_cstr = true;
+	    break;
+	  }
+
+      /* Don't accept hard register constraints.  Allow targets to reject
+	 combined insn.  */
+      if (has_hard_reg_cstr || !targetm.legitimate_combined_insn (insn))
 	{
 	  if (dump_file && (dump_flags & TDF_DETAILS))
-	    fputs ("Instruction not appropriate for target.",
-		   dump_file);
+	    {
+	      if (has_hard_reg_cstr)
+		fputs ("Instruction makes use of hard register constraints.",
+		       dump_file);
+	      else
+		fputs ("Instruction not appropriate for target.",
+		       dump_file);
+	    }
 
 	  /* Callers expect recog_for_combine to strip
 	     clobbers from the pattern on failure.  */
@@ -12617,7 +12606,7 @@ simplify_comparison (enum rtx_code code, rtx *pop0, rtx *pop1)
 
 	     The difficulty here is that we have predicates for A but not for
 	     (A - C1) so we need to check that C1 is within proper bounds so
-	     as to perturbate A as little as possible.  */
+	     as to perturb A as little as possible.  */
 
 	  if (mode_width <= HOST_BITS_PER_WIDE_INT
 	      && subreg_lowpart_p (op0)
@@ -14464,7 +14453,7 @@ distribute_notes (rtx notes, rtx_insn *from_insn, rtx_insn *i3, rtx_insn *i2,
 	    /* The landing pad handling needs to be kept in sync with the
 	       prerequisite checking in try_combine.  */
 	    int lp_nr = INTVAL (XEXP (note, 0));
-	    /* A REG_EH_REGION note transfering control can only ever come
+	    /* A REG_EH_REGION note transferring control can only ever come
 	       from i3.  */
 	    if (lp_nr > 0)
 	      gcc_assert (from_insn == i3);

@@ -254,6 +254,10 @@ along with GCC; see the file COPYING3.  If not see
 }
 #define ADJUST_REG_ALLOC_ORDER xtensa_adjust_reg_alloc_order ()
 
+/* Tell IRA to use the order we define rather than messing it up with its
+   own cost calculations.  */
+#define HONOR_REG_ALLOC_ORDER 1
+
 /* Internal macros to classify a register number.  */
 
 /* 16 address registers + fake registers */
@@ -316,6 +320,13 @@ along with GCC; see the file COPYING3.  If not see
 /* It is as good or better to call a constant function address than to
    call an address kept in a register.  */
 #define NO_FUNCTION_CSE 1
+
+/* Named address spaces.  */
+#define ADDR_SPACE_FORCE_L32 1
+#define REGISTER_TARGET_PRAGMAS()					\
+  do {									\
+    c_register_addr_space ("__force_l32", ADDR_SPACE_FORCE_L32);	\
+  } while (0)
 
 /* Xtensa processors have "register windows".  GCC does not currently
    take advantage of the possibility for variable-sized windows; instead,

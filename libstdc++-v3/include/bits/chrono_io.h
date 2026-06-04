@@ -164,7 +164,7 @@ namespace __detail
 }
 /// @endcond
 
-  /** Return an object that asssociates timezone info with a local time.
+  /** Return an object that associates timezone info with a local time.
    *
    * A `chrono::local_time` object has no timezone associated with it. This
    * function creates an object that allows formatting a `local_time` as
@@ -5234,8 +5234,12 @@ namespace __detail
 		      else
 			{
 			  // Read hh
-			  __hh = 10 * _S_try_read_digit(__is, __err);
-			  __hh += _S_try_read_digit(__is, __err);
+			  auto __d1 = _S_try_read_digit(__is, __err);
+			  auto __d2 = _S_try_read_digit(__is, __err);
+			  if (__d1 >= 0 && __d2 >= 0) [[likely]]
+			    __hh = 10 * __d1 + __d2;
+			  else
+			    __err |= ios_base::failbit;
 			}
 
 		      if (__is_failed(__err))
@@ -5269,8 +5273,12 @@ namespace __detail
 		      int_least32_t __mm = 0;
 		      if (__read_mm)
 			{
-			  __mm = 10 * _S_try_read_digit(__is, __err);
-			  __mm += _S_try_read_digit(__is, __err);
+			  auto __d1 = _S_try_read_digit(__is, __err);
+			  auto __d2 = _S_try_read_digit(__is, __err);
+			  if (__d1 >= 0 && __d2 >= 0) [[likely]]
+			    __mm = 10 * __d1 + __d2;
+			  else
+			    __err |= ios_base::failbit;
 			}
 
 		      if (!__is_failed(__err))

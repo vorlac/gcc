@@ -104,7 +104,7 @@ along with GCC; see the file COPYING3.  If not see
    precision of the type of the variable are always zero.  The
    uninteresting case is a variable of UNSIGNED type that has the
    maximum precision of the target.  Such variables can go to VARYING,
-   but this causes no loss of infomation since these variables will
+   but this causes no loss of information since these variables will
    never be extended.
 
    References:
@@ -2263,7 +2263,6 @@ evaluate_stmt (gimple *stmt)
      not attempt to fold them, including builtins that may profit.  */
   if (likelyvalue == CONSTANT)
     {
-      fold_defer_overflow_warnings ();
       simplified = ccp_fold (stmt);
       if (simplified
 	  && TREE_CODE (simplified) == SSA_NAME)
@@ -2275,10 +2274,7 @@ evaluate_stmt (gimple *stmt)
 	    {
 	      ccp_prop_value_t *val = get_value (simplified);
 	      if (val && val->lattice_val != VARYING)
-		{
-		  fold_undefer_overflow_warnings (true, stmt, 0);
-		  return *val;
-		}
+		return *val;
 	    }
 	  else
 	    /* We may also not place a non-valueized copy in the lattice
@@ -2286,7 +2282,6 @@ evaluate_stmt (gimple *stmt)
 	    simplified = NULL_TREE;
 	}
       is_constant = simplified && is_gimple_min_invariant (simplified);
-      fold_undefer_overflow_warnings (is_constant, stmt, 0);
       if (is_constant)
 	{
 	  /* The statement produced a constant value.  */
@@ -2454,6 +2449,34 @@ evaluate_stmt (gimple *stmt)
 								   prec,
 								   UNSIGNED)),
 					UNSIGNED);
+		  if (wi::sext (val.mask, prec) != -1)
+		    break;
+		}
+	      val.lattice_val = VARYING;
+	      val.value = NULL_TREE;
+	      val.mask = -1;
+	      break;
+
+	    case BUILT_IN_BITREVERSE8:
+	    case BUILT_IN_BITREVERSE16:
+	    case BUILT_IN_BITREVERSE32:
+	    case BUILT_IN_BITREVERSE64:
+	    case BUILT_IN_BITREVERSE128:
+	      val = get_value_for_expr (gimple_call_arg (stmt, 0), true);
+	      if (val.lattice_val == UNDEFINED)
+		break;
+	      else if (val.lattice_val == CONSTANT
+		       && val.value
+		       && TREE_CODE (val.value) == INTEGER_CST)
+		{
+		  tree type = TREE_TYPE (gimple_call_lhs (stmt));
+		  int prec = TYPE_PRECISION (type);
+		  wide_int wval = wi::to_wide (val.value);
+		  wval = wide_int::from (wval, prec, UNSIGNED);
+		  wide_int wmask = wide_int::from (val.mask, prec, UNSIGNED);
+		  val.value = wide_int_to_tree (type, wi::bitreverse (wval));
+		  val.mask = widest_int::from (wi::bitreverse (wmask),
+					       UNSIGNED);
 		  if (wi::sext (val.mask, prec) != -1)
 		    break;
 		}

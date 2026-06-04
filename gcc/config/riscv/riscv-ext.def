@@ -66,7 +66,7 @@ Format of DEFINE_RISCV_EXT:
     Extra flags for the extension, this is a bitmask of the
     extra flags.  The extra flags are:
     - EXT_FLAG_MACRO: Set this flag if this extension is just a macro of set of
-       extensions, and not define any new instrcutions, new CSRs or new
+       extensions, and not define any new instructions, new CSRs or new
        behaviors, the example is `b` extension is just a macro of `zba`, `zbb`
        and `zbs`.
 */
@@ -229,8 +229,8 @@ DEFINE_RISCV_EXT(
   /* DEP_EXTS */ ({}),
   /* SUPPORTED_VERSIONS */ ({{1, 0}}),
   /* FLAG_GROUP */ zi,
-  /* BITMASK_GROUP_ID */ BITMASK_NOT_YET_ALLOCATED,
-  /* BITMASK_BIT_POSITION*/ BITMASK_NOT_YET_ALLOCATED,
+  /* BITMASK_GROUP_ID */ 1,
+  /* BITMASK_BIT_POSITION*/ 20,
   /* EXTRA_EXTENSION_FLAGS */ 0)
 
 DEFINE_RISCV_EXT(
@@ -242,8 +242,8 @@ DEFINE_RISCV_EXT(
   /* DEP_EXTS */ ({}),
   /* SUPPORTED_VERSIONS */ ({{1, 0}}),
   /* FLAG_GROUP */ zi,
-  /* BITMASK_GROUP_ID */ BITMASK_NOT_YET_ALLOCATED,
-  /* BITMASK_BIT_POSITION*/ BITMASK_NOT_YET_ALLOCATED,
+  /* BITMASK_GROUP_ID */ 1,
+  /* BITMASK_BIT_POSITION*/ 25,
   /* EXTRA_EXTENSION_FLAGS */ 0)
 
 DEFINE_RISCV_EXT(
@@ -333,8 +333,8 @@ DEFINE_RISCV_EXT(
   /* DEP_EXTS */ ({"zicsr"}),
   /* SUPPORTED_VERSIONS */ ({{1, 0}}),
   /* FLAG_GROUP */ zi,
-  /* BITMASK_GROUP_ID */ BITMASK_NOT_YET_ALLOCATED,
-  /* BITMASK_BIT_POSITION*/ BITMASK_NOT_YET_ALLOCATED,
+  /* BITMASK_GROUP_ID */ 1,
+  /* BITMASK_BIT_POSITION*/ 26,
   /* EXTRA_EXTENSION_FLAGS */ 0)
 
 DEFINE_RISCV_EXT(
@@ -346,8 +346,8 @@ DEFINE_RISCV_EXT(
   /* DEP_EXTS */ ({"zicsr", "zimop"}),
   /* SUPPORTED_VERSIONS */ ({{1, 0}}),
   /* FLAG_GROUP */ zi,
-  /* BITMASK_GROUP_ID */ BITMASK_NOT_YET_ALLOCATED,
-  /* BITMASK_BIT_POSITION*/ BITMASK_NOT_YET_ALLOCATED,
+  /* BITMASK_GROUP_ID */ 1,
+  /* BITMASK_BIT_POSITION*/ 27,
   /* EXTRA_EXTENSION_FLAGS */ 0)
 
 DEFINE_RISCV_EXT(
@@ -359,8 +359,8 @@ DEFINE_RISCV_EXT(
   /* DEP_EXTS */ ({}),
   /* SUPPORTED_VERSIONS */ ({{2, 0}}),
   /* FLAG_GROUP */ zi,
-  /* BITMASK_GROUP_ID */ BITMASK_NOT_YET_ALLOCATED,
-  /* BITMASK_BIT_POSITION*/ BITMASK_NOT_YET_ALLOCATED,
+  /* BITMASK_GROUP_ID */ 1,
+  /* BITMASK_BIT_POSITION*/ 15,
   /* EXTRA_EXTENSION_FLAGS */ 0)
 
 DEFINE_RISCV_EXT(
@@ -385,8 +385,8 @@ DEFINE_RISCV_EXT(
   /* DEP_EXTS */ ({}),
   /* SUPPORTED_VERSIONS */ ({{2, 0}}),
   /* FLAG_GROUP */ zi,
-  /* BITMASK_GROUP_ID */ BITMASK_NOT_YET_ALLOCATED,
-  /* BITMASK_BIT_POSITION*/ BITMASK_NOT_YET_ALLOCATED,
+  /* BITMASK_GROUP_ID */ 1,
+  /* BITMASK_BIT_POSITION*/ 16,
   /* EXTRA_EXTENSION_FLAGS */ 0)
 
 DEFINE_RISCV_EXT(
@@ -489,8 +489,8 @@ DEFINE_RISCV_EXT(
   /* DEP_EXTS */ ({}),
   /* SUPPORTED_VERSIONS */ ({{1, 0}}),
   /* FLAG_GROUP */ za,
-  /* BITMASK_GROUP_ID */ BITMASK_NOT_YET_ALLOCATED,
-  /* BITMASK_BIT_POSITION*/ BITMASK_NOT_YET_ALLOCATED,
+  /* BITMASK_GROUP_ID */ 1,
+  /* BITMASK_BIT_POSITION*/ 21,
   /* EXTRA_EXTENSION_FLAGS */ 0)
 
 DEFINE_RISCV_EXT(
@@ -528,8 +528,8 @@ DEFINE_RISCV_EXT(
   /* DEP_EXTS */ ({"zaamo"}),
   /* SUPPORTED_VERSIONS */ ({{1, 0}}),
   /* FLAG_GROUP */ za,
-  /* BITMASK_GROUP_ID */ BITMASK_NOT_YET_ALLOCATED,
-  /* BITMASK_BIT_POSITION*/ BITMASK_NOT_YET_ALLOCATED,
+  /* BITMASK_GROUP_ID */ 1,
+  /* BITMASK_BIT_POSITION*/ 23,
   /* EXTRA_EXTENSION_FLAGS */ 0)
 
 DEFINE_RISCV_EXT(
@@ -546,6 +546,19 @@ DEFINE_RISCV_EXT(
   /* EXTRA_EXTENSION_FLAGS */ 0)
 
 DEFINE_RISCV_EXT(
+  /* NAME */ zalasr,
+  /* UPPERCASE_NAME */ ZALASR,
+  /* FULL_NAME */ "Atomic load-acquire and store-release extension",
+  /* DESC */ "",
+  /* URL */ ,
+  /* DEP_EXTS */ ({}),
+  /* SUPPORTED_VERSIONS */ ({{1, 0}}),
+  /* FLAG_GROUP */ za,
+  /* BITMASK_GROUP_ID */ 1,
+  /* BITMASK_BIT_POSITION*/ 24,
+  /* EXTRA_EXTENSION_FLAGS */ 0)
+
+DEFINE_RISCV_EXT(
   /* NAME */ zalrsc,
   /* UPPERCASE_NAME */ ZALRSC,
   /* FULL_NAME */ "Load-reserved/store-conditional subset of the A extension",
@@ -554,8 +567,8 @@ DEFINE_RISCV_EXT(
   /* DEP_EXTS */ ({}),
   /* SUPPORTED_VERSIONS */ ({{1, 0}}),
   /* FLAG_GROUP */ za,
-  /* BITMASK_GROUP_ID */ BITMASK_NOT_YET_ALLOCATED,
-  /* BITMASK_BIT_POSITION*/ BITMASK_NOT_YET_ALLOCATED,
+  /* BITMASK_GROUP_ID */ 1,
+  /* BITMASK_BIT_POSITION*/ 22,
   /* EXTRA_EXTENSION_FLAGS */ 0)
 
 DEFINE_RISCV_EXT(
@@ -608,8 +621,8 @@ DEFINE_RISCV_EXT(
   /* DEP_EXTS */ ({"zfhmin"}),
   /* SUPPORTED_VERSIONS */ ({{1, 0}}),
   /* FLAG_GROUP */ zf,
-  /* BITMASK_GROUP_ID */ BITMASK_NOT_YET_ALLOCATED,
-  /* BITMASK_BIT_POSITION*/ BITMASK_NOT_YET_ALLOCATED,
+  /* BITMASK_GROUP_ID */ 1,
+  /* BITMASK_BIT_POSITION*/ 17,
   /* EXTRA_EXTENSION_FLAGS */ 0)
 
 DEFINE_RISCV_EXT(
@@ -697,7 +710,7 @@ DEFINE_RISCV_EXT(
       return true;
     }
 
-  /* Do nothing for future RV128 specification. Behaviour
+  /* Do nothing for future RV128 specification.  Behaviour
      for this case is not yet well defined.  */
   return false;
 
@@ -1152,6 +1165,19 @@ DEFINE_RISCV_EXT(
   /* DEP_EXTS */ ({"zve32f"}),
   /* SUPPORTED_VERSIONS */ ({{1, 0}}),
   /* FLAG_GROUP */ zvf,
+  /* BITMASK_GROUP_ID */ 1,
+  /* BITMASK_BIT_POSITION*/ 18,
+  /* EXTRA_EXTENSION_FLAGS */ 0)
+
+DEFINE_RISCV_EXT(
+  /* NAME */ zvfofp8min,
+  /* UPPERCASE_NAME */ ZVFOFP8MIN,
+  /* FULL_NAME */ "Vector FP8 minimum extension",
+  /* DESC */ "",
+  /* URL */ ,
+  /* DEP_EXTS */ ({"zve32f"}),
+  /* SUPPORTED_VERSIONS */ ({{0, 2}}),
+  /* FLAG_GROUP */ zvf,
   /* BITMASK_GROUP_ID */ BITMASK_NOT_YET_ALLOCATED,
   /* BITMASK_BIT_POSITION*/ BITMASK_NOT_YET_ALLOCATED,
   /* EXTRA_EXTENSION_FLAGS */ 0)
@@ -1165,8 +1191,8 @@ DEFINE_RISCV_EXT(
   /* DEP_EXTS */ ({"zvfbfmin", "zfbfmin"}),
   /* SUPPORTED_VERSIONS */ ({{1, 0}}),
   /* FLAG_GROUP */ zvf,
-  /* BITMASK_GROUP_ID */ BITMASK_NOT_YET_ALLOCATED,
-  /* BITMASK_BIT_POSITION*/ BITMASK_NOT_YET_ALLOCATED,
+  /* BITMASK_GROUP_ID */ 1,
+  /* BITMASK_BIT_POSITION*/ 19,
   /* EXTRA_EXTENSION_FLAGS */ 0)
 
 DEFINE_RISCV_EXT(
@@ -1986,8 +2012,8 @@ DEFINE_RISCV_EXT(
   /* DEP_EXTS */ ({}),
   /* SUPPORTED_VERSIONS */ ({{1, 0}}),
   /* FLAG_GROUP */ su,
-  /* BITMASK_GROUP_ID */ BITMASK_NOT_YET_ALLOCATED,
-  /* BITMASK_BIT_POSITION*/ BITMASK_NOT_YET_ALLOCATED,
+  /* BITMASK_GROUP_ID */ 1,
+  /* BITMASK_BIT_POSITION*/ 14,
   /* EXTRA_EXTENSION_FLAGS */ 0)
 
 DEFINE_RISCV_EXT(

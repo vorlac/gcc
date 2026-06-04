@@ -83,6 +83,8 @@
   UNSPEC_LOAD_SYMBOL_OFFSET64
   UNSPEC_LA_PCREL_64_PART1
   UNSPEC_LA_PCREL_64_PART2
+
+  UNSPEC_SSP
 ])
 
 (define_c_enum "unspecv" [
@@ -358,7 +360,7 @@
 ;; Length of instruction in bytes.
 (define_attr "length" ""
    (cond [
-	  ;; Branch futher than +/- 128 KiB require two instructions.
+	  ;; Branch further than +/- 128 KiB require two instructions.
 	  (eq_attr "type" "branch")
 	  (if_then_else (and (le (minus (match_dup 0) (pc)) (const_int 131064))
 			     (le (minus (pc) (match_dup 0)) (const_int 131068)))
@@ -1452,6 +1454,15 @@
   [(set_attr "type" "clz")
    (set_attr "mode" "<MODE>")])
 
+(define_insn "*ctzsi2_extend"
+  [(set (match_operand:DI 0 "register_operand" "=r")
+	(any_extend:DI
+	  (ctz:SI (match_operand:SI 1 "register_operand" "r"))))]
+  "TARGET_64BIT"
+  "ctz.w\t%0,%1"
+  [(set_attr "type" "clz")
+   (set_attr "mode" "SI")])
+
 ;;
 ;;  ....................
 ;;
@@ -1818,6 +1829,29 @@
   "<insn>n\t%0,%2,%1"
   [(set_attr "type" "logical")
    (set_attr "mode" "SI")])
+
+(define_split
+  [(set (match_operand:X 0 "register_operand")
+        (xor:X (xor:X (ior:X (match_operand:X 1 "register_operand")
+                             (match_operand:X 2 "register_operand"))
+                      (match_dup 1))
+               (match_operand:X 3 "register_operand")))
+   (clobber (match_operand:X 4 "register_operand"))]
+  "TARGET_64BIT || TARGET_32BIT_S"
+  [(set (match_dup 4) (and:X (not:X (match_dup 1)) (match_dup 2)))
+   (set (match_dup 0) (xor:X (match_dup 4) (match_dup 3)))])
+
+(define_split
+  [(set (match_operand:X 0 "register_operand")
+        (xor:X (xor:X (ior:X (match_operand:X 1 "register_operand")
+                             (match_operand:X 2 "register_operand"))
+                      (match_dup 2))
+               (match_operand:X 3 "register_operand")))
+   (clobber (match_operand:X 4 "register_operand"))]
+  "TARGET_64BIT || TARGET_32BIT_S"
+  [(set (match_dup 4) (and:X (not:X (match_dup 2)) (match_dup 1)))
+   (set (match_dup 0) (xor:X (match_dup 4) (match_dup 3)))])
+
 
 ;;
 ;;  ....................
@@ -2040,7 +2074,7 @@
   [(set_attr "type" "fcvt")
    (set_attr "mode" "<ANYF:MODE>")])
 
-;; conversion of an integeral (or boolean) value to a floating-point value
+;; conversion of an integral (or boolean) value to a floating-point value
 
 (define_insn "floatsidf2"
   [(set (match_operand:DF 0 "register_operand" "=f")
@@ -3677,7 +3711,7 @@
 ;; QImode values so we can force zero-extension.
 (define_mode_iterator BR [(QI "TARGET_64BIT") SI (DI "TARGET_64BIT")])
 
-(define_expand "cbranch<mode>4"
+(define_expand "@cbranch<mode>4"
   [(set (pc)
 	(if_then_else (match_operator 0 "comparison_operator"
 			[(match_operand:BR 1 "register_operand")
@@ -3788,6 +3822,47 @@
 }
   [(set_attr "type" "slt")
    (set_attr "mode" "<X:MODE>")])
+
+(define_expand "spaceship<mode>4"
+  [(match_operand:SI   0 "register_operand")
+   (match_operand:QHWD 1 "register_operand")
+   (match_operand:QHWD 2 "reg_or_0_operand")
+   (match_operand:SI   3 "const_int_operand")]
+  ""
+{
+  gcc_assert (operands[3] == const1_rtx || operands[3] == constm1_rtx);
+
+  if (GET_MODE_SIZE (<MODE>mode) < GET_MODE_SIZE (word_mode))
+    {
+      auto extend = (operands[3] == const1_rtx ? ZERO_EXTEND
+					       : SIGN_EXTEND);
+      for (int i: {1, 2})
+	if (operands[i] != const0_rtx)
+	  operands[i] = force_reg (word_mode,
+				   gen_rtx_fmt_e (extend, word_mode,
+						  operands[i]));
+    }
+
+  auto lt_code = (operands[3] == const1_rtx ? LTU : LT);
+  auto gt_code = (operands[3] == const1_rtx ? GTU : GT);
+  rtx lt = gen_rtx_fmt_ee (lt_code, word_mode, operands[1], operands[2]);
+  rtx gt = gen_rtx_fmt_ee (gt_code, word_mode, operands[1], operands[2]);
+
+  gt = force_reg (word_mode, gt);
+  lt = force_reg (word_mode, lt);
+
+  rtx diff = gen_rtx_MINUS (word_mode, gt, lt);
+  if (TARGET_64BIT)
+    {
+      diff = force_reg (DImode, diff);
+      diff = gen_lowpart (SImode, diff);
+      SUBREG_PROMOTED_VAR_P (diff) = 1;
+      SUBREG_PROMOTED_SET (diff, SRP_SIGNED);
+    }
+
+  emit_move_insn (operands[0], diff);
+  DONE;
+})
 
 
 ;;
@@ -4666,7 +4741,7 @@
   [(set_attr "type" "unknown")
    (set_attr "mode" "DI")])
 
-(define_insn "@rbit<mode>"
+(define_insn "@bitreverse<mode>2"
   [(set (match_operand:GPR 0 "register_operand" "=r")
 	(bitreverse:GPR (match_operand:GPR 1 "register_operand" "r")))]
   "TARGET_64BIT || TARGET_32BIT_S"
@@ -4674,7 +4749,7 @@
   [(set_attr "type" "unknown")
    (set_attr "mode" "<MODE>")])
 
-(define_insn "rbitsi_extended"
+(define_insn "bitreversesi2_extended"
   [(set (match_operand:DI 0 "register_operand" "=r")
 	(sign_extend:DI
 	  (bitreverse:SI (match_operand:SI 1 "register_operand" "r"))))]
@@ -4685,7 +4760,7 @@
 
 ;; If we don't care high bits, bitrev.4b can reverse bits of values in
 ;; QImode.
-(define_insn "rbitqi"
+(define_insn "bitreverseqi2"
   [(set (match_operand:QI 0 "register_operand" "=r")
 	(bitreverse:QI (match_operand:QI 1 "register_operand" "r")))]
   "TARGET_64BIT || TARGET_32BIT_S"
@@ -4693,18 +4768,17 @@
   [(set_attr "type" "unknown")
    (set_attr "mode" "SI")])
 
-;; For HImode it's a little complicated...
-(define_expand "rbithi"
-  [(match_operand:HI 0 "register_operand")
-   (match_operand:HI 1 "register_operand")]
+(define_expand "bitreversehi2"
+  [(set (match_operand:HI 0 "register_operand" "=r")
+	(bitreverse:HI (match_operand:HI 1 "register_operand" "r")))]
   ""
   {
     rtx t = gen_reg_rtx (word_mode);
 
     /* Oh, using paradoxical subreg.  I learnt the trick from RISC-V,
        hoping we won't be blown up altogether one day.  */
-    emit_insn (gen_rbit(word_mode, t,
-			gen_lowpart (word_mode, operands[1])));
+    emit_insn (gen_bitreverse2 (word_mode, t,
+				gen_lowpart (word_mode, operands[1])));
     t = expand_simple_binop (word_mode, LSHIFTRT, t,
 			     GEN_INT (GET_MODE_BITSIZE (word_mode) - 16),
 			     NULL_RTX, false, OPTAB_DIRECT);
@@ -4883,23 +4957,8 @@
       }
     else
       {
-	/* No CRC instruction is suitable, use the generic table-based
-	   implementation but optimize bit reversion.  */
-	auto rbit = [](rtx *r)
-	  {
-	    /* Well, this is ugly.  The problem is
-	       expand_reversed_crc_table_based only accepts one helper
-	       for reversing data elements and CRC states.  */
-	    auto mode = GET_MODE (*r);
-	    auto rbit = (mode == <MODE>mode ? gen_rbit<mode> : gen_rbitsi);
-	    rtx out = gen_reg_rtx (mode);
-
-	    emit_insn (rbit (out, *r));
-	    *r = out;
-	  };
 	expand_reversed_crc_table_based (operands[0], operands[1],
-					 msg, operands[3], <MODE>mode,
-					 rbit);
+					 msg, operands[3], <MODE>mode);
       }
     DONE;
   })
@@ -4985,6 +5044,90 @@
   {
     operands[0] = loongarch_rewrite_mem_for_simple_ldst (operands[0]);
   })
+
+;; Set and check against stack canary without leaving it in a register.
+;; DO NOT ATTEMPT TO SPLIT THESE INSNS!  It's important for security reason
+;; that the canary value does not live beyond the life of this sequence.
+
+(define_insn "@stack_protect_combined_set_normal_<mode>"
+  [(set (match_operand:P 0 "memory_operand" "=m,ZC")
+        (unspec:P [(mem:P (match_operand:P 1 "ssp_normal_operand"))]
+		  UNSPEC_SSP))
+   (set (match_scratch:P 2 "=&r,&r") (const_int 0))]
+  ""
+{
+  loongarch_output_asm_load_canary (operands[2], operands[1], NULL_RTX);
+  output_asm_insn (which_alternative ? "stptr.d\t%2,%0" : "st.d\t%2,%0",
+		   operands);
+  return "ori\t%2,$r0,0";
+}
+  [(set_attr "type" "store")
+   (set_attr "length" "20")])
+
+(define_insn "@stack_protect_combined_set_extreme_<mode>"
+  [(set (match_operand:P 0 "memory_operand" "=m,ZC")
+        (unspec:P [(mem:P (match_operand:P 1 "ssp_operand"))] UNSPEC_SSP))
+   (set (match_scratch:P 2 "=&r,&r") (const_int 0))
+   (set (match_scratch:P 3 "=&r,&r") (const_int 0))]
+  ""
+{
+  loongarch_output_asm_load_canary (operands[2], operands[1], operands[3]);
+  output_asm_insn (which_alternative ? "stptr.d\t%2,%0" : "st.d\t%2,%0",
+		   operands);
+  return "ori\t%2,$r0,0\n\tori\t%3,$r0,0";
+}
+  [(set_attr "type" "store")
+   (set_attr "length" "36")])
+
+(define_insn "@stack_protect_combined_test_internal_<mode>"
+  [(set (match_operand:P 0 "register_operand" "=r,r,&r,&r")
+	(xor:P
+	  (match_operand:P 1 "memory_operand" "=m,ZC,m,ZC")
+	    (unspec:P
+	      [(mem:P (match_operand:P 2 "ssp_operand" "ZE,ZE,ZF,ZF"))]
+	      UNSPEC_SSP)))
+   (set (match_scratch:P 3 "=&r,&r,&r,&r") (const_int 0))]
+  ""
+{
+  rtx t = (which_alternative >= 2 ? operands[0] : NULL_RTX);
+  loongarch_output_asm_load_canary (operands[3], operands[2], t);
+  output_asm_insn ((which_alternative & 1) ? "ldptr.d\t%0,%1"
+					   : "ld.d\t%0,%1",
+		   operands);
+  return "xor\t%0,%0,%3\n\tori\t%3,$r0,0";
+}
+  [(set_attr "type" "load,load,load,load")
+   (set_attr "length" "24,24,36,36")])
+
+(define_expand "stack_protect_combined_set"
+  [(match_operand 0 "memory_operand")
+   (match_operand 1 "memory_operand")]
+  ""
+{
+  rtx canary = XEXP (operands[1], 0);
+  auto fn = (ssp_normal_operand (canary, VOIDmode)
+	     ? gen_stack_protect_combined_set_normal
+	     : gen_stack_protect_combined_set_extreme);
+
+  emit_insn (fn (Pmode, operands[0], canary));
+  DONE;
+})
+
+(define_expand "stack_protect_combined_test"
+  [(match_operand 0 "memory_operand")
+   (match_operand 1 "memory_operand")
+   (match_operand 2 "")]
+  ""
+{
+  rtx t = gen_reg_rtx (Pmode);
+  rtx canary = XEXP (operands[1], 0);
+  emit_insn (gen_stack_protect_combined_test_internal (Pmode, t,
+						       operands[0],
+						       canary));
+  rtx cond = gen_rtx_EQ (VOIDmode, t, const0_rtx);
+  emit_jump_insn (gen_cbranch4 (Pmode, cond, t, const0_rtx, operands[2]));
+  DONE;
+})
 
 ;; Synchronization instructions.
 

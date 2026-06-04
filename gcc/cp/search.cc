@@ -936,6 +936,8 @@ accessible_p (tree type, tree decl, bool consider_local_p)
   /* Anonymous unions don't have their own access.  */
   if (ANON_AGGR_TYPE_P (type))
     type = type_context_for_name_lookup (type);
+  if (ANON_AGGR_TYPE_P (otype))
+    otype = type_context_for_name_lookup (otype);
 
   /* [class.access.base]
 
@@ -1142,6 +1144,7 @@ build_baselink (tree binfo, tree access_binfo, tree functions, tree optype)
 {
   tree baselink;
 
+  gcc_checking_assert (binfo && access_binfo);
   gcc_assert (OVL_P (functions) || TREE_CODE (functions) == TEMPLATE_ID_EXPR);
   gcc_assert (!optype || TYPE_P (optype));
   gcc_assert (TREE_TYPE (functions));

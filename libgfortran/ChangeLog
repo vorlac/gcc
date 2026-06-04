@@ -1,3 +1,151 @@
+2026-05-30  Dhruv Chawla  <dhruvc@nvidia.com>
+
+	* caf/caf_error.h (caf_runtime_error): Fix typos.
+	* caf/libcaf.h: Likewise.
+	* caf/mpi.c (caf_runtime_error): Likewise.
+	* caf/shmem.c (_gfortran_caf_deregister): Likewise.
+	* caf/shmem/alloc.h: Likewise.
+	* caf/shmem/shared_memory.c (shared_memory_get_env): Likewise.
+	* caf/shmem/supervisor.h (struct caf_shmem_token): Likewise.
+	* caf/shmem/teams_mgmt.h (struct caf_shmem_team): Likewise.
+	* caf/single.c (caf_runtime_error): Likewise.
+	(_gfortran_caf_deregister): Likewise.
+	* intrinsics/args.c (get_command_i4): Likewise.
+	* intrinsics/chmod.c: Likewise.
+	* intrinsics/env.c (PREFIX): Likewise.
+	* intrinsics/trigd.c: Likewise.
+	* io/async.c (init_adv_cond): Likewise.
+	* io/file_pos.c (st_rewind): Likewise.
+	* io/format.c (parse_format_list): Likewise.
+	* io/open.c (new_unit): Likewise.
+	(st_open): Likewise.
+	* io/transfer.c (write_block): Likewise.
+	(unformatted_read): Likewise.
+	(unformatted_write): Likewise.
+	(formatted_transfer_scalar_write): Likewise.
+	* io/transfer128.c (export_proto): Likewise.
+	* io/unix.c (buf_init): Likewise.
+	(mem_read): Likewise.
+	* io/write.c (btoa): Likewise.
+	(list_formatted_write): Likewise.
+	* runtime/select_inc.c (select_string): Likewise.
+
+2026-05-29  Peter Damianov  <peter0x44@disroot.org>
+
+	* caf/shmem/shared_memory.c (shared_memory_init): Use
+	MapViewOfFileEx instead of MapViewOfFileExNuma.
+
+2026-05-28  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
+
+	PR fortran/93727
+	* io/write.c (write_ex): Replace simple truncation with
+	rounding-aware logic respecting dtp round_status.  Add carry
+	propagation and integer-digit normalization.
+	* io/write_float.def: Change use of GFC_UINTEGER_8 to
+	long long unsigned.
+
+2026-05-25  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
+
+	PR fortran/93727
+	* io/write_float.def (get_float_hex_string): Fix kind=8 frac_part
+	from unsigned long to GFC_UINTEGER_8 to correct truncated hex
+	output and IEEE_INVALID_FLAG on ILP32 targets.  Update kind=10
+	and kind=16 to use GFC_UINTEGER_8 for consistency.
+	Assisted by: Claude Sonnet 4.6
+
+2026-05-24  Jerry DeLisle  <jvdelisle@gcc.gnu.org>
+	    Harald Anlauf  <anlauf@gcc.gnu.org>
+
+	PR fortran/93727
+	* io/format.c (format_lex): Add new FMT_EX token handing.
+	(parse_format_list): Likewise.
+	(next_format): Likewise
+	* io/io.h (write_ex): Add prototype for new function.
+	(internal_proto): Likewise.
+	* io/transfer.c (formatted_transfer_scalar_write): Use FMT_EX token.
+	* io/write.c (write_default_char4): White space fix.
+	(write_a): White space fix.
+	(write_boz): White space fix.
+	(write_decimal): White space fix.
+	(otoa_big): White space fix.
+	(write_character): White space fix.
+	(write_float_0): White space fix.
+	(write_ex): New function which uses the new helper function
+	get_float_hex_string() to build the hexadecimal float format for
+	output.
+	(write_real): White space fix.
+	(write_complex): White space fix.
+	(nml_write_obj): White space fix.
+	(namelist_write): White space fix.
+	* io/write_float.def: Add defines to handle the various forms of
+	KIND=16 floats. These handle the selection of the appropriate versions
+	of the frexp, fabs, and scalbn used to extract the components of the
+	floating point values.
+	(GFC_REAL_16_FREXP): New define.
+	(GFC_REAL_16_FABS): New define.
+	(GFC_REAL_16_SCALBN): New define.
+	(get_float_hex_string): New function which exatracts the bits and builds
+	the basic hexadecimal format strings into a buffer. The buffer is provided
+	by the caller write_ex.
+	(build_float_string): White space fix.
+	(quadmath_snprintf): White space fix.
+	(determine_en_precision): White space fix.
+
+2026-05-22  Tobias Burnus  <tburnus@baylibre.com>
+
+	* m4/matmul.m4: Fix comment typo.
+	* generated/matmul_c10.c: Regenerate.
+	* generated/matmul_c16.c: Regenerate.
+	* generated/matmul_c17.c: Regenerate.
+	* generated/matmul_c4.c: Regenerate.
+	* generated/matmul_c8.c: Regenerate.
+	* generated/matmul_i1.c: Regenerate.
+	* generated/matmul_i16.c: Regenerate.
+	* generated/matmul_i2.c: Regenerate.
+	* generated/matmul_i4.c: Regenerate.
+	* generated/matmul_i8.c: Regenerate.
+	* generated/matmul_r10.c: Regenerate.
+	* generated/matmul_r16.c: Regenerate.
+	* generated/matmul_r17.c: Regenerate.
+	* generated/matmul_r4.c: Regenerate.
+	* generated/matmul_r8.c: Regenerate.
+
+2026-05-16  Rainer Orth  <ro@CeBiTec.Uni-Bielefeld.DE>
+
+	* caf/shmem/sync.h (lock_t): Rename to caf_shmem_lock_t.
+	* caf/shmem.c: Adapt uses.
+
+2026-05-08  Harald Anlauf  <anlauf@gmx.de>
+
+	PR libfortran/125087
+	* io/format.c (free_format_data): Change argument from pointer to
+	format_data to pointer to pointer of object.
+	(free_format_hash_table): Adjust argument passed to
+	free_format_data.
+	(save_parsed_format): Likewise.
+	* io/format.h (free_format_data): Adjust prototype.
+	* io/transfer.c (st_read_done_worker): Adjust argument passed to
+	free_format_data.
+	(st_write_done_worker): Likewise.
+
+2026-05-06  Harald Anlauf  <anlauf@gmx.de>
+
+	PR libfortran/125095
+	* io/list_read.c (read_logical): Eat comments in namelist read mode.
+	(read_integer): Likewise.
+	(read_character): Likewise.
+	(read_complex): Likewise.
+	(read_real): Likewise.
+
+2026-05-05  Pietro Monteiro  <pietro@sociotechnical.xyz>
+
+	* Makefile.in: Regenerate.
+	* acinclude.m4: Delete LIBGFOR_CHECK_ATTRIBUTE_VISIBILITY.
+	* aclocal.m4: Regenerate.
+	* configure: Likewise.
+	* configure.ac: Use GCC_CHECK_ATTRIBUTE_VISIBILITY istead of
+	LIBGFOR_CHECK_ATTRIBUTE_VISIBILITY.
+
 2026-04-17  Steven G. Kargl  <kargl@gcc.gnu.org>
 
 	PR libfortran/120431

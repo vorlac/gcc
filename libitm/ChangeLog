@@ -1,3 +1,26 @@
+2026-06-01  Dhruv Chawla  <dhruvc@nvidia.com>
+
+	* config/linux/futex_bits.h: Fix typo.
+
+2026-05-30  Dhruv Chawla  <dhruvc@nvidia.com>
+
+	* configure: Regenerate.
+	* acinclude.m4: Fix typos.
+	* dispatch.h (struct method_group): Likewise.
+	* method-gl.cc: Likewise.
+	* method-ml.cc: Likewise.
+	* method-serial.cc: Likewise.
+
+2026-05-05  Pietro Monteiro  <pietro@sociotechnical.xyz>
+
+	* Makefile.in: Regenerate.
+	* acinclude.m4: Delete LIBITM_CHECK_ATTRIBUTE_VISIBILITY.
+	* aclocal.m4: Regenerate.
+	* configure: Likewise.
+	* configure.ac: Use GCC_CHECK_ATTRIBUTE_VISIBILITY instead of
+	LIBITM_CHECK_ATTRIBUTE_VISIBILITY.
+	* testsuite/Makefile.in: Regenerate.
+
 2026-02-12  Pietro Monteiro  <pietro@sociotechnical.xyz>
 	    Jakub Jelinek   <jakub@redhat.com>
 

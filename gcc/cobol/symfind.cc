@@ -93,25 +93,25 @@ typedef std::map <field_key_t, std::list<size_t> > field_keymap_t;
 static field_keymap_t symbol_map2;
 
 /*
- * As each field is added to the symbol table, add its name and index
- * to the name map.  Initially the type is FldInvalid.  Those are
- * removed by symbols_update();
+ * As each field is added to the symbol table, add its name and index to the
+ * name map.  Initially the type is FldInvalid.  Those are removed by
+ * symbols_update().  Typedefs are excluded; they do not represent data items.
  */
 void
 update_symbol_map2( const symbol_elem_t *e ) {
   auto field = cbl_field_of(e);
 
-  if( ! field->is_typedef() ) {
-    switch( field->type ) {
-    case FldForward:
-    case FldLiteralN:
-      return;
-    case FldLiteralA:
-      if( ! field->is_key_name() ) return;
-      break;
-    default:
-      break;
-    }
+  if( field->is_typedef() ) return;
+
+  switch( field->type ) {
+  case FldForward:
+  case FldLiteralN:
+    return;
+  case FldLiteralA:
+    if( ! field->is_key_name() ) return;
+    break;
+  default:
+    break;
   }
 
   field_key_t fk( e->program, field );
@@ -523,6 +523,7 @@ symbol_find( size_t program, std::list<const char *> names ) {
                   std::inserter(qualified, qualified.begin()),
                   [i01]( auto item ) {
                     const std::vector<size_t>& ancestors(item.second);
+                    assert(!ancestors.empty());
                     return ancestors.back() == i01;
                   } );
     items = qualified;

@@ -35,9 +35,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "fold-const.h"
 #include "stor-layout.h"
 #include "cfganal.h"
-#include "gimplify.h"
 #include "gimple-iterator.h"
-#include "gimplify-me.h"
 #include "tree-cfg.h"
 #include "tree-dfa.h"
 #include "domwalk.h"
@@ -102,7 +100,7 @@ replace_phi_edge_with_variable (basic_block cond_block,
 
   /* Duplicate range info if they are the only things setting the target PHI.
      This is needed as later on, the new_tree will be replacing
-     The assignement of the PHI.
+     The assignment of the PHI.
      For an example:
      bb1:
      _4 = min<a_1, 255>
@@ -333,7 +331,7 @@ factor_out_conditional_operation (edge e0, edge e1, basic_block merge,
 
   gcc_assert (arg0 != NULL_TREE && arg1 != NULL_TREE);
 
-  /* Arugments that are the same don't have anything to be
+  /* Arguments that are the same don't have anything to be
      done to them. */
   if (operand_equal_for_phi_arg_p (arg0, arg1))
     return false;
@@ -491,7 +489,7 @@ factor_out_conditional_operation (edge e0, edge e1, basic_block merge,
 	}
       new_arg1 = fold_convert (TREE_TYPE (new_arg0), arg1);
 
-      /* Drop the overlow that fold_convert might add. */
+      /* Drop the overflow that fold_convert might add. */
       if (TREE_OVERFLOW (new_arg1))
 	new_arg1 = drop_tree_overflow (new_arg1);
 
@@ -819,6 +817,11 @@ empty_bb_or_one_feeding_into_p (basic_block bb,
 	case CFN_BUILT_IN_BSWAP32:
 	case CFN_BUILT_IN_BSWAP64:
 	case CFN_BUILT_IN_BSWAP128:
+	case CFN_BUILT_IN_BITREVERSE8:
+	case CFN_BUILT_IN_BITREVERSE16:
+	case CFN_BUILT_IN_BITREVERSE32:
+	case CFN_BUILT_IN_BITREVERSE64:
+	case CFN_BUILT_IN_BITREVERSE128:
 	CASE_CFN_FFS:
 	CASE_CFN_PARITY:
 	CASE_CFN_POPCOUNT:
@@ -1326,7 +1329,7 @@ absorbing_element_p (tree_code code, tree arg, bool right, tree rval)
     case ROUND_MOD_EXPR:
       return (!right
 	      && integer_zerop (arg)
-	      && tree_single_nonzero_warnv_p (rval, NULL));
+	      && tree_single_nonzero_p (rval));
 
     default:
       return false;
@@ -2578,6 +2581,11 @@ cond_removal_in_builtin_zero_pattern (basic_block cond_bb,
     case CFN_BUILT_IN_BSWAP32:
     case CFN_BUILT_IN_BSWAP64:
     case CFN_BUILT_IN_BSWAP128:
+    case CFN_BUILT_IN_BITREVERSE8:
+    case CFN_BUILT_IN_BITREVERSE16:
+    case CFN_BUILT_IN_BITREVERSE32:
+    case CFN_BUILT_IN_BITREVERSE64:
+    case CFN_BUILT_IN_BITREVERSE128:
     CASE_CFN_FFS:
     CASE_CFN_PARITY:
     CASE_CFN_POPCOUNT:
@@ -2586,7 +2594,7 @@ cond_removal_in_builtin_zero_pattern (basic_block cond_bb,
       if (INTEGRAL_TYPE_P (TREE_TYPE (arg)))
 	{
 	  tree type = TREE_TYPE (arg);
-	  if (TREE_CODE (type) == BITINT_TYPE)
+	  if (BITINT_TYPE_P (type))
 	    {
 	      if (gimple_call_num_args (call) == 1)
 		{
@@ -2616,7 +2624,7 @@ cond_removal_in_builtin_zero_pattern (basic_block cond_bb,
       if (INTEGRAL_TYPE_P (TREE_TYPE (arg)))
 	{
 	  tree type = TREE_TYPE (arg);
-	  if (TREE_CODE (type) == BITINT_TYPE)
+	  if (BITINT_TYPE_P (type))
 	    {
 	      if (gimple_call_num_args (call) == 1)
 		{
@@ -2991,16 +2999,16 @@ get_non_trapping (void)
    JOIN_BB:
      some more
 
-   We check that MIDDLE_BB contains only one store, that that store
+   ASSIGN is a store in MIDDLE_BB which is the candidate for cselim.  We check
+   that MIDDLE_BB contains only one store (i.e., ASSIGN), that that store
    doesn't trap (not via NOTRAP, but via checking if an access to the same
-   memory location dominates us, or the store is to a local addressable
-   object) and that the store has a "simple" RHS.  */
+   memory location dominates us, or the store is to a local addressable object)
+   and that the store has a "simple" RHS.  */
 
 static bool
-cond_store_replacement (basic_block middle_bb, basic_block join_bb,
-			edge e0, edge e1, hash_set<tree> *nontrap)
+cond_store_replacement (basic_block middle_bb, basic_block join_bb, edge e0,
+			edge e1, gimple *assign, hash_set<tree> *nontrap)
 {
-  gimple *assign = last_and_only_stmt (middle_bb);
   tree lhs, rhs, name, name2;
   gphi *newphi;
   gassign *new_stmt;
@@ -3013,11 +3021,6 @@ cond_store_replacement (basic_block middle_bb, basic_block join_bb,
       || gimple_has_volatile_ops (assign))
     return false;
 
-  /* And no PHI nodes so all uses in the single stmt are also
-     available where we insert to.  */
-  if (!gimple_seq_empty_p (phi_nodes (middle_bb)))
-    return false;
-
   locus = gimple_location (assign);
   lhs = gimple_assign_lhs (assign);
   rhs = gimple_assign_rhs1 (assign);
@@ -3025,6 +3028,20 @@ cond_store_replacement (basic_block middle_bb, basic_block join_bb,
        && !DECL_P (lhs))
       || !is_gimple_reg_type (TREE_TYPE (lhs)))
     return false;
+
+  /* Make sure all uses (except the rhs) in the single stmt are also available
+     where we insert to.  */
+  ssa_op_iter iter;
+  tree use;
+  FOR_EACH_SSA_TREE_OPERAND (use, assign, iter, SSA_OP_USE)
+    {
+      if (use == rhs)
+	continue;
+
+      gimple *stmt = SSA_NAME_DEF_STMT (use);
+      if (stmt && gimple_bb (stmt) == middle_bb)
+	return false;
+    }
 
   /* Prove that we can move the store down.  We could also check
      TREE_THIS_NOTRAP here, but in that case we also could move stores,
@@ -3161,7 +3178,7 @@ cond_if_else_store_replacement_1 (basic_block then_bb, basic_block else_bb,
 
   if (!is_gimple_reg_type (TREE_TYPE (lhs)))
     {
-      /* Handle clobbers seperately as operand_equal_p does not check
+      /* Handle clobbers separately as operand_equal_p does not check
 	 the kind of the clobbers being the same. */
       if (TREE_CLOBBER_P (then_rhs) && TREE_CLOBBER_P (else_rhs))
 	{
@@ -3287,6 +3304,20 @@ trailing_store_in_bb (basic_block bb, tree vdef, gphi *vphi, bool onlyonestore)
     return NULL;
 
   return store;
+}
+
+/* Return the only store in MIDDLE_BB as the candidate store for cselim.  Return
+   NULL if no candidate can be found.  */
+
+static gimple *
+cselim_candidate (basic_block middle_bb, basic_block join_bb, edge e0)
+{
+  gphi *vphi = get_virtual_phi (join_bb);
+  if (!vphi)
+    return NULL;
+
+  tree middle_vdef = PHI_ARG_DEF_FROM_EDGE (vphi, e0);
+  return trailing_store_in_bb (middle_bb, middle_vdef, vphi, true);
 }
 
 /* Limited Conditional store replacement.  We already know
@@ -3866,7 +3897,7 @@ execute_over_cond_phis (func_type func)
 
    This fully replaces the old "Conditional Replacement",
    "ABS Replacement" and "MIN/MAX Replacement" transformations as they are now
-   implmeneted in match.pd.
+   implemented in match.pd.
 
    Value Replacement
    -----------------
@@ -4048,10 +4079,11 @@ pass_phiopt::execute (function *)
 	    hoist_adjacent_loads (bb, bb1, bb2, bb3);
 
 	  /* Try to see if there are only store in each side of the if
-	     and try to remove that; don't do this for -Og.  */
+	     and try to remove that; don't do this for -Og.
+	     With sinking the stores we might end up with empty blocks.  */
 	  if (EDGE_COUNT (bb3->preds) == 2 && !optimize_debug)
 	    while (cond_if_else_store_replacement_limited (bb1, bb2, bb3))
-	      ;
+	      cfgchanged = true;
 	}
 
       gimple_stmt_iterator gsi;
@@ -4259,7 +4291,9 @@ pass_cselim::execute (function *)
 	 optimization if the join block has more than two predecessors.  */
       if (EDGE_COUNT (bb2->preds) > 2)
 	return;
-      if (cond_store_replacement (bb1, bb2, e1, e2, nontrap))
+
+      gimple *assign = cselim_candidate (bb1, bb2, e1);
+      if (cond_store_replacement (bb1, bb2, e1, e2, assign, nontrap))
 	cfgchanged = true;
     };
 

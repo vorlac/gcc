@@ -4163,7 +4163,7 @@ struct set
   /* Nonzero if the SET_SRC contains something
      whose value cannot be predicted and understood.  */
   unsigned int src_volatile : 1;
-  /* Nonzero if RTL is an artifical set that has been created to describe
+  /* Nonzero if RTL is an artificial set that has been created to describe
      part of an insn's effect.  Zero means that RTL appears directly in
      the insn pattern.  */
   unsigned int is_fake_set : 1;
@@ -4262,7 +4262,7 @@ try_back_substitute_reg (rtx set, rtx_insn *insn)
 }
 
 /* Add an entry containing RTL X into SETS.  IS_FAKE_SET is true if X is
-   an artifical set that has been created to describe part of an insn's
+   an artificial set that has been created to describe part of an insn's
    effect.  */
 static inline void
 add_to_set (vec<struct set> *sets, rtx x, bool is_fake_set)
@@ -4978,6 +4978,34 @@ cse_insn (rtx_insn *insn)
 		    break;
 		}
 	    }
+	}
+
+      /* If SRC_EQV is a CONST_INT, try looking up some related
+	 constants (logical and arithmetic negation).  Those may
+	 ultimately be cheaper to re-use.  */
+      if (GET_CODE (src) != CONST_INT
+	  && GET_CODE (src) != REG
+	  && GET_CODE (src) != SUBREG
+	  && src_const
+	  && GET_CODE (src_const) == CONST_INT)
+	{
+	  rtx trial_rtx = GEN_INT (~UINTVAL (src_const));
+	  struct table_elt *tmp = lookup (trial_rtx, HASH (trial_rtx, mode), mode);
+	  rtx_code code = NOT;
+	  if (!tmp)
+	    {
+	      trial_rtx = GEN_INT (-UINTVAL (src_const));
+	      tmp = lookup (trial_rtx, HASH (trial_rtx, mode), mode);
+	      code = NEG;
+	    }
+
+	  if (tmp)
+	    {
+	      src_related = gen_rtx_fmt_e (code, mode, tmp->first_same_value->exp);
+	      src_eqv_here = src_related;
+	      src_related_is_const_anchor = true;
+	    }
+
 	}
 
       /* See if a MEM has already been loaded with a widening operation;
@@ -7018,7 +7046,7 @@ count_stores (rtx x, const_rtx set ATTRIBUTE_UNUSED, void *data)
 
 /* Return if DEBUG_INSN pattern PAT needs to be reset because some dead
    pseudo doesn't have a replacement.  COUNTS[X] is zero if register X
-   is dead and REPLACEMENTS[X] is null if it has no replacemenet.
+   is dead and REPLACEMENTS[X] is null if it has no replacement.
    Set *SEEN_REPL to true if we see a dead register that does have
    a replacement.  */
 

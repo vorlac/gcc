@@ -139,6 +139,14 @@
 ;; VQMOV without 2-element modes.
 (define_mode_iterator VQMOV_NO2E [V16QI V8HI V4SI V8HF V8BF V4SF])
 
+;; Modes that can be duplicated into a 64-bit register.
+(define_mode_iterator VDDUP [V4QI V2QI QI V2HI HI SI
+				V2BF BF V2HF HF SF])
+
+;; Modes that can be duplicated into a 128-bit register.
+(define_mode_iterator VQDUP [V8QI V4QI V2QI QI V4HI V2HI HI V2SI SI DI
+				V4BF V2BF BF V4HF V2HF HF V2SF SF DF])
+
 ;; Double integer vector modes.
 (define_mode_iterator VD_I [V8QI V4HI V2SI DI])
 
@@ -192,7 +200,7 @@
 				  (HF "TARGET_SIMD_F16INST")
 				  SF DF])
 
-;; Scalar and vetor modes for SF, DF.
+;; Scalar and vector modes for SF, DF.
 (define_mode_iterator VSFDF [V2SF V4SF V2DF DF SF])
 
 ;; Advanced SIMD single Float modes.
@@ -227,9 +235,31 @@
 ;; All Advanced SIMD integer modes
 (define_mode_iterator VALLI [VDQ_BHSI V2DI])
 
+;; All sub-64-bit vector modes.
+(define_mode_iterator VSUB64 [V2QI V4QI V2HI V2HF V2BF])
+
+;; All sub-64-bit scalar modes.
+(define_mode_iterator SSUB64 [QI HI HF BF SI SF])
+
+;; All sub-64-bit modes.
+(define_mode_iterator VSSUB64 [VSUB64 SSUB64])
+
+;; All sub-32-bit integer modes.
+(define_mode_iterator VSSUB32_I [V2QI QI HI])
+
+;; All sub-64-bit floating-point modes.
+(define_mode_iterator VSSUB64_F [V2HF V2BF HF BF])
+
+;; All 32-bit integer and sub-64-bit floating point modes.
+(define_mode_iterator VS32_I_SUB64_F [V4QI V2HI VSSUB64_F])
+
 ;; All Advanced SIMD modes suitable for moving, loading, and storing.
 (define_mode_iterator VALL_F16 [V8QI V16QI V4HI V8HI V2SI V4SI V2DI
 				V4HF V8HF V4BF V8BF V2SF V4SF V2DF])
+
+;; All Advanced SIMD modes suitable for moving, loading, and storing,
+;; plus all sub-64-bit vector modes.
+(define_mode_iterator VALL_F16_SUB64 [VALL_F16 VSUB64])
 
 ;; The VALL_F16 modes except the 128-bit 2-element ones.
 (define_mode_iterator VALL_F16_NO_V2Q [V8QI V16QI V4HI V8HI V2SI V4SI
@@ -1102,6 +1132,7 @@
     UNSPEC_FCVT		; Used in aarch64-sve2.md.
     UNSPEC_FCVTNB	; Used in aarch64-sve2.md.
     UNSPEC_FCVTNT	; Used in aarch64-sve2.md.
+    UNSPEC_FIRSTP	; Used in aarch64-sve2.md.
     UNSPEC_FMAXNMP	; Used in aarch64-sve2.md.
     UNSPEC_FMAXP	; Used in aarch64-sve2.md.
     UNSPEC_FMINNMP	; Used in aarch64-sve2.md.
@@ -1119,6 +1150,7 @@
     UNSPEC_FP8FCVTN	; Used in aarch64-sve2.md.
     UNSPEC_HISTCNT	; Used in aarch64-sve2.md.
     UNSPEC_HISTSEG	; Used in aarch64-sve2.md.
+    UNSPEC_LASTP	; Used in aarch64-sve2.md.
     UNSPEC_LD1_COUNT	; Used in aarch64-sve2.md.
     UNSPEC_LDNT1_COUNT	; Used in aarch64-sve2.md.
     UNSPEC_MATCH	; Used in aarch64-sve2.md.
@@ -1460,13 +1492,21 @@
 (define_mode_attr bitsize [(V8QI "64") (V16QI "128")
 			   (V4HI "64") (V8HI "128")
 			   (V2SI "64") (V4SI "128")
-			   (V1DI "64") (V2DI "128")])
+			   (V1DI "64") (V2DI "128")
+			   (QI "8") (V2QI "16")
+			   (V4QI "32") (HI "16")
+			   (HF "16") (BF "16")
+			   (SI "32") (SF "32")
+			   (V2HI "32") (V2HF "32")
+			   (V2BF "32")])
 
 ;; Map a floating point or integer mode to the appropriate register name prefix
 (define_mode_attr s [(HF "h") (SF "s") (DF "d") (SI "s") (DI "d")])
 
 ;; Give the length suffix letter for a sign- or zero-extension.
-(define_mode_attr size [(QI "b") (HI "h") (SI "w")])
+(define_mode_attr size [(QI "b") (HI "h") (SI "w") (HF "") (BF "") (SF "")
+			(V2QI "h") (V4QI "") (V2HI "")
+			(V2HF "") (V2BF "")])
 
 ;; Give the number of bits in the mode
 (define_mode_attr sizen [(QI "8") (HI "16") (SI "32") (DI "64")])
@@ -1479,7 +1519,9 @@
 
 ;; The number of bits in a vector element, or controlled by a predicate
 ;; element.
-(define_mode_attr elem_bits [(VNx16BI "8") (VNx8BI "16")
+(define_mode_attr elem_bits [(V2QI "8") (V4QI "8") (V2HF "16") (V2HI "16")
+			     (V2BF "16")
+			     (VNx16BI "8") (VNx8BI "16")
 			     (VNx4BI "32") (VNx2BI "64")
 			     (VNx16QI "8") (VNx32QI "8") (VNx64QI "8")
 			     (VNx8HI "16") (VNx16HI "16") (VNx32HI "16")
@@ -1584,11 +1626,12 @@
 
 ;; Mode-to-individual element type mapping.
 (define_mode_attr Vetype [(V8QI "b") (V16QI "b")
-			  (V4HI "h") (V8HI  "h")
+			  (V2QI "b") (V4QI "b")
+			  (V4HI "h") (V8HI  "h") (V2HI "h")
 			  (V2SI "s") (V4SI  "s")
 			  (V2DI "d") (V1DI  "d")
-			  (V4HF "h") (V8HF  "h")
-			  (V2SF "s") (V4SF  "s")
+			  (V4HF "h") (V8HF  "h") (V2HF "h")
+			  (V2SF "s") (V4SF  "s") (V2BF "h")
 			  (V2DF "d") (V1DF  "d")
 			  (V2x8QI "b") (V2x4HI "h")
 			  (V2x2SI "s") (V2x1DI "d")
@@ -1763,8 +1806,10 @@
 			       (V4x2DF "v2df") (V4x8BF "v8bf")])
 
 ;; Define element mode for each vector mode.
-(define_mode_attr VEL [(V8QI  "QI") (V16QI "QI")
+(define_mode_attr VEL [(V8QI "QI") (V16QI "QI")
+		       (V2QI "QI") (V4QI  "QI")
 		       (V4HI "HI") (V8HI  "HI")
+		       (V2HI "HI") (V2HF  "HF")
 		       (V2SI "SI") (V4SI  "SI")
 		       (DI   "DI") (V1DI  "DI")
 		       (V2DI "DI")
@@ -1775,6 +1820,7 @@
 		       (SI   "SI") (HI    "HI")
 		       (QI   "QI")
 		       (V4BF "BF") (V8BF "BF")
+		       (V2BF "BF")
 		       (V2x8QI "QI") (V2x4HI "HI")
 		       (V2x2SI "SI") (V2x1DI "DI")
 		       (V2x4HF "HF") (V2x2SF "SF")
@@ -1883,28 +1929,97 @@
 			(VNx4SI  "v2si") (VNx4SF "v2sf")
 			(VNx2DI  "di") (VNx2DF "df")])
 
+;; Sub-64-bit vector mode to equivalent scalar mode.
+(define_mode_attr VSC [(V4QI "SI") (V2QI "HI")
+		       (V2HI "SI") (V2HF "SF") (V2BF "SF")])
+
 (define_mode_attr vnx [(V4SI "vnx4si") (V2DI "vnx2di")])
 
 ;; 64-bit container modes the inner or scalar source mode.
 (define_mode_attr VCOND [(HI "V4HI") (SI "V2SI")
+			 (V2HI "V4HI")
 			 (V4HI "V4HI") (V8HI "V4HI")
 			 (V2SI "V2SI") (V4SI "V2SI")
+			 (QI "V8QI") (V2QI "V8QI")
+			 (V4QI "V8QI")
 			 (DI   "DI") (V2DI "DI")
+			 (HF "V4HF") (V2HF "V4HF")
 			 (V4HF "V4HF") (V8HF "V4HF")
+			 (BF "V4BF") (V2BF "V4BF")
+			 (SF "V2SF")
 			 (V2SF "V2SF") (V4SF "V2SF")
 			 (V2DF "DF")])
 
+;; Same as above, but in lowercase.
+(define_mode_attr vcond [(HI "v4hi") (SI "v2si")
+			 (V2HI "v4hi")
+			 (V4HI "v4hi") (V8HI "v4hi")
+			 (V2SI "v2si") (V4SI "v2si")
+			 (QI "v8qi") (V2QI "v8qi")
+			 (V4QI "v8qi")
+			 (DI   "di") (V2DI "di")
+			 (HF "v4hf") (V2HF "v4hf")
+			 (V4HF "v4hf") (V8HF "v4hf")
+			 (BF "v4bf") (V2BF "v4bf")
+			 (SF "v2sf")
+			 (V2SF "v2sf") (V4SF "v2sf")
+			 (V2DF "df")])
+
 ;; 128-bit container modes the inner or scalar source mode.
 (define_mode_attr VCONQ [(V8QI "V16QI") (V16QI "V16QI")
+			 (V4QI "V16QI") (V2QI "V16QI")
 			 (V4HI "V8HI") (V8HI "V8HI")
+			 (V2HI "V8HI")
 			 (V2SI "V4SI") (V4SI "V4SI")
 			 (DI   "V2DI") (V2DI "V2DI")
 			 (V4HF "V8HF") (V8HF "V8HF")
+			 (V2HF "V8HF") (HF "V8HF")
 			 (V4BF "V8BF") (V8BF "V8BF")
+			 (V2BF "V8BF") (BF "V8BF")
 			 (V2SF "V4SF") (V4SF "V4SF")
 			 (V2DF "V2DF") (SI   "V4SI")
 			 (HI   "V8HI") (QI   "V16QI")
 			 (SF   "V4SF") (DF   "V2DF")])
+
+;; Same as above, but in lowercase.
+(define_mode_attr vconq [(V8QI "v16qi") (V16QI "v16qi")
+			 (V4QI "v16qi") (V2QI "v16qi")
+			 (V4HI "v8hi") (V8HI "v8hi")
+			 (V2HI "v8hi")
+			 (V2SI "v4si") (V4SI "v4si")
+			 (DI   "v2di") (V2DI "v2di")
+			 (V4HF "v8hf") (V8HF "v8hf")
+			 (V2HF "v8hf") (HF "v8hf")
+			 (V4BF "v8bf") (V8BF "v8bf")
+			 (V2BF "v8bf") (BF "v8bf")
+			 (V2SF "v4sf") (V4SF "v4sf")
+			 (V2DF "v2df") (SI   "v4si")
+			 (HI   "v8hi") (QI   "v16qi")
+			 (SF   "v4sf") (DF   "v2df")])
+
+;; SVE container modes for duplication into a full SVE register.
+(define_mode_attr VCONSV [(V8QI "VNx16QI") (V4QI "VNx16QI")
+			  (V2QI "VNx16QI") (QI "VNx16QI")
+			  (V4HI "VNx8HI") (V2HI "VNx8HI")
+			  (HI "VNx8HI") (V2SI "VNx4SI")
+			  (SI "VNx4SI") (DI "VNx2DI")
+			  (V4BF "VNx8BF") (V2BF "VNx8BF")
+			  (BF "VNx8BF") (V4HF "VNx8HF")
+			  (V2HF "VNx8HF") (HF "VNx8HF")
+			  (V2SF "VNx4SF") (SF "VNx4SF")
+			  (DF "VNx2DF")])
+
+;; Same as above, but in lowercase.
+(define_mode_attr vconsv [(V8QI "vnx16qi") (V4QI "vnx16qi")
+			  (V2QI "vnx16qi") (QI "vnx16qi")
+			  (V4HI "vnx8hi") (V2HI "vnx8hi")
+			  (HI "vnx8hi") (V2SI "vnx4si")
+			  (SI "vnx4si") (DI "vnx2di")
+			  (V4BF "vnx8bf") (V2BF "vnx8bf")
+			  (BF "vnx8bf") (V4HF "vnx8hf")
+			  (V2HF "vnx8hf") (HF "vnx8hf")
+			  (V2SF "vnx4sf") (SF "vnx4sf")
+			  (DF "vnx2df")])
 
 ;; Half modes of all vector modes.
 (define_mode_attr VHALF [(V8QI "V4QI")  (V16QI "V8QI")
@@ -1947,10 +2062,16 @@
 (define_mode_attr V1half [(V2DI "v1di")  (V2DF  "v1df")])
 
 ;; Double modes of vector modes.
-(define_mode_attr VDBL [(V8QI "V16QI") (V4HI "V8HI")
+(define_mode_attr VDBL [(V8QI "V16QI") (V4QI "V8QI")
+			(V2QI "V4QI")  (V4HI "V8HI")
 			(V4HF "V8HF")  (V4BF "V8BF")
+			(V2BF "V4BF")
 			(V2SI "V4SI")  (V2SF "V4SF")
+			(V2HI "V4HI")  (V2HF "V4HF")
+			(BF   "V2BF")
 			(SI   "V2SI")  (SF   "V2SF")
+			(QI   "V2QI")
+			(HI   "V2HI")  (HF   "V2HF")
 			(DI   "V2DI")  (DF   "V2DF")])
 
 ;; Load/store pair mode.
@@ -2023,6 +2144,26 @@
 ;; Register suffix narrowed modes for VQN.
 (define_mode_attr V2ntype [(V8HI "16b") (V4SI "8h")
 			   (V2DI "4s")])
+
+;; Register suffix used when duplicating a value of a certain mode
+;; into a full 128-bit AdvSIMD register.
+(define_mode_attr Vqduptype [(QI "16b") (V2QI "8h") (V4QI "4s") (V8QI "2d")
+			     (HI "8h") (V2HI "4s") (V4HI "2d")
+			     (HF "8h") (V2HF "4s") (V4HF "2d")
+			     (BF "8h") (V2BF "4s") (V4BF "2d")
+			     (SI "4s") (V2SI "2d")
+			     (SF "4s") (V2SF "2d")
+			     (DI "2d") (DF "2d")])
+
+;; Register suffix used when duplicating a value of a certain mode
+;; into a partial 64-bit AdvSIMD register.
+(define_mode_attr Vdduptype [(QI "8b") (V2QI "4h") (V4QI "2s") (V8QI "")
+			     (HI "4h") (V2HI "2s") (V4HI "")
+			     (HF "4h") (V2HF "2s") (V4HF "")
+			     (BF "4h") (V2BF "2s") (V4BF "")
+			     (SI "2s") (V2SI "")
+			     (SF "2s") (V2SF "")
+			     (DI "") (DF "")])
 
 ;; The result of FCVTN on two vectors of the given mode.  The result has
 ;; twice as many QI elements as the input.
@@ -2148,10 +2289,23 @@
 ;; Whether a mode fits in W or X registers (i.e. "w" for 32-bit modes
 ;; and "x" for 64-bit modes).
 (define_mode_attr single_wx [(SI   "w") (SF   "w")
+			     (V2QI "w") (V4QI "w")
 			     (V8QI "x") (V4HI "x")
 			     (V4HF "x") (V4BF "x")
+			     (V2HI "w") (V2HF "w")
+			     (HF   "w") (QI   "w")
+			     (V2BF "w") (BF   "w")
+			     (HI   "w")
 			     (V2SI "x") (V2SF "x")
 			     (DI   "x") (DF   "x")])
+
+(define_mode_attr single_dwx [(SI  "x") (SF   "x")
+			     (V2QI "w") (V4QI "x")
+			     (V2HI "x") (V2HF "x")
+			     (HF   "w") (QI   "w")
+			     (V2BF "x") (BF   "w")
+			     (HI   "w")])
+
 
 ;; Whether a mode fits in S or D registers (i.e. "s" for 32-bit modes
 ;; and "d" for 64-bit modes).
@@ -2159,7 +2313,12 @@
 			       (V8QI "d") (V4HI "d")
 			       (V4HF "d") (V4BF "d")
 			       (V2SI "d") (V2SF "d")
-			       (DI   "d") (DF   "d")])
+			       (DI   "d") (DF   "d")
+			       (QI   "b") (BF   "h")
+			       (V2HF "s") (HI   "h")
+			       (V4QI "s") (V2QI "h")
+			       (V2HI "s") (V2BF "s")
+			       (HF   "h")])
 
 ;; Whether a double-width mode fits in D or Q registers (i.e. "d" for
 ;; 32-bit modes and "q" for 64-bit modes).
@@ -2168,6 +2327,14 @@
 			        (V4HF "q") (V4BF "q")
 			        (V2SI "q") (V2SF "q")
 			        (DI   "q") (DF   "q")])
+
+;; Scalar size of a sub-128-bit vector or scalar mode.
+(define_mode_attr vstype [(V8QI "d") (V4QI "s") (V2QI "h") (QI "b")
+			  (V4HI "d") (V2HI "s") (HI "h")
+			  (V2SI "d") (SI "s") (DI "d")
+			  (V4BF "d") (V2BF "s") (BF "h")
+			  (V4HF "d") (V2HF "s") (HF "h")
+			  (V2SF "d") (SF "s") (DF "d")])
 
 ;; Define corresponding core/FP element mode for each vector mode.
 (define_mode_attr vw [(V8QI "w") (V16QI "w")
@@ -2526,7 +2693,7 @@
 			      (V4x1DF "16") (V4x2DF "16")
 			      (V4x4BF "16") (V4x8BF "16")])
 
-;; -fpic small model GOT reloc modifers: gotpage_lo15/lo14 for ILP64/32.
+;; -fpic small model GOT reloc modifiers: gotpage_lo15/lo14 for ILP64/32.
 ;; No need of iterator for -fPIC as it use got_lo12 for both modes.
 (define_mode_attr got_modifier [(SI "gotpage_lo14") (DI "gotpage_lo15")])
 

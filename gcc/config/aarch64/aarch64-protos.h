@@ -872,6 +872,7 @@ bool aarch64_and_bitmask_imm (unsigned HOST_WIDE_INT val_in, machine_mode mode);
 int aarch64_branch_cost (bool, bool);
 enum aarch64_symbol_type aarch64_classify_symbolic_expression (rtx);
 bool aarch64_advsimd_struct_mode_p (machine_mode mode);
+bool aarch64_advsimd_sub_dword_mode_p (machine_mode mode);
 opt_machine_mode aarch64_v64_mode (scalar_mode);
 opt_machine_mode aarch64_v128_mode (scalar_mode);
 opt_machine_mode aarch64_full_sve_mode (scalar_mode);
@@ -887,7 +888,7 @@ bool aarch64_emit_approx_div (rtx, rtx, rtx);
 bool aarch64_emit_approx_sqrt (rtx, rtx, bool);
 bool aarch64_emit_opt_vec_rotate (rtx, rtx, rtx);
 tree aarch64_vector_load_decl (tree);
-rtx aarch64_gen_callee_cookie (aarch64_isa_mode, arm_pcs, bool);
+rtx aarch64_gen_callee_cookie (aarch64_isa_mode, bool);
 void aarch64_expand_call (rtx, rtx, rtx, bool);
 bool aarch64_expand_cpymem_mops (rtx *, bool);
 bool aarch64_expand_cpymem (rtx *, bool);
@@ -952,8 +953,10 @@ char *aarch64_output_simd_and_imm (rtx, unsigned);
 char *aarch64_output_simd_xor_imm (rtx, unsigned);
 char *aarch64_output_fmov (rtx);
 
+const char *aarch64_output_simd_mov_imm_low (rtx *);
 char *aarch64_output_sve_mov_immediate (rtx);
 char *aarch64_output_sve_ptrues (rtx);
+bool aarch64_const_vec_fmov_p (rtx);
 bool aarch64_pad_reg_upward (machine_mode, const_tree, bool);
 bool aarch64_regno_ok_for_base_p (int, bool);
 bool aarch64_regno_ok_for_index_p (int, bool);
@@ -994,6 +997,7 @@ bool aarch64_use_simple_return_insn_p (void);
 const char *aarch64_output_casesi (rtx *);
 const char *aarch64_output_load_tp (rtx);
 const char *aarch64_output_sme_zero_za (rtx);
+const char *aarch64_output_move_imm (rtx);
 
 arm_pcs aarch64_tlsdesc_abi_id ();
 enum aarch64_symbol_type aarch64_classify_symbol (rtx, HOST_WIDE_INT);
@@ -1140,7 +1144,8 @@ void aarch64_expand_tag_memory (rtx, rtx, rtx);
 #endif /* RTX_CODE */
 
 bool aarch64_process_target_attr (tree);
-void aarch64_override_options_internal (struct gcc_options *);
+void aarch64_override_options_internal (struct gcc_options *,
+					struct gcc_options *);
 
 const char *aarch64_general_mangle_builtin_type (const_tree);
 void aarch64_general_init_builtins (void);

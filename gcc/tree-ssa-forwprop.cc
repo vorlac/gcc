@@ -407,13 +407,9 @@ combine_cond_expr_cond (gimple *stmt, enum tree_code code, tree type,
 
   gcc_assert (TREE_CODE_CLASS (code) == tcc_comparison);
 
-  fold_defer_overflow_warnings ();
   t = fold_binary_loc (gimple_location (stmt), code, type, op0, op1);
   if (!t)
-    {
-      fold_undefer_overflow_warnings (false, NULL, 0);
-      return NULL_TREE;
-    }
+    return NULL_TREE;
 
   /* Require that we got a boolean type out if we put one in.  */
   gcc_assert (TREE_CODE (TREE_TYPE (t)) == TREE_CODE (type));
@@ -423,13 +419,7 @@ combine_cond_expr_cond (gimple *stmt, enum tree_code code, tree type,
 
   /* Bail out if we required an invariant but didn't get one.  */
   if (!t || (invariant_only && !is_gimple_min_invariant (t)))
-    {
-      fold_undefer_overflow_warnings (false, NULL, 0);
-      return NULL_TREE;
-    }
-
-  bool nowarn = warning_suppressed_p (stmt, OPT_Wstrict_overflow);
-  fold_undefer_overflow_warnings (!nowarn, stmt, 0);
+    return NULL_TREE;
 
   return t;
 }
@@ -856,8 +846,10 @@ forward_propagate_addr_expr_1 (tree name, tree def_rhs,
 	      new_base = build_fold_addr_expr (*def_rhs_basep);
 	      new_offset = TREE_OPERAND (rhs, 1);
 	    }
-	  *def_rhs_basep = build2 (MEM_REF, TREE_TYPE (*def_rhs_basep),
-				   new_base, new_offset);
+	  tree atype = TREE_TYPE (*def_rhs_basep);
+	  if (TYPE_ALIGN (TREE_TYPE (rhs)) < TYPE_ALIGN (atype))
+	    atype = build_aligned_type (atype, TYPE_ALIGN (TREE_TYPE (rhs)));
+	  *def_rhs_basep = build2 (MEM_REF, atype, new_base, new_offset);
 	  TREE_THIS_VOLATILE (*def_rhs_basep) = TREE_THIS_VOLATILE (rhs);
 	  TREE_SIDE_EFFECTS (*def_rhs_basep) = TREE_SIDE_EFFECTS (rhs);
 	  TREE_THIS_NOTRAP (*def_rhs_basep) = TREE_THIS_NOTRAP (rhs);
@@ -1462,7 +1454,7 @@ static tree
 new_src_based_on_copy (tree src2, tree dest, tree src)
 {
   /* If the second src is not exactly the same as dest,
-     try to handle it seperately; see it is address/size equivalent.
+     try to handle it separately; see it is address/size equivalent.
      Handles `a` and `a.b` and `MEM<char[N]>(&a)` which all have
      the same size and offsets as address/size equivalent.
      This allows copying over a memcpy and also one for copying
@@ -1603,7 +1595,7 @@ optimize_agr_copyprop_1 (gimple *stmt, gimple *use_stmt,
   src = new_src_based_on_copy (src2, dest, src);
   if (!src)
     return;
-  /* For 2 memory refences and using a temporary to do the copy,
+  /* For 2 memory references and using a temporary to do the copy,
      don't remove the temporary as the 2 memory references might overlap.
      Note t does not need to be decl as it could be field.
      See PR 22237 for full details.
@@ -3464,8 +3456,20 @@ simplify_count_zeroes (gimple_stmt_iterator *gsi)
 	{
 	  unsigned HOST_WIDE_INT mask
 	    = ((HOST_WIDE_INT_1U << (input_bits - shiftval)) - 1) << shiftval;
-	  return (((((HOST_WIDE_INT_1U << (data + 1)) - 1) * mulval) & mask)
-		  >> shiftval) == i;
+	  /* The OR-cascade produces a value with all bits from 0 to the
+	     original MSB set.  Compute (1 << (data + 1)) - 1 to simulate
+	     that value.  When data + 1 equals HOST_BITS_PER_WIDE_INT
+	     (i.e. data is the MSB position of a 64-bit input) the shift
+	     is undefined behavior, so handle that case explicitly using
+	     all-ones.  Without this, any well-formed 64-bit DeBruijn CLZ
+	     table is rejected because its entry for the all-ones input
+	     correctly maps to the MSB (e.g. table[...] == 63).
+	     PR tree-optimization/122569.  */
+	  unsigned HOST_WIDE_INT all_bits_below
+	    = (data + 1 == HOST_BITS_PER_WIDE_INT)
+	      ? HOST_WIDE_INT_M1U
+	      : ((HOST_WIDE_INT_1U << (data + 1)) - 1);
+	  return (((all_bits_below * mulval) & mask) >> shiftval) == i;
 	};
     if (!check_table (ctor, type, zero_val, input_bits, checkfn))
       return false;
@@ -4246,7 +4250,8 @@ simplify_vector_constructor (gimple_stmt_iterator *gsi)
 			   ? 0 : refnelts) + i);
       vec_perm_indices indices (sel, orig[1] ? 2 : 1, refnelts);
       machine_mode vmode = TYPE_MODE (perm_type);
-      if (!can_vec_perm_const_p (vmode, vmode, indices))
+      if ((cfun->curr_properties & PROP_gimple_lvec)
+	  && !can_vec_perm_const_p (vmode, vmode, indices))
 	return false;
       mask_type = build_vector_type (ssizetype, refnelts);
       tree op2 = vec_perm_indices_to_tree (mask_type, indices);
@@ -4311,7 +4316,8 @@ simplify_vector_constructor (gimple_stmt_iterator *gsi)
 			    ? elts[i].second + nelts : i);
 	  vec_perm_indices indices (sel, 2, nelts);
 	  machine_mode vmode = TYPE_MODE (type);
-	  if (!can_vec_perm_const_p (vmode, vmode, indices))
+	  if ((cfun->curr_properties & PROP_gimple_lvec)
+	      && !can_vec_perm_const_p (vmode, vmode, indices))
 	    return false;
 	  mask_type = build_vector_type (ssizetype, nelts);
 	  blend_op2 = vec_perm_indices_to_tree (mask_type, indices);
@@ -4419,7 +4425,13 @@ optimize_vector_load (gimple_stmt_iterator *gsi)
 	  gimple *use_stmt = USE_STMT (use_p);
 	  if (is_gimple_debug (use_stmt))
 	    continue;
-	  if (!is_gimple_assign (use_stmt))
+	  tree use_lhs;
+	  if (!is_gimple_assign (use_stmt)
+	      /* For alias reasons we move the use to the place of the
+		 load.  Avoid this when abnormals are involved.  */
+	      || ((TREE_CODE ((use_lhs = gimple_assign_lhs (use_stmt)))
+		   == SSA_NAME)
+		  && SSA_NAME_OCCURS_IN_ABNORMAL_PHI (use_lhs)))
 	    {
 	      rewrite = false;
 	      break;
@@ -5211,7 +5223,7 @@ public:
   bool m_full_walk = false;
 }; // class pass_forwprop
 
-/* Attemp to make the BB block of __builtin_unreachable unreachable by changing
+/* Attempt to make the BB block of __builtin_unreachable unreachable by changing
    the incoming jumps.  Return true if at least one jump was changed.  */
 
 static bool
@@ -5248,8 +5260,7 @@ optimize_unreachable (basic_block bb)
 	}
       else
 	{
-	  /* Todo: handle other cases.  Note that unreachable switch case
-	     statements have already been removed.  */
+	  /* Todo: handle other cases.  e.g. switch.  */
 	  continue;
 	}
 
@@ -5928,7 +5939,7 @@ pass_forwprop::execute (function *fun)
 	      propagate_value (use_p, val);
 	  }
 
-      /* Mark outgoing exectuable edges.  */
+      /* Mark outgoing executable edges.  */
       if (edge e = find_taken_edge (bb, NULL))
 	{
 	  e->flags |= EDGE_EXECUTABLE;
@@ -5990,7 +6001,7 @@ pass_forwprop::execute (function *fun)
 
   /* Fixup stmts that became noreturn calls.  This may require splitting
      blocks and thus isn't possible during the walk.  Do this
-     in reverse order so we don't inadvertedly remove a stmt we want to
+     in reverse order so we don't inadvertently remove a stmt we want to
      fixup by visiting a dominating now noreturn call first.  */
   while (!to_fixup.is_empty ())
     {

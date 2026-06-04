@@ -2734,6 +2734,84 @@ simplify_context::simplify_logical_relational_operation (rtx_code code,
   return simplify_gen_relational (code, mode, VOIDmode, op0, op1);
 }
 
+/* We are going to IOR together OP0/OP1.  If there is a common term in OP0/OP1
+   then we may be able to simplify the expression.  We're primarily trying to
+   simplify down to IOR/XOR expression right now, but there may be other
+   simplifications we can do in the future.
+
+   Return the simplified expression or NULL_RTX if no simplification was
+   possible.  */
+rtx
+simplify_context::simplify_ior_with_common_term (machine_mode mode, rtx op0, rtx op1)
+{
+  /* (ior X (plus/xor X C)) can be simplified into (ior X C) when
+     X and C have no bits in common.  */
+  if ((GET_CODE (op1) == PLUS || GET_CODE (op1) == XOR)
+      && rtx_equal_p (op0, XEXP (op1, 0))
+      && ((nonzero_bits (op0, GET_MODE (op0))
+	  & nonzero_bits (XEXP (op1, 1), GET_MODE (op1))) == 0)
+      && !side_effects_p (op1))
+    return simplify_gen_binary (IOR, mode, op0, XEXP (op1, 1));
+
+  /* (ior (and A C1) (and (not A) C2)) can be converted
+     into (and (xor A C2) (C1 + C2)) when there are no bits
+     in common between C1 and C2.  */
+  if (GET_CODE (op0) == AND
+      && GET_CODE (op1) == AND
+      && GET_CODE (XEXP (op1, 0)) == NOT
+      && rtx_equal_p (XEXP (op0, 0), XEXP (XEXP (op1, 0), 0))
+      && CONST_INT_P (XEXP (op0, 1))
+      && CONST_INT_P (XEXP (op1, 1))
+      && (INTVAL (XEXP (op0, 1)) & INTVAL (XEXP (op1, 1))) == 0)
+    {
+      rtx c = GEN_INT (INTVAL (XEXP (op0, 1)) + INTVAL (XEXP (op1, 1)));
+
+      rtx tem = simplify_gen_binary (XOR, mode, XEXP (op0, 0), XEXP (op1, 1));
+      if (tem)
+	{
+	  tem = simplify_gen_binary (AND, mode, tem, c);
+
+	  if (tem)
+	    return tem;
+	}
+    }
+
+  /* Another variant seen on some target particularly those with
+     sub-word operations.
+
+     (ior (and A C1) (plus (and A C2) C2)) can be simplified into
+     (and (xor (A C2) (C1 + C2).
+
+     Where C2 is the sign bit for A's mode.  So 0x80 for QI,
+     0x8000 for HI, etc.  In this case we know there is no carry
+     from the PLUS into relevant bits of the output.  */
+  if (GET_CODE (op0) == AND
+      && GET_CODE (op1) == PLUS
+      && GET_CODE (XEXP (op1, 0)) == AND
+      && rtx_equal_p (XEXP (op0, 0), XEXP (XEXP (op1, 0), 0))
+      && CONST_INT_P (XEXP (op0, 1))
+      && CONST_INT_P (XEXP (op1, 1))
+      && CONST_INT_P (XEXP (XEXP (op1, 0), 1))
+      && INTVAL (XEXP (op1, 1)) == INTVAL (XEXP (XEXP (op1, 0), 1))
+      && GET_MODE_BITSIZE (GET_MODE (op1)).is_constant ()
+      && ((INTVAL (XEXP (op1, 1)) & GET_MODE_MASK (GET_MODE (op1)))
+	  == HOST_WIDE_INT_1U << (GET_MODE_BITSIZE (GET_MODE (op1)).to_constant () - 1))
+      && (INTVAL (XEXP (op0, 1)) & INTVAL (XEXP (op1, 1))) == 0)
+    {
+      rtx c = GEN_INT (INTVAL (XEXP (op0, 1)) + INTVAL (XEXP (op1, 1)));
+
+      rtx tem = simplify_gen_binary (XOR, mode, XEXP (op0, 0), XEXP (op1, 1));
+      if (tem)
+	{
+	  tem = simplify_gen_binary (AND, mode, tem, c);
+	  if (tem)
+	    return tem;
+	}
+    }
+  return NULL_RTX;
+}
+
+
 /* Simplify a binary operation CODE with result mode MODE, operating on OP0
    and OP1.  Return 0 if no simplification is possible.
 
@@ -3854,15 +3932,17 @@ simplify_context::simplify_binary_operation_1 (rtx_code code,
 	  && (INTVAL (XEXP (op0, 1))
 	      == ~INTVAL (XEXP (op1, 1))))
 	{
-	  /* The IOR may be on both sides.  */
+	  /* The IOR/XOR may be on both sides.  */
 	  rtx top0 = NULL_RTX, top1 = NULL_RTX;
-	  if (GET_CODE (XEXP (op1, 0)) == IOR)
+	  if (GET_CODE (XEXP (op1, 0)) == IOR
+	      || GET_CODE (XEXP (op1, 0)) == XOR)
 	    top0 = op0, top1 = op1;
-	  else if (GET_CODE (XEXP (op0, 0)) == IOR)
+	  else if (GET_CODE (XEXP (op0, 0)) == IOR
+		   || GET_CODE (XEXP (op0, 0)) == XOR)
 	    top0 = op1, top1 = op0;
 	  if (top0 && top1)
 	    {
-	      /* X may be on either side of the inner IOR.  */
+	      /* X may be on either side of the inner IOR/XOR.  */
 	      rtx tem = NULL_RTX;
 	      if (rtx_equal_p (XEXP (top0, 0),
 			       XEXP (XEXP (top1, 0), 0)))
@@ -3871,7 +3951,8 @@ simplify_context::simplify_binary_operation_1 (rtx_code code,
 				    XEXP (XEXP (top1, 0), 1)))
 		tem = XEXP (XEXP (top1, 0), 0);
 	      if (tem)
-		return simplify_gen_binary (IOR, mode, XEXP (top0, 0),
+		return simplify_gen_binary (GET_CODE (XEXP (top1, 0)),
+					    mode, XEXP (top0, 0),
 					    simplify_gen_binary
 					      (AND, mode, tem, XEXP (top1, 1)));
 	    }
@@ -3896,6 +3977,19 @@ simplify_context::simplify_binary_operation_1 (rtx_code code,
       if (GET_CODE (op0) == AND
 	  && negated_ops_p (XEXP (op0, 0), op1))
 	return simplify_gen_binary (IOR, mode, XEXP (op0, 1), op1);
+
+      /* op0/op1 may have a common term which in turn may allow simplification
+	 of the the outer IOR.  There are likely other cases we should
+	 handle for the outer code as well as the form of the operands.  */
+      tem = simplify_ior_with_common_term (mode, op0, op1);
+      if (tem)
+	return tem;
+
+      /* IOR is commutative and we can't rely on canonicalization at this point,
+	 so try again to simplify with the operands reversed.  */
+      tem = simplify_ior_with_common_term (mode, op1, op0);
+      if (tem)
+	return tem;
 
       tem = simplify_with_subreg_not (code, mode, op0, op1);
       if (tem)
@@ -5023,7 +5117,7 @@ simplify_ashift:
 	     (i386) extract scalar element from a vector using chain of
 	     nested VEC_SELECT expressions.  When input operand is a memory
 	     operand, this operation can be simplified to a simple scalar
-	     load from an offseted memory address.  */
+	     load from an offsetted memory address.  */
 	  int n_elts;
 	  if (GET_CODE (trueop0) == VEC_SELECT
 	      && (GET_MODE_NUNITS (GET_MODE (XEXP (trueop0, 0)))
@@ -5347,6 +5441,7 @@ simplify_ashift:
 	  rtx op0_subop1 = XEXP (trueop0, 1);
 	  gcc_assert (GET_CODE (op0_subop1) == PARALLEL);
 	  gcc_assert (known_eq (XVECLEN (trueop1, 0), GET_MODE_NUNITS (mode)));
+	  bool identical_p = true;
 
 	  /* Apply the outer ordering vector to the inner one.  (The inner
 	     ordering vector is expressly permitted to be of a different
@@ -5358,10 +5453,25 @@ simplify_ashift:
 	      if (!CONST_INT_P (x))
 		return 0;
 	      rtx y = XVECEXP (op0_subop1, 0, INTVAL (x));
-	      if (!CONST_INT_P (y) || i != INTVAL (y))
+	      if (!CONST_INT_P (y))
 		return 0;
+	      if (i != INTVAL (y))
+		identical_p = false;
 	    }
-	  return XEXP (trueop0, 0);
+	  if (identical_p)
+	    return XEXP (trueop0, 0);
+
+	  /* Otherwise a permutation of a permutation is a permutation.  */
+	  int len = XVECLEN (trueop1, 0);
+	  rtvec vec = rtvec_alloc (len);
+	  for (int i = 0; i < len; ++i)
+	    {
+	      rtx x = XVECEXP (trueop1, 0, i);
+	      rtx y = XVECEXP (op0_subop1, 0, INTVAL (x));
+	      RTVEC_ELT (vec, i) = y;
+	    }
+	  return gen_rtx_fmt_ee (code, mode, XEXP (trueop0, 0),
+				 gen_rtx_PARALLEL (VOIDmode, vec));
 	}
 
       return 0;
@@ -6649,6 +6759,15 @@ simplify_context::simplify_relational_operation_1 (rtx_code code,
       return simplify_gen_relational (code, mode, cmp_mode, x, tem);
     }
 
+  /* (eq/ne (plus (x) (y)) y) simplifies to (eq/ne x 0).  */
+  if ((code == EQ || code == NE)
+      && op0code == PLUS
+      && rtx_equal_p (XEXP (op0, 1), op1)
+      && !side_effects_p (op1)
+      && (INTEGRAL_MODE_P (cmp_mode) || flag_unsafe_math_optimizations))
+    return simplify_gen_relational (code, mode, cmp_mode,
+				    XEXP (op0, 0), CONST0_RTX (cmp_mode));
+
   /* (ne:SI (zero_extract:SI FOO (const_int 1) BAR) (const_int 0))) is
      the same as (zero_extract:SI FOO (const_int 1) BAR).  */
   scalar_int_mode int_mode, int_cmp_mode;
@@ -6729,6 +6848,51 @@ simplify_context::simplify_relational_operation_1 (rtx_code code,
 	  return simplify_gen_relational (code, mode, cmp_mode, lhs,
 					  CONST0_RTX (cmp_mode));
 	}
+    }
+
+  /* Optimize (cmp (and/ior x C1) C2) depending on the CMP and C1 and C2's
+     relationship.  */
+  if ((op0code == AND || op0code == IOR)
+      && CONST_INT_P (op1)
+      && CONST_INT_P (XEXP (op0, 1)))
+    {
+      unsigned HOST_WIDE_INT c1 = UINTVAL (XEXP (op0, 1));
+      unsigned HOST_WIDE_INT c2 = UINTVAL (op1);
+
+      /* For AND operations:
+	   - (x & c1) == c2 when some bits are set in c2 but not in c1 -> false
+	   - (x & c1) != c2 when some bits are set in c2 but not in c1 -> true
+	   - (x & c1) >= c2 when c1 is less than c2 -> false
+	   - (x & c1) < c2 when c1 is less than c2 -> true
+	   - (x & c1) > c2 when c1 is less than or equal to c2 -> false
+	   - (x & c1) <= c2 when c1 is less than or equal to c2 -> true
+
+	 For IOR operations:
+	   - (x | c1) == c2 when some bits are set in c1 but not in c2 -> false
+	   - (x | c1) != c2 when some bits are set in c1 but not in c2 -> true
+	   - (x | c1) <= c2 when c1 is greater than c2 -> false
+	   - (x | c1) > c2 when c1 is greater than c2 -> true
+	   - (x | c1) < c2 when c1 is greater than or equal to c2 -> false
+	   - (x | c1) >= c2 when c1 is greater than or equal to c2 -> true */
+      if ((op0code == AND
+	   && ((code == EQ && (c1 & c2) != c2)
+	       || (code == GEU && c1 < c2)
+	       || (code == GTU && c1 <= c2)))
+	  || ((op0code == IOR
+	      && ((code == EQ && (c1 & c2) != c1)
+		  || (code == LEU && c1 > c2)
+		  || (code == LTU && c1 >= c2)))))
+	return const0_rtx;
+
+      if ((op0code == AND
+	   && ((code == NE && (c1 & c2) != c2)
+	       || (code == LTU && c1 < c2)
+	       || (code == LEU && c1 <= c2)))
+	  || ((op0code == IOR
+	      && ((code == NE && (c1 & c2) != c1)
+		  || (code == GTU && c1 > c2)
+		  || (code == GEU && c1 >= c2)))))
+	return const_true_rtx;
     }
 
   /* (eq/ne (bswap x) C1) simplifies to (eq/ne x C2) with C2 swapped.  */
@@ -8215,7 +8379,7 @@ simplify_const_vector_subreg (machine_mode outermode, rtx x,
   if (!native_encode_rtx (innermode, x, buffer, first_byte, buffer_bytes))
     return NULL_RTX;
 
-  /* Reencode the bytes as OUTERMODE.  */
+  /* Re-encode the bytes as OUTERMODE.  */
   return native_decode_vector_rtx (outermode, buffer, 0, out_npatterns,
 				   nelts_per_pattern);
 }

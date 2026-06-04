@@ -904,7 +904,7 @@ package body Sem_Ch3 is
       --  set, as required by gigi. This is necessary in the case of the
       --  Task_Body_Procedure.
 
-      if not Has_Private_Component (Desig_Type) then
+      if not Is_Incompletely_Defined (Desig_Type) then
          Layout_Type (Anon_Type);
       end if;
 
@@ -956,7 +956,7 @@ package body Sem_Ch3 is
          if Is_Limited_Record (Desig_Type)
            and then Is_Class_Wide_Type (Desig_Type)
          then
-            Build_Master_Entity (Defining_Identifier (Related_Nod));
+            Build_Master_Entity (Related_Nod);
             Build_Master_Renaming (Anon_Type);
 
          --  Similarly, if the type is an anonymous access that designates
@@ -965,7 +965,7 @@ package body Sem_Ch3 is
          elsif Has_Task (Desig_Type)
            and then Comes_From_Source (Related_Nod)
          then
-            Build_Master_Entity (Defining_Identifier (Related_Nod));
+            Build_Master_Entity (Related_Nod);
             Build_Master_Renaming (Anon_Type);
          end if;
       end if;
@@ -1385,7 +1385,7 @@ package body Sem_Ch3 is
             if From_Limited_With (Entity (S))
               and then not Is_Class_Wide_Type (Entity (S))
             then
-               Build_Master_Entity (T);
+               Build_Master_Entity (Def);
                Build_Master_Renaming (T);
             end if;
 
@@ -2222,7 +2222,7 @@ package body Sem_Ch3 is
       --  If this component is private (or depends on a private type), flag the
       --  record type to indicate that some operations are not available.
 
-      P := Private_Component (T);
+      P := Partially_Visible_Part (T);
 
       if Present (P) then
 
@@ -2894,7 +2894,8 @@ package body Sem_Ch3 is
          --  generated bodies that have not been analyzed yet), freeze all
          --  types now. Note that in the latter case, the expander must take
          --  care to attach the bodies at a proper place in the tree so as to
-         --  not cause unwanted freezing at that point.
+         --  not cause unwanted freezing at that point. The exception is the
+         --  generated body of an expression function, which does not freeze.
 
          --  It is also necessary to check for a case where both an expression
          --  function is used and the current scope depends on an incomplete
@@ -2940,11 +2941,6 @@ package body Sem_Ch3 is
             end if;
 
             Adjust_Decl;
-
-            --  The generated body of an expression function does not freeze,
-            --  unless it is a completion, in which case only the expression
-            --  itself freezes. This is handled when the body itself is
-            --  analyzed (see Freeze_Expr_Types, sem_ch6.adb).
 
             Freeze_All (Freeze_From, Decl);
             Freeze_From := Last_Entity (Current_Scope);
@@ -3197,12 +3193,22 @@ package body Sem_Ch3 is
    begin
       if Present (Aspect_Specifications (Parent (Def))) then
          declare
-            Asp : Node_Id;
+            Asp  : Node_Id;
+            Expr : Node_Id;
+
          begin
             Asp := First (Aspect_Specifications (Parent (Def)));
             while Present (Asp) loop
                if Chars (Identifier (Asp)) = Name_Unsigned_Base_Range then
-                  Is_Unsigned_Base_Range_Type_Decl := True;
+                  Expr := Expression (Asp);
+
+                  if Present (Expr) then
+                     Analyze_And_Resolve (Expr, Standard_Boolean);
+                  end if;
+
+                  Is_Unsigned_Base_Range_Type_Decl :=
+                    No (Expression (Asp))
+                      or else Is_True (Static_Boolean (Expr));
                   exit;
                end if;
 
@@ -3415,7 +3421,7 @@ package body Sem_Ch3 is
 
       --  Some common processing for all types
 
-      Set_Depends_On_Private (T, Has_Private_Component (T));
+      Set_Depends_On_Private (T, Is_Incompletely_Defined (T));
       Check_Ops_From_Incomplete_Type;
 
       --  Both the declared entity, and its anonymous base type if one was
@@ -4514,6 +4520,14 @@ package body Sem_Ch3 is
          Generate_Definition (Id);
          Enter_Name (Id);
 
+         --  For artificial return objects created from within a transient
+         --  scope, propagate Return_Applies_To from the enclosing return.
+
+         if Is_Return_Object (Id) and then Scope_Is_Transient then
+            Set_Return_Applies_To
+              (Scope (Id), Return_Applies_To (Scope (Scope (Id))));
+         end if;
+
          Mark_Coextensions (N, Object_Definition (N));
 
          T := Find_Type_Of_Object (Object_Definition (N), N);
@@ -4769,8 +4783,7 @@ package body Sem_Ch3 is
          --  has been replaced by a renaming declaration during its expansion
          --  (see Expand_N_Case_Expression and Expand_N_If_Expression).
 
-         if Expander_Active
-           and then Nkind (E) in N_Case_Expression | N_If_Expression
+         if Nkind (E) in N_Case_Expression | N_If_Expression
            and then Nkind (N) = N_Object_Renaming_Declaration
          then
             goto Leave;
@@ -4865,6 +4878,19 @@ package body Sem_Ch3 is
               ("formal parameter cannot be implicitly converted to "
                & "class-wide type when Extensions_Visible is False", E);
          end if;
+
+         --  Cannot invoke a C++ constructor in the return statement of
+         --  a function with foreign convention, because the extra formal
+         --  BIP_Object_Access is not available.
+
+         if Is_CPP_Constructor_Call (E)
+           and then Is_Return_Object (Id)
+           and then Has_Foreign_Convention (Return_Applies_To (Scope (Id)))
+         then
+            Error_Msg_N
+              ("C++ constructor call in return statement of "
+               &  "function with foreign convention", E);
+         end if;
       end if;
 
       --  If the No_Streams restriction is set, check that the type of the
@@ -4904,7 +4930,9 @@ package body Sem_Ch3 is
         and then
           (Present (E)
             or else
-              Is_Partially_Initialized_Type (T, Include_Implicit => False))
+              Is_Partially_Initialized_Type (T,
+                Include_Implicit => False,
+                Predicate_Check  => True))
         and then not (Constant_Present (N) and then No (E))
       then
          --  If the type has a static predicate and the expression is known at
@@ -5249,15 +5277,6 @@ package body Sem_Ch3 is
         and then Nkind (E) = N_Aggregate
       then
          Act_T := Etype (E);
-
-      elsif Needs_Construction (T)
-        and then not Has_Init_Expression (N)
-        and then not Has_Parameterless_Constructor (T)
-        and then not Suppress_Initialization (Id)
-        and then Comes_From_Source (N)
-      then
-         Error_Msg_NE ("no parameterless constructor for&",
-                       Object_Definition (N), T);
       end if;
 
       --  Check No_Wide_Characters restriction
@@ -5461,12 +5480,11 @@ package body Sem_Ch3 is
 
       Check_Eliminated (Id);
 
-      --  Deal with setting In_Private_Part flag if in private part
+      --  Deal with setting In_Package_Body and In_Private_Part flags
 
-      if Ekind (Scope (Id)) = E_Package
-        and then In_Private_Part (Scope (Id))
-      then
-         Set_In_Private_Part (Id);
+      if Ekind (Scope (Id)) = E_Package then
+         Set_In_Package_Body (Id, In_Package_Body (Scope (Id)));
+         Set_In_Private_Part (Id, In_Private_Part (Scope (Id)));
       end if;
 
    <<Leave>>
@@ -5782,6 +5800,8 @@ package body Sem_Ch3 is
          Set_Treat_As_Volatile (Id, Treat_As_Volatile (T));
          Set_Is_Generic_Type (Id, Is_Generic_Type (Base_Type (T)));
          Set_Convention (Id, Convention (T));
+         Set_Linker_Section_Pragma
+           (Id, Linker_Section_Pragma (Base_Type (T)));
       end Copy_Parent_Attributes;
 
    --  Start of processing for Analyze_Subtype_Declaration
@@ -6021,6 +6041,7 @@ package body Sem_Ch3 is
                   Set_No_Tagged_Streams_Pragma
                                         (Id, No_Tagged_Streams_Pragma (T));
                   Set_Is_Abstract_Type  (Id, Is_Abstract_Type (T));
+                  Set_Is_CPP_Class      (Id, Is_CPP_Class (T));
                   Set_Class_Wide_Type   (Id, Class_Wide_Type (T));
 
                   if Is_Interface (T) then
@@ -6272,7 +6293,7 @@ package body Sem_Ch3 is
       T := Etype (Id);
 
       Set_Is_Immediately_Visible   (Id, True);
-      Set_Depends_On_Private       (Id, Has_Private_Component (T));
+      Set_Depends_On_Private       (Id, Is_Incompletely_Defined (T));
       Set_Is_Descendant_Of_Address (Id, Is_Descendant_Of_Address (T));
 
       if Is_Interface (T) then
@@ -6795,7 +6816,7 @@ package body Sem_Ch3 is
          end if;
       end if;
 
-      Priv := Private_Component (Element_Type);
+      Priv := Partially_Visible_Part (Element_Type);
 
       if Present (Priv) then
 
@@ -7343,7 +7364,7 @@ package body Sem_Ch3 is
       Set_Size_Info          (Derived_Type, Parent_Type);
       Copy_RM_Size           (To => Derived_Type, From => Parent_Type);
       Set_Depends_On_Private (Derived_Type,
-                              Has_Private_Component (Derived_Type));
+                              Is_Incompletely_Defined (Derived_Type));
       Conditional_Delay      (Derived_Type, Subt);
 
       if Is_Access_Subprogram_Type (Derived_Type)
@@ -8485,7 +8506,7 @@ package body Sem_Ch3 is
          Set_Is_Frozen             (Full_Der, False);
          Set_Freeze_Node           (Full_Der, Empty);
          Set_Depends_On_Private
-           (Full_Der, Has_Private_Component (Full_Der));
+           (Full_Der, Is_Incompletely_Defined (Full_Der));
          Set_Is_Public             (Full_Der, Is_Public (Derived_Type));
          Set_Is_Implicit_Full_View (Full_Der);
 
@@ -10115,6 +10136,13 @@ package body Sem_Ch3 is
       Set_Has_Primitive_Operations
         (Derived_Type, Has_Primitive_Operations (Parent_Base));
 
+      if Ekind (Derived_Type) = E_Record_Type then
+         Set_Is_Unchecked_Union
+           (Derived_Type, Is_Unchecked_Union (Parent_Base));
+         Set_Has_Unchecked_Union
+           (Derived_Type, Has_Unchecked_Union (Parent_Base));
+      end if;
+
       --  Set fields for private derived types
 
       if Is_Private_Type (Derived_Type) then
@@ -10454,6 +10482,12 @@ package body Sem_Ch3 is
       if Is_Tagged_Type (Derived_Type) then
          Set_No_Tagged_Streams_Pragma
            (Derived_Type, No_Tagged_Streams_Pragma (Parent_Type));
+
+         --  Propagate information about constructor dependence from parent
+
+         Set_Needs_Construction
+           (Derived_Type,
+            Needs_Construction (Parent_Type));
       end if;
 
       --  If the parent has primitive routines and may have not-seen-yet aspect
@@ -12562,6 +12596,10 @@ package body Sem_Ch3 is
          --  source (including the _Call primitive operation of RAS types,
          --  which has to have the flag Comes_From_Source for other purposes):
          --  we assume that the expander will provide the missing completion.
+
+         --  Likewise for a stand-alone expression function, whose body may be
+         --  generated outside of the package.
+
          --  In case of previous errors, other expansion actions that provide
          --  bodies for null procedures with not be invoked, so inhibit message
          --  in those cases.
@@ -12585,6 +12623,9 @@ package body Sem_Ch3 is
               and then (not Comes_From_Source (E)
                          or else Chars (E) = Name_uCall)
             then
+               null;
+
+            elsif Is_Expression_Function (E) then
                null;
 
             elsif
@@ -13616,7 +13657,7 @@ package body Sem_Ch3 is
       end if;
 
       Set_First_Rep_Item     (Full, First_Rep_Item (Full_Base));
-      Set_Depends_On_Private (Full, Has_Private_Component (Full));
+      Set_Depends_On_Private (Full, Is_Incompletely_Defined (Full));
 
       --  When prefixed calls are enabled for untagged types, the subtype
       --  shares the primitive operations of its base type. Do this even
@@ -14285,7 +14326,8 @@ package body Sem_Ch3 is
       Set_Size_Info                (Def_Id, T);
       Set_Is_Constrained           (Def_Id, Constraint_OK);
       Set_Directly_Designated_Type (Def_Id, Desig_Subtype);
-      Set_Depends_On_Private       (Def_Id, Has_Private_Component (Def_Id));
+      Set_Depends_On_Private
+        (Def_Id, Is_Incompletely_Defined (Def_Id));
       Set_Is_Access_Constant       (Def_Id, Is_Access_Constant (T));
       Set_Can_Never_Be_Null        (Def_Id, Can_Never_Be_Null (T));
 
@@ -14454,7 +14496,7 @@ package body Sem_Ch3 is
                              (Def_Id, Is_FLB_Array_Subtype);
       Set_Is_Aliased         (Def_Id, Is_Aliased (T));
       Set_Is_Independent     (Def_Id, Is_Independent (T));
-      Set_Depends_On_Private (Def_Id, Has_Private_Component (Def_Id));
+      Set_Depends_On_Private (Def_Id, Is_Incompletely_Defined (Def_Id));
 
       Set_Is_Private_Composite (Def_Id, Is_Private_Composite (T));
       Set_Is_Limited_Composite (Def_Id, Is_Limited_Composite (T));
@@ -14579,7 +14621,7 @@ package body Sem_Ch3 is
             Set_Etype                    (Itype, Base_Type      (Old_Type));
             Set_Size_Info                (Itype,                (Old_Type));
             Set_Directly_Designated_Type (Itype, Desig_Subtype);
-            Set_Depends_On_Private       (Itype, Has_Private_Component
+            Set_Depends_On_Private       (Itype, Is_Incompletely_Defined
                                                                 (Old_Type));
             Set_Is_Access_Constant       (Itype, Is_Access_Constant
                                                                 (Old_Type));
@@ -14919,7 +14961,7 @@ package body Sem_Ch3 is
          Constrain_Discriminated_Type (Def_Id, SI, Related_Nod);
          Set_First_Private_Entity (Def_Id, First_Private_Entity (T_Ent));
 
-         Set_Depends_On_Private (Def_Id, Has_Private_Component (Def_Id));
+         Set_Depends_On_Private (Def_Id, Is_Incompletely_Defined (Def_Id));
          Set_Corresponding_Record_Type (Def_Id,
            Constrain_Corresponding_Record (Def_Id, T_Val, Related_Nod));
 
@@ -14972,7 +15014,7 @@ package body Sem_Ch3 is
            (T_Sub, Related_Nod, Corr_Rec, Discriminant_Constraint (T_Sub));
       end if;
 
-      Set_Depends_On_Private      (T_Sub, Has_Private_Component (T_Sub));
+      Set_Depends_On_Private      (T_Sub, Is_Incompletely_Defined (T_Sub));
 
       if Ekind (Scope (Prot_Subt)) /= E_Record_Type then
          Conditional_Delay (T_Sub, Corr_Rec);
@@ -15799,7 +15841,7 @@ package body Sem_Ch3 is
       Set_Is_Volatile_Full_Access (T1, Is_Volatile_Full_Access (T2));
       Set_Treat_As_Volatile       (T1, Treat_As_Volatile       (T2));
       Set_Is_Constrained          (T1, Is_Constrained          (T2));
-      Set_Depends_On_Private      (T1, Has_Private_Component   (T2));
+      Set_Depends_On_Private      (T1, Is_Incompletely_Defined (T2));
       Inherit_Rep_Item_Chain      (T1,                          T2);
       Set_Convention              (T1, Convention              (T2));
       Set_Is_Limited_Composite    (T1, Is_Limited_Composite    (T2));
@@ -16844,6 +16886,23 @@ package body Sem_Ch3 is
          if Present (Formal_Of_Actual) then
             Replace_Type (Formal_Of_Actual, New_Formal);
             Next_Formal (Formal_Of_Actual);
+
+         --  Do not replace the type when Derived_Type inherits the first
+         --  controlling parameter aspect and this is not the first formal
+         --  of this operation. The exception to this common case is when
+         --  this is a controlling formal; this case corresponds with an
+         --  inherited operation of an ancestor that does not have the
+         --  first controlling parameter aspect.
+
+         elsif Is_Tagged_Type (Parent_Type)
+           and then Has_First_Controlling_Parameter_Aspect (Parent_Type)
+           and then Formal /= First_Formal (Parent_Subp)
+           and then not Is_Controlling_Formal (Formal)
+           and then Is_Dispatching_Operation (Parent_Subp)
+           and then not Is_Predefined_Dispatching_Operation (Parent_Subp)
+         then
+            null;
+
          else
             Replace_Type (Formal, New_Formal);
          end if;
@@ -18179,7 +18238,7 @@ package body Sem_Ch3 is
 
       elsif (Is_Incomplete_Or_Private_Type (Parent_Type)
               and then not Comes_From_Generic (Parent_Type))
-        or else Has_Private_Component (Parent_Type)
+        or else Is_Incompletely_Defined (Parent_Type)
       then
          --  The ancestor type of a formal type can be incomplete, in which
          --  case only the operations of the partial view are available in the
@@ -18191,7 +18250,7 @@ package body Sem_Ch3 is
             null;
 
          elsif No (Underlying_Type (Parent_Type))
-           or else Has_Private_Component (Parent_Type)
+           or else Is_Incompletely_Defined (Parent_Type)
          then
             Error_Msg_N
               ("premature derivation of derived or private type", Indic);
@@ -19185,7 +19244,7 @@ package body Sem_Ch3 is
          --  of discriminated private type without a full view.
 
          else
-            Insert_Actions (Obj_Def, Freeze_Entity (Base_Type (T), P));
+            Freeze_Before (Obj_Def, Base_Type (T));
          end if;
 
       --  Ada 2005 AI-406: the object definition in an object declaration
@@ -19964,6 +20023,11 @@ package body Sem_Ch3 is
          if not Is_Tagged then
             Append_Elmt (Old_C, Assoc_List);
             Append_Elmt (New_C, Assoc_List);
+
+            if Plain_Discrim then
+               Append_Elmt (Discriminal (Old_C), Assoc_List);
+               Append_Elmt (Discriminal (New_C), Assoc_List);
+            end if;
          end if;
       end Inherit_Component;
 
@@ -21778,10 +21842,7 @@ package body Sem_Ch3 is
       --  decoration of the full view and thus cannot be placed with other
       --  similar checks in Find_Type_Name
 
-      if not Is_Limited_Type (Priv_T)
-        and then (Is_Limited_Type (Full_T)
-                   or else Is_Limited_Composite (Full_T))
-      then
+      if not Is_Limited_Type (Priv_T) and then Is_Limited_Type (Full_T) then
          if In_Instance then
             null;
          else
@@ -22454,6 +22515,27 @@ package body Sem_Ch3 is
       then
          Propagate_Predicate_Attributes
            (Underlying_Full_View (Full_T), Priv_T);
+      end if;
+
+      --  Now that the full view is known, check any primitive equality
+      --  operators declared in the visible part against SPARK RM 6.9(23).
+      --  This check is deferred from Check_For_Primitive_Subprogram because
+      --  the full view of a private type is not available when the operator
+      --  is declared in the visible part of the package.
+
+      if Has_Primitive_Operations (Priv_T) then
+         declare
+            Prim : Elmt_Id := First_Elmt (Primitive_Operations (Priv_T));
+            Op   : Entity_Id;
+         begin
+            while Present (Prim) loop
+               Op := Node (Prim);
+               if Chars (Op) = Name_Op_Eq then
+                  Check_Ghost_Equality_Op (Op, Priv_T);
+               end if;
+               Next_Elmt (Prim);
+            end loop;
+         end;
       end if;
 
    <<Leave>>
@@ -23473,14 +23555,6 @@ package body Sem_Ch3 is
          end if;
 
          Propagate_Concurrent_Flags (T, Etype (Component));
-
-         --  Propagate information about constructor dependence
-
-         if Ekind (Etype (Component)) /= E_Void
-           and then Needs_Construction (Etype (Component))
-         then
-            Set_Needs_Construction (T);
-         end if;
 
          if Ekind (Component) /= E_Component then
             null;

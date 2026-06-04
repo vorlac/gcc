@@ -2777,9 +2777,15 @@ package body Sem_Prag is
             --  identifiers Normal_Return, Exception_Raised, or Program_Exit.
 
             if Nkind (Exit_Kind) = N_Identifier then
-               if Chars (Exit_Kind) not in Name_Normal_Return
-                                         | Name_Exception_Raised
-                                         | Name_Program_Exit
+               if Chars (Exit_Kind) = Name_Exception_Raised then
+                  if No_Raise (Spec_Id) then
+                     Error_Msg_N
+                       ("exit kind cannot be Exception_Raised on No_Raise " &
+                          "subprogram",
+                        Exit_Kind);
+                  end if;
+               elsif Chars (Exit_Kind) not in Name_Normal_Return
+                                            | Name_Program_Exit
                then
                   Error_Msg_N
                     ("exit kind should be Normal_Return, Exception_Raised, " &
@@ -2810,6 +2816,12 @@ package body Sem_Prag is
                      Error_Msg_N
                        ("exit kind should have a single choice named "
                         & "Exception_Raised",
+                        Exit_Kind);
+
+                  elsif No_Raise (Spec_Id) then
+                     Error_Msg_N
+                       ("exit kind cannot be Exception_Raised on No_Raise " &
+                          "subprogram",
                         Exit_Kind);
 
                   elsif Nkind (Exc) /= N_Identifier then
@@ -5210,9 +5222,9 @@ package body Sem_Prag is
       --  errors out and uses Arg as the pragma argument for the message.
 
       function Fix_Error (Msg : String) return String;
-      --  This is called prior to issuing an error message. Msg is the normal
-      --  error message issued in the pragma case. This routine checks for the
-      --  case of a pragma coming from an aspect in the source, and returns a
+      --  This is called prior to issuing an error message. Msg is the error
+      --  message issued in the pragma case. This routine checks for the case
+      --  of a pragma coming from an aspect in the source, and returns a
       --  message suitable for the aspect case as follows:
       --
       --    Each substring "pragma" is replaced by "aspect"
@@ -12708,12 +12720,7 @@ package body Sem_Prag is
 
       --  Deal with unrecognized pragma
 
-      --  Pragma Unsigned_Base_Range temporarily disabled
-
-      if not Is_Pragma_Name (Pname)
-        or else (Pname = Name_Unsigned_Base_Range
-                  and then not Debug_Flag_Dot_U)
-      then
+      if not Is_Pragma_Name (Pname) then
          declare
             Msg_Issued : Boolean := False;
          begin
@@ -13397,8 +13404,11 @@ package body Sem_Prag is
 
                --  Local variables
 
-               Opt     : Node_Id;
-               Opt_Nam : Node_Id;
+               Expr     : Node_Id;
+               Is_Ghost : Boolean;
+               Level    : Entity_Id;
+               Opt      : Node_Id;
+               Opt_Nam  : Node_Id;
 
             --  Start of processing for Analyze_Abstract_State
 
@@ -13568,20 +13578,49 @@ package body Sem_Prag is
                            Check_Ghost_Synchronous;
 
                            if Present (State_Id) then
-                              Set_Is_Ghost_Entity (State_Id);
+                              Is_Ghost := True;
+                              Expr := Expression (Opt);
 
-                              --  Amend the Assertion_Level coming from the
-                              --  package.
+                              if Nkind (Expr) /= N_Identifier
+                                or else
+                                  No (Get_Assertion_Level (Chars (Expr)))
+                              then
+                                 Analyze_And_Resolve (Expr, Standard_Boolean);
 
-                              if Nkind (Expression (Opt)) /= N_Identifier then
-                                 Error_Pragma_Arg
-                                   ("level name must be an identifier", N);
+                                 if not Is_OK_Static_Expression (Expr) then
+                                    Error_Msg_Name_1 := Pname;
+                                    SPARK_Msg_N
+                                      (Fix_Error
+                                         ("expression used for Ghost "
+                                          & "in pragma % "
+                                          & "must be static"),
+                                       Expr);
+                                 elsif Is_False (Expr_Value (Expr)) then
+                                    Is_Ghost := False;
+
+                                    --  "Ghostness" cannot be turned off once
+                                    --  enabled within a region (SPARK RM
+                                    --  6.9(8)).
+
+                                    if Ghost_Config.Ghost_Mode > None then
+                                       Error_Msg_Name_1 := Pname;
+                                       SPARK_Msg_N
+                                         (Fix_Error ("pragma %")
+                                          & " with value ""Ghost ='> False"""
+                                          & " cannot appear"
+                                          & " in a ghost region", N);
+                                    end if;
+                                 end if;
                               end if;
 
-                              Set_Ghost_Assertion_Level
-                                (State_Id,
-                                 Get_Assertion_Level
-                                   (Chars (Expression (Opt))));
+                              Level := Assertion_Level_From_Arg (Expr);
+
+                              Set_Ghost_Assertion_Level (State_Id, Level);
+
+                              if Is_Ghost then
+                                 Set_Is_Implicit_Ghost (State_Id, False);
+                                 Set_Is_Ghost_Entity (State_Id);
+                              end if;
                            end if;
                         else
                            SPARK_Msg_N ("invalid state option", Opt);
@@ -15659,33 +15698,7 @@ package body Sem_Prag is
                --  Now go ahead and analyze the if statement
 
                In_Assertion_Expr := In_Assertion_Expr + 1;
-
-               --  One rather special treatment. If we are now in Eliminated
-               --  overflow mode, then suppress overflow checking since we do
-               --  not want to drag in the bignum stuff if we are in Ignore
-               --  mode anyway. This is particularly important if we are using
-               --  a configurable run time that does not support bignum ops.
-
-               if Scope_Suppress.Overflow_Mode_Assertions = Eliminated then
-                  declare
-                     Svo : constant Boolean :=
-                             Scope_Suppress.Suppress (Overflow_Check);
-                  begin
-                     Scope_Suppress.Overflow_Mode_Assertions  := Strict;
-                     Scope_Suppress.Suppress (Overflow_Check) := True;
-                     Analyze (N);
-                     Scope_Suppress.Suppress (Overflow_Check) := Svo;
-                     Scope_Suppress.Overflow_Mode_Assertions  := Eliminated;
-                  end;
-
-               --  Not that special case
-
-               else
-                  Analyze (N);
-               end if;
-
-               --  All done with this check
-
+               Analyze (N);
                In_Assertion_Expr := In_Assertion_Expr - 1;
 
             --  Check is active or expansion not active. In these cases we can
@@ -18184,6 +18197,17 @@ package body Sem_Prag is
                end if;
             end if;
 
+            --  Pragma Exceptional_Cases is not allowed when No_Raise is
+            --  specified.
+
+            Analyze_If_Present (Pragma_No_Raise);
+
+            if No_Raise (Spec_Id) then
+               Error_Msg_N (Fix_Error
+                 ("pragma % cannot apply to No_Raise subprogram"), N);
+               return;
+            end if;
+
             --  A pragma that applies to a Ghost entity becomes Ghost for the
             --  purposes of legality checks and removal of ignored Ghost code.
 
@@ -18370,6 +18394,8 @@ package body Sem_Prag is
 
                Analyze_If_Present (Pragma_SPARK_Mode);
                Analyze_If_Present (Pragma_Volatile_Function);
+               Analyze_If_Present (Pragma_No_Raise);
+
                Analyze_Exit_Cases_In_Decl_Part (N);
             end if;
          end Exit_Cases;
@@ -20905,9 +20931,42 @@ package body Sem_Prag is
          --  given as a static integer expression which must be in the range of
          --  Ada.Interrupts.Interrupt_ID.
 
+         --  Note: There are two places where the runtime does significant work
+         --  with interrupt/signals:
+         --
+         --  1. __gnat_install_handler.
+         --  2. Ada.Interrupts and its partition closure, at least for some
+         --     configurations of the runtime.
+         --
+         --  1. kicks in by default whereas 2. only happens for applications
+         --  that have a with clause to Ada.Interrupts. Users who develop
+         --  mixed-language applications sometimes want to opt out of 1., and
+         --  pragma Interrupt_State is the preferred way to do that. So we
+         --  jump through a few hoops to make pragma Interrupt_State *not*
+         --  implicitly pull in Ada.Interrupts, as users who want to suppress
+         --  the effects of 1. surely don't want to enable the effects of 2.
+         --
+         --  The hoops in question are:
+         --
+         --  A. We have a Preelab_Interrupt_ID type in the runtime in a
+         --     preelaborate package. Interrupt_ID trivially derives from this
+         --     type, therefore we can correctly substitute
+         --     Preelab_Interrupt_ID for Interrupt_ID when analyzing
+         --     Interrupt_State pragmas.
+         --  B. The runtime configurations for which Ada.Interrupts has
+         --     significant side effects expose a preelaborate package,
+         --     System.Interrupt_Names, that mirrors Ada.Interrupts.Names. The
+         --     constant declarations of Ada.Interrupts.Names are replaced with
+         --     named numbers so there's no dependency on Ada.Interrupts.
+         --     System.Interrupt_Names is generated from Ada.Interrupts.Names
+         --     during the build of the runtime. Again, we can correctly
+         --     substitute System.Interrupt_Names for Ada.Interrupts.Names when
+         --     analyzing identifiers used in Interrupt_State pragmas.
+
          when Pragma_Interrupt_State => Interrupt_State : declare
-            Int_Id : constant Entity_Id := RTE (RE_Interrupt_ID);
-            --  This is the entity Ada.Interrupts.Interrupt_ID;
+            Int_Id : constant Entity_Id := RTE (RE_Preelab_Interrupt_ID);
+            --  This is the entity System.Interrupt_Types.Ada_Interrupt_Id,
+            --  from which Ada.Interrupts.Interrupt_ID directly derives.
 
             State_Type : Character;
             --  Set to 's'/'r'/'u' for System/Runtime/User
@@ -20921,8 +20980,15 @@ package body Sem_Prag is
             Arg1X : constant Node_Id := Get_Pragma_Arg (Arg1);
             --  The first argument to the pragma
 
+            Names_Package : constant Entity_Id :=
+              RTE
+                (if RTE_Available (RE_Interrupt_Names)
+                 then RE_Interrupt_Names
+                 else RE_Names);
+            --  The package we search for Interrupt_ID constants
+
             Int_Ent : Entity_Id;
-            --  Interrupt entity in Ada.Interrupts.Names
+            --  Interrupt entity in Names_Package
 
          begin
             GNAT_Pragma;
@@ -20937,9 +21003,9 @@ package body Sem_Prag is
 
             if Nkind (Arg1X) = N_Identifier then
 
-               --  Search list of names in Ada.Interrupts.Names
+               --  Search list of names in Names_Package
 
-               Int_Ent := First_Entity (RTE (RE_Names));
+               Int_Ent := First_Entity (Names_Package);
                loop
                   if No (Int_Ent) then
                      Error_Pragma_Arg ("invalid interrupt name", Arg1);
@@ -29133,6 +29199,10 @@ package body Sem_Prag is
       ----------------------
 
       function Check_References (Nod : Node_Id) return Traverse_Result is
+         CW_Disp_Typ : constant Entity_Id :=
+           (if Present (Disp_Typ)
+             then Class_Wide_Type (Disp_Typ)
+             else Empty);
       begin
          if Nkind (Nod) = N_Function_Call
            and then Is_Entity_Name (Name (Nod))
@@ -29159,7 +29229,7 @@ package body Sem_Prag is
                   --  A return object of the type is illegal as well
 
                   if Etype (Func) = Disp_Typ
-                    or else Etype (Func) = Class_Wide_Type (Disp_Typ)
+                    or else Etype (Func) = CW_Disp_Typ
                   then
                      Error_Msg_NE
                        ("operation in class-wide condition must be primitive "
@@ -29171,7 +29241,7 @@ package body Sem_Prag is
          elsif Is_Entity_Name (Nod)
            and then
              (Etype (Nod) = Disp_Typ
-               or else Etype (Nod) = Class_Wide_Type (Disp_Typ))
+               or else Etype (Nod) = CW_Disp_Typ)
            and then Ekind (Entity (Nod)) in E_Constant | E_Variable
          then
             Error_Msg_NE
@@ -29180,7 +29250,7 @@ package body Sem_Prag is
 
          elsif Nkind (Nod) = N_Explicit_Dereference
            and then (Etype (Nod) = Disp_Typ
-                      or else Etype (Nod) = Class_Wide_Type (Disp_Typ))
+                      or else Etype (Nod) = CW_Disp_Typ)
            and then (not Is_Entity_Name (Prefix (Nod))
                       or else not Is_Formal (Entity (Prefix (Nod))))
          then
@@ -34072,7 +34142,7 @@ package body Sem_Prag is
                then
                   return Stmt;
 
-               elsif Is_Access_Subprogram_Wrapper (Defining_Entity (Stmt))
+               elsif Is_Access_To_Subprogram_Wrapper (Defining_Entity (Stmt))
                  and then Ada_Version >= Ada_2022
                then
                   return Stmt;

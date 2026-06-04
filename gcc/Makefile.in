@@ -162,9 +162,7 @@ PICFLAG = @PICFLAG@
 # The linker flag for the above.
 LD_PICFLAG = @LD_PICFLAG@
 
-# Flags to determine code coverage. When coverage is disabled, this will
-# contain the optimization flags, as you normally want code coverage
-# without optimization.
+# Flags to determine code coverage.
 COVERAGE_FLAGS = @coverage_flags@
 coverageexts = .{gcda,gcno}
 
@@ -1353,6 +1351,7 @@ ANALYZER_OBJS = \
 	analyzer/constraint-manager.o \
 	analyzer/diagnostic-manager.o \
 	analyzer/engine.o \
+	analyzer/exploded-path.o \
 	analyzer/feasible-graph.o \
 	analyzer/function-set.o \
 	analyzer/infinite-loop.o \
@@ -1363,6 +1362,7 @@ ANALYZER_OBJS = \
 	analyzer/known-function-manager.o \
 	analyzer/ops.o \
 	analyzer/pending-diagnostic.o \
+	analyzer/poisoned-value-diagnostic.o \
 	analyzer/program-point.o \
 	analyzer/program-state.o \
 	analyzer/ranges.o \
@@ -1372,6 +1372,8 @@ ANALYZER_OBJS = \
 	analyzer/region-model-asm.o \
 	analyzer/region-model-manager.o \
 	analyzer/region-model-reachability.o \
+	analyzer/setjmp-longjmp.o \
+	analyzer/shift-diagnostics.o \
 	analyzer/sm.o \
 	analyzer/sm-file.o \
 	analyzer/sm-fd.o \
@@ -1381,6 +1383,7 @@ ANALYZER_OBJS = \
 	analyzer/sm-signal.o \
 	analyzer/sm-taint.o \
 	analyzer/state-purge.o \
+	analyzer/state-transition.o \
 	analyzer/store.o \
 	analyzer/supergraph.o \
 	analyzer/supergraph-fixup-locations.o \
@@ -1389,7 +1392,8 @@ ANALYZER_OBJS = \
 	analyzer/svalue.o \
 	analyzer/symbol.o \
 	analyzer/trimmed-graph.o \
-	analyzer/varargs.o
+	analyzer/varargs.o \
+	analyzer/write-to-const-diagnostics.o \
 
 # Language-independent object files.
 # We put the *-match.o and insn-*.o files first so that a parallel make
@@ -1904,8 +1908,8 @@ OBJS-libcommon = \
 	diagnostics/diagnostics-selftests.o \
 	gcc-diagnostic-spec.o \
 	graphviz.o pex.o \
-	pretty-print.o intl.o \
-	json.o json-parsing.o json-diagnostic.o \
+	pretty-print.o pretty-print-token-buffer.o intl.o \
+	json.o json-parsing.o json-diagnostic.o json-pointer-parsing.o \
 	pub-sub.o \
 	xml.o \
 	sbitmap.o \
@@ -1994,7 +1998,7 @@ MOSTLYCLEANFILES = insn-flags.h insn-config.h insn-codes.h \
  $(SPECS) collect2$(exeext) gcc-ar$(exeext) gcc-nm$(exeext) \
  gcc-ranlib$(exeext) \
  genversion$(build_exeext) gcov$(exeext) gcov-dump$(exeext) \
- gcov-tool$(exeect) \
+ gcov-tool$(exeext) \
  gengtype$(exeext) *.[0-9][0-9].* *.[si] *-checksum.cc libbackend.a \
  libcommon-target.a libcommon.a libgcc.mk perf.data
 
@@ -3052,7 +3056,7 @@ $(GENERIC_MATCH_PD_SEQ_SRC): s-generic-match generic-match-head.cc; @true
 generic-match-auto.h: s-generic-match; @true
 
 s-gimple-match: build/genmatch$(build_exeext) \
-	    $(srcdir)/match.pd cfn-operators.pd
+	    $(srcdir)/match.pd $(srcdir)/match-sat-alu.pd cfn-operators.pd
 	$(RUN_GEN) build/genmatch$(build_exeext) --gimple \
 	    --header=tmp-gimple-match-auto.h --include=gimple-match-auto.h \
 	    $(srcdir)/match.pd $(patsubst %, tmp-%, $(GIMPLE_MATCH_PD_SEQ_SRC))
@@ -3898,7 +3902,7 @@ doc/%.pdf: %.texi
 doc/gccinstall.pdf: $(TEXI_GCCINSTALL_FILES)
 	$(TEXI2PDF) -I . -I $(abs_docdir) -I $(abs_docdir)/include -o $@ $<
 
-# List the directories or single hmtl files which are installed by
+# List the directories or single html files which are installed by
 # install-html. The lang.html file triggers language fragments to build
 # html documentation.
 HTMLS_INSTALL=$(build_htmldir)/cpp $(build_htmldir)/gcc \
@@ -4845,6 +4849,7 @@ TAGS: lang.tags
 	done;						\
 	$(ETAGS) -o TAGS.sub c-family/*.h c-family/*.cc \
 	      *.h *.cc \
+	      diagnostics/*.h diagnostics/*.cc text-art/*.h text-art/*.cc \
 	      ../include/*.h ../libiberty/*.c \
 	      ../libcpp/*.cc ../libcpp/include/*.h \
 	      --language=none --regex="/\(char\|unsigned int\|int\|bool\|void\|HOST_WIDE_INT\|enum [A-Za-z_0-9]+\) [*]?\([A-Za-z_0-9]+\)/\2/" common.opt	\

@@ -1383,7 +1383,7 @@ class op_by_pieces_d
   /* The type of operation that we're performing.  */
   by_pieces_operation m_op;
 
-  /* Virtual functions, overriden by derived classes for the specific
+  /* Virtual functions, overridden by derived classes for the specific
      operation.  */
   virtual void generate (rtx, rtx, machine_mode) = 0;
   virtual bool prepare_mode (machine_mode, unsigned int) = 0;
@@ -1565,7 +1565,7 @@ op_by_pieces_d::run ()
 	  if (gap > 0)
 	    {
 	      /* If size of MODE > M_LEN, generate the last operation
-		 in MODE for the remaining bytes with ovelapping memory
+		 in MODE for the remaining bytes with overlapping memory
 		 from the previois operation.  */
 	      if (m_reverse)
 		m_offset += gap;
@@ -3817,7 +3817,7 @@ use_group_regs (rtx *call_fusage, rtx regs)
 }
 
 /* Return the defining gimple statement for SSA_NAME NAME if it is an
-   assigment and the code of the expresion on the RHS is CODE.  Return
+   assignment and the code of the expression on the RHS is CODE.  Return
    NULL otherwise.  */
 
 static gimple *
@@ -3838,7 +3838,7 @@ get_def_for_expr (tree name, enum tree_code code)
 }
 
 /* Return the defining gimple statement for SSA_NAME NAME if it is an
-   assigment and the class of the expresion on the RHS is CLASS.  Return
+   assignment and the class of the expression on the RHS is CLASS.  Return
    NULL otherwise.  */
 
 static gimple *
@@ -4660,7 +4660,7 @@ emit_move_insn (rtx x, rtx y)
   auto candidate_mem_p = [&](machine_mode innermode, rtx mem) {
     return (!targetm.can_change_mode_class (innermode, GET_MODE (mem), ALL_REGS)
 	    && !push_operand (mem, GET_MODE (mem))
-	    /* Not a candiate if innermode requires too much alignment.  */
+	    /* Not a candidate if innermode requires too much alignment.  */
 	    && (MEM_ALIGN (mem) >= GET_MODE_ALIGNMENT (innermode)
 		|| targetm.slow_unaligned_access (GET_MODE (mem),
 						  MEM_ALIGN (mem))
@@ -7133,7 +7133,8 @@ count_type_elements (const_tree type, bool for_ctor_p)
 static bool
 categorize_ctor_elements_1 (const_tree ctor, HOST_WIDE_INT *p_nz_elts,
 			    HOST_WIDE_INT *p_unique_nz_elts,
-			    HOST_WIDE_INT *p_init_elts, int *p_complete)
+			    HOST_WIDE_INT *p_init_elts,
+			    ctor_completeness *p_complete)
 {
   unsigned HOST_WIDE_INT idx;
   HOST_WIDE_INT nz_elts, unique_nz_elts, init_elts, num_fields;
@@ -7260,34 +7261,34 @@ categorize_ctor_elements_1 (const_tree ctor, HOST_WIDE_INT *p_nz_elts,
 	}
     }
 
-  if (*p_complete && !complete_ctor_at_level_p (TREE_TYPE (ctor),
+  if (!p_complete->sparse && !complete_ctor_at_level_p (TREE_TYPE (ctor),
 						num_fields, elt_type))
-    *p_complete = 0;
+    p_complete->sparse = true;
   else if (TREE_CODE (TREE_TYPE (ctor)) == UNION_TYPE
 	   || TREE_CODE (TREE_TYPE (ctor)) == QUAL_UNION_TYPE)
     {
-      if (*p_complete
+      if (!p_complete->sparse
 	  && CONSTRUCTOR_ZERO_PADDING_BITS (ctor)
 	  && (num_fields
 	      ? simple_cst_equal (TYPE_SIZE (TREE_TYPE (ctor)),
 				  TYPE_SIZE (elt_type)) != 1
 	      : type_has_padding_at_level_p (TREE_TYPE (ctor))))
-	*p_complete = 0;
-      else if (*p_complete > 0
+	p_complete->sparse = true;
+      else if (!p_complete->sparse && !p_complete->padded_union
 	       && (num_fields
 		   ? simple_cst_equal (TYPE_SIZE (TREE_TYPE (ctor)),
 				       TYPE_SIZE (elt_type)) != 1
 		   : type_has_padding_at_level_p (TREE_TYPE (ctor))))
-	*p_complete = -1;
+	p_complete->padded_union = true;
     }
-  else if (*p_complete
+  else if (!p_complete->sparse
 	   && (CONSTRUCTOR_ZERO_PADDING_BITS (ctor)
 	       || flag_zero_init_padding_bits == ZERO_INIT_PADDING_BITS_ALL)
 	   && type_has_padding_at_level_p (TREE_TYPE (ctor)))
-    *p_complete = 0;
-  else if (*p_complete > 0
+    p_complete->sparse = true;
+  else if (!p_complete->sparse && !p_complete->padded_non_union
 	   && type_has_padding_at_level_p (TREE_TYPE (ctor)))
-    *p_complete = -1;
+    p_complete->padded_non_union = true;
 
   *p_nz_elts += nz_elts;
   *p_unique_nz_elts += unique_nz_elts;
@@ -7309,9 +7310,6 @@ categorize_ctor_elements_1 (const_tree ctor, HOST_WIDE_INT *p_nz_elts,
    * whether the constructor is complete -- in the sense that every
      meaningful byte is explicitly given a value --
      and place it in *P_COMPLETE:
-     -  0 if any field is missing
-     -  1 if all fields are initialized, and there's no padding
-     - -1 if all fields are initialized, but there's padding
 
    Return whether or not CTOR is a valid static constant initializer, the same
    as "initializer_constant_valid_p (CTOR, TREE_TYPE (CTOR)) != 0".  */
@@ -7319,12 +7317,13 @@ categorize_ctor_elements_1 (const_tree ctor, HOST_WIDE_INT *p_nz_elts,
 bool
 categorize_ctor_elements (const_tree ctor, HOST_WIDE_INT *p_nz_elts,
 			  HOST_WIDE_INT *p_unique_nz_elts,
-			  HOST_WIDE_INT *p_init_elts, int *p_complete)
+			  HOST_WIDE_INT *p_init_elts,
+			  ctor_completeness *p_complete)
 {
   *p_nz_elts = 0;
   *p_unique_nz_elts = 0;
   *p_init_elts = 0;
-  *p_complete = 1;
+  *p_complete = {};
 
   return categorize_ctor_elements_1 (ctor, p_nz_elts, p_unique_nz_elts,
 				     p_init_elts, p_complete);
@@ -7398,11 +7397,11 @@ mostly_zeros_p (const_tree exp)
   if (TREE_CODE (exp) == CONSTRUCTOR)
     {
       HOST_WIDE_INT nz_elts, unz_elts, init_elts;
-      int complete_p;
+      ctor_completeness complete_p;
 
       categorize_ctor_elements (exp, &nz_elts, &unz_elts, &init_elts,
 				&complete_p);
-      return !complete_p || nz_elts < init_elts / 4;
+      return complete_p.sparse || nz_elts < init_elts / 4;
     }
 
   return initializer_zerop (exp);
@@ -7416,7 +7415,7 @@ all_zeros_p (const_tree exp)
   if (TREE_CODE (exp) == CONSTRUCTOR)
     {
       HOST_WIDE_INT nz_elts, unz_elts, init_elts;
-      int complete_p;
+      ctor_completeness complete_p;
 
       categorize_ctor_elements (exp, &nz_elts, &unz_elts, &init_elts,
 				&complete_p);
@@ -9622,7 +9621,7 @@ expand_expr_real (tree exp, rtx target, machine_mode tmode,
 }
 
 /* Try to expand the conditional expression which is represented by
-   TREEOP0 ? TREEOP1 : TREEOP2 using conditonal moves.  If it succeeds
+   TREEOP0 ? TREEOP1 : TREEOP2 using conditional moves.  If it succeeds
    return the rtl reg which represents the result.  Otherwise return
    NULL_RTX.  */
 
@@ -11338,7 +11337,7 @@ expand_expr_real_gassign (gassign *g, rtx target, machine_mode tmode,
     case GIMPLE_BINARY_RHS:
       ops.op1 = gimple_assign_rhs2 (g);
 
-      /* Try to expand conditonal compare.  */
+      /* Try to expand conditional compare.  */
       if (targetm.have_ccmp ())
 	{
 	  gcc_checking_assert (targetm.gen_ccmp_next != NULL);
@@ -11398,7 +11397,7 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
      internally extend after arithmetic operations, we can avoid doing that
      when reading from SSA_NAMEs of vars.  */
 #define EXTEND_BITINT(expr) \
-  ((TREE_CODE (type) == BITINT_TYPE					\
+  ((BITINT_TYPE_P (type)						\
     && !bitint_extended							\
     && reduce_bit_field							\
     && mode != BLKmode							\
@@ -11411,7 +11410,7 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
   type = TREE_TYPE (exp);
   mode = TYPE_MODE (type);
   unsignedp = TYPE_UNSIGNED (type);
-  if (TREE_CODE (type) == BITINT_TYPE && bitint_extended == -1)
+  if (BITINT_TYPE_P (type) && bitint_extended == -1)
     {
       struct bitint_info info;
       bool ok = targetm.c.bitint_type_info (TYPE_PRECISION (type), &info);
@@ -11756,7 +11755,7 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
 
     case INTEGER_CST:
       {
-	if (TREE_CODE (type) == BITINT_TYPE)
+	if (BITINT_TYPE_P (type))
 	  {
 	    unsigned int prec = TYPE_PRECISION (type);
 	    struct bitint_info info;
@@ -13714,12 +13713,6 @@ maybe_optimize_sub_cmp_0 (enum tree_code code, tree *arg0, tree *arg1)
   if (!TYPE_OVERFLOW_UNDEFINED (TREE_TYPE (treeop0)))
     return;
 
-  if (issue_strict_overflow_warning (WARN_STRICT_OVERFLOW_COMPARISON))
-    warning_at (gimple_location (stmt), OPT_Wstrict_overflow,
-		"assuming signed overflow does not occur when "
-		"simplifying %<X - Y %s 0%> to %<X %s Y%>",
-		op_symbol_code (code), op_symbol_code (code));
-
   *arg0 = treeop0;
   *arg1 = treeop1;
 }
@@ -14516,6 +14509,75 @@ generate_crc_table (unsigned HOST_WIDE_INT polynom, unsigned short crc_bits)
   return assemble_crc_table (polynom, crc_bits);
 }
 
+/* Calculate CRC for the initial CRC and given POLYNOMIAL.
+   CRC_BITS is CRC size.  */
+
+static unsigned HOST_WIDE_INT
+calculate_reversed_crc (unsigned HOST_WIDE_INT crc,
+			unsigned HOST_WIDE_INT polynomial,
+			unsigned short crc_bits)
+{
+  unsigned HOST_WIDE_INT rev_polynom = reflect_hwi (polynomial, crc_bits);
+  for (int j = 0; j < 8; j++)
+    {
+      if (crc & 1)
+	crc = (crc >> 1) ^ rev_polynom;
+      else
+	crc >>= 1;
+    }
+  /* Zero out bits in crc beyond the specified number of crc_bits.  */
+  if (crc_bits < sizeof (crc) * CHAR_BIT)
+    crc &= (HOST_WIDE_INT_1U << crc_bits) - 1;
+  return crc;
+}
+
+/* Assemble CRC table with 256 elements for the given POLYNOM and CRC_BITS.
+   POLYNOM is the polynomial used to calculate the CRC table's elements.
+   CRC_BITS is the size of CRC, may be 8, 16, ... . */
+
+static rtx
+assemble_reversed_crc_table (unsigned HOST_WIDE_INT polynom, unsigned short crc_bits)
+{
+  unsigned table_el_n = 0x100;
+  tree ar = build_array_type (make_unsigned_type (crc_bits),
+			      build_index_type (size_int (table_el_n - 1)));
+
+  /* Initialize the table.  */
+  vec<tree, va_gc> *initial_values;
+  vec_alloc (initial_values, table_el_n);
+  for (size_t i = 0; i < table_el_n; ++i)
+    {
+      unsigned HOST_WIDE_INT crc = calculate_reversed_crc (i, polynom, crc_bits);
+      tree element = build_int_cstu (make_unsigned_type (crc_bits), crc);
+      vec_safe_push (initial_values, element);
+    }
+  tree ctor = build_constructor_from_vec (ar, initial_values);
+  rtx mem = output_constant_def (ctor, 1);
+  gcc_assert (MEM_P (mem));
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file,
+	       ";; emitting reversed crc table crc_%u_polynomial_"
+	       HOST_WIDE_INT_PRINT_HEX " ",
+	       crc_bits, polynom);
+      print_rtl_single (dump_file, XEXP (mem, 0));
+      fprintf (dump_file, "\n");
+    }
+
+  return XEXP (mem, 0);
+}
+
+/* Generate reversed CRC table for the given POLYNOM and CRC_BITS.  */
+
+static rtx
+generate_reversed_crc_table (unsigned HOST_WIDE_INT polynom,
+			     unsigned short crc_bits)
+{
+  gcc_assert (crc_bits <= 64);
+
+  return assemble_reversed_crc_table (polynom, crc_bits);
+}
+
 /* Generate table-based CRC code for the given CRC, INPUT_DATA and the
    POLYNOMIAL (without leading 1).
 
@@ -14590,6 +14652,71 @@ calculate_table_based_CRC (rtx *crc, const rtx &input_data,
 
       /* crc = (crc << 8)
 	       ^ crc_table[(crc >> (crc_bit_size - 8)) ^ data_8bit];  */
+      *crc = expand_binop (mode, xor_optab, tab_el, high, NULL_RTX, 1,
+			   OPTAB_WIDEN);
+    }
+}
+
+/* Generate table-based reversed CRC code for the given CRC, INPUT_DATA
+   and the POLYNOMIAL (without leading 1).
+
+   This function generates code for reversed (bit-reflected) CRC calculation
+   using a pre-computed lookup table.  Unlike the standard CRC calculation,
+   this processes data from LSB to MSB, eliminating the need for explicit
+   bit reflection before and after the CRC computation.  */
+
+static void
+calculate_table_based_reversed_CRC (rtx *crc, const rtx &input_data,
+				    const rtx &polynomial,
+				    machine_mode data_mode)
+{
+  machine_mode mode = GET_MODE (*crc);
+  unsigned short crc_bit_size = GET_MODE_BITSIZE (mode).to_constant ();
+  unsigned short data_size = GET_MODE_SIZE (data_mode).to_constant ();
+  rtx tab = generate_reversed_crc_table (UINTVAL (polynomial), crc_bit_size);
+
+  /* CRC's mode is always at least as wide as INPUT_DATA.  Convert
+     INPUT_DATA into CRC's mode once outside the loop since INPUT_DATA
+     is loop-invariant.  */
+  rtx data_in_crc_mode = gen_reg_rtx (mode);
+  convert_move (data_in_crc_mode, input_data, 1);
+
+  for (unsigned short i = 0; i < data_size; i++)
+    {
+      *crc = force_reg (mode, *crc);
+
+      /* data >> (8 * i).  */
+      unsigned range_8 = 8 * i;
+      rtx data = expand_shift (RSHIFT_EXPR, mode, data_in_crc_mode,
+			       range_8, NULL_RTX, 1);
+
+      /* crc ^ (data >> (8 * i)).  */
+      rtx in = expand_binop (mode, xor_optab, *crc, data,
+			     NULL_RTX, 1, OPTAB_WIDEN);
+
+      /* (crc ^ data) & 0xFF.  */
+      rtx index = expand_and (mode, in, gen_int_mode (255, mode),
+			      NULL_RTX);
+      int log_crc_size = exact_log2 (GET_MODE_SIZE (mode).to_constant ());
+      index = expand_shift (LSHIFT_EXPR, mode, index,
+			    log_crc_size, NULL_RTX, 0);
+
+      rtx addr = gen_reg_rtx (Pmode);
+      convert_move (addr, index, 1);
+      addr = expand_binop (Pmode, add_optab, addr, tab, NULL_RTX,
+			    0, OPTAB_DIRECT);
+
+      /* crc_table[(crc ^ data) & 0xFF].  */
+      rtx tab_el = validize_mem (gen_rtx_MEM (mode, addr));
+
+      /* (crc >> 8) if CRC is larger than 8, otherwise 0.  */
+      rtx high = NULL_RTX;
+      if (crc_bit_size != 8)
+	high = expand_shift (RSHIFT_EXPR, mode, *crc, 8, NULL_RTX, 1);
+      else
+	high = gen_int_mode (0, mode);
+
+      /* crc = (crc >> 8) ^ crc_table[(crc ^ data) & 0xFF].  */
       *crc = expand_binop (mode, xor_optab, tab_el, high, NULL_RTX, 1,
 			   OPTAB_WIDEN);
     }
@@ -14732,41 +14859,30 @@ generate_reflecting_code_standard (rtx *op)
    the POLYNOMIAL (without leading 1).
 
    CRC is OP1, data is OP2 and the polynomial is OP3.
-   This must generate CRC table and assembly for the following code,
+   This generates a reversed CRC table and assembly for the following code,
    where crc_bit_size and data_bit_size may be 8, 16, 32, 64:
    uint_crc_bit_size_t
    crc_crc_bit_size (uint_crc_bit_size_t crc_init,
-			   uint_data_bit_size_t data, size_t size)
+		     uint_data_bit_size_t data)
    {
-     reflect (crc_init)
      uint_crc_bit_size_t crc = crc_init;
-     reflect (data);
      for (int i = 0; i < data_bit_size / 8; i++)
-       crc = (crc << 8) ^ crc_table[(crc >> (crc_bit_size - 8))
-			  ^ (data >> (data_bit_size - (i + 1) * 8) & 0xFF))];
-     reflect (crc);
+       crc = (crc >> 8) ^ crc_table[(crc ^ (data >> (i * 8))) & 0xFF];
      return crc;
-   }  */
+   }
+
+   This approach uses a pre-computed reversed polynomial table, eliminating
+   the need for explicit bit reflection before and after the CRC computation.  */
 
 void
 expand_reversed_crc_table_based (rtx op0, rtx op1, rtx op2, rtx op3,
-				 machine_mode data_mode,
-				 void (*gen_reflecting_code) (rtx *op))
+				 machine_mode data_mode)
 {
   gcc_assert (!CONST_INT_P (op0));
   gcc_assert (CONST_INT_P (op3));
   machine_mode crc_mode = GET_MODE (op0);
-
   rtx crc = gen_reg_rtx (crc_mode);
   convert_move (crc, op1, 0);
-  gen_reflecting_code (&crc);
-
-  rtx data = gen_reg_rtx (data_mode);
-  convert_move (data, op2, 0);
-  gen_reflecting_code (&data);
-
-  calculate_table_based_CRC (&crc, data, op3, data_mode);
-
-  gen_reflecting_code (&crc);
+  calculate_table_based_reversed_CRC (&crc, op2, op3, data_mode);
   convert_move (op0, crc, 0);
 }

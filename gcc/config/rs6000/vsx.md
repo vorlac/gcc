@@ -5595,7 +5595,7 @@
   emit_insn (gen_vcmpne<VSX_EXTRACT_WIDTH> (cmpz2_result, operands[2], vzero));
   emit_insn (gen_and<mode>3 (and_result, cmpz1_result, cmpz2_result));
 
-  /* Vector with ones in elments that do not match.  */
+  /* Vector with ones in elements that do not match.  */
   emit_insn (gen_vcmpnez<VSX_EXTRACT_WIDTH> (cmpz_result, operands[1],
                                              operands[2]));
 
@@ -5683,7 +5683,7 @@
   emit_insn (gen_vcmpne<VSX_EXTRACT_WIDTH> (cmpz2_result, operands[2], vzero));
   emit_insn (gen_and<mode>3 (and_result, cmpz1_result, cmpz2_result));
 
-  /* Vector with ones in elments that match.  */
+  /* Vector with ones in elements that match.  */
   emit_insn (gen_vcmpnez<VSX_EXTRACT_WIDTH> (cmpz_result, operands[1],
                                              operands[2]));
   emit_insn (gen_one_cmpl<mode>2 (not_cmpz_result, cmpz_result));
@@ -6547,25 +6547,19 @@
    (set_attr "size" "<bits>")])
 
 (define_insn "smul<mode>3_highpart"
-  [(set (match_operand:VIlong 0 "vsx_register_operand" "=v")
-	(mult:VIlong (ashiftrt
-		       (match_operand:VIlong 1 "vsx_register_operand" "v")
-		       (const_int 32))
-		     (ashiftrt
-		       (match_operand:VIlong 2 "vsx_register_operand" "v")
-		       (const_int 32))))]
+  [(set (match_operand:VIlong 0 "altivec_register_operand" "=v")
+	(smul_highpart:VIlong
+	  (match_operand:VIlong 1 "altivec_register_operand" "v")
+	  (match_operand:VIlong 2 "altivec_register_operand" "v")))]
   "TARGET_POWER10"
   "vmulhs<wd> %0,%1,%2"
   [(set_attr "type" "veccomplex")])
 
 (define_insn "umul<mode>3_highpart"
-  [(set (match_operand:VIlong 0 "vsx_register_operand" "=v")
-	(us_mult:VIlong (ashiftrt
-			  (match_operand:VIlong 1 "vsx_register_operand" "v")
-			  (const_int 32))
-			(ashiftrt
-			  (match_operand:VIlong 2 "vsx_register_operand" "v")
-			  (const_int 32))))]
+  [(set (match_operand:VIlong 0 "altivec_register_operand" "=v")
+	(umul_highpart:VIlong
+	  (match_operand:VIlong 1 "altivec_register_operand" "v")
+	  (match_operand:VIlong 2 "altivec_register_operand" "v")))]
   "TARGET_POWER10"
   "vmulhu<wd> %0,%1,%2"
   [(set_attr "type" "veccomplex")])
@@ -6720,8 +6714,8 @@
   else
     {
       /* Reverse value of byte element indexes by XORing with 0xFF.
-	 Reverse the 32-byte section identifier match by subracting bits [0:2]
-	 of elemet from 7.  */
+	 Reverse the 32-byte section identifier match by subtracting bits [0:2]
+	 of element from 7.  */
       int value = INTVAL (operands[4]);
       rtx vreg = gen_reg_rtx (V16QImode);
 

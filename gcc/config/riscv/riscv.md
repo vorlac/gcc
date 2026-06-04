@@ -83,9 +83,6 @@
   UNSPEC_CLMULH
   UNSPEC_CLMULR
 
-  ;; the calling convention of callee
-  UNSPEC_CALLEE_CC
-
   ;; String unspecs
   UNSPEC_STRLEN
 
@@ -362,7 +359,7 @@
 ;; rdvl        vector length vl csrr read
 ;; wrvxrm      vector fixed-point rounding mode write
 ;; wrfrm       vector floating-point rounding mode write
-;; vsetvl      vector configuration-setting instrucions
+;; vsetvl      vector configuration-setting instructions
 ;; 7. Vector Loads and Stores
 ;; vlde        vector unit-stride load instructions
 ;; vste        vector unit-stride store instructions
@@ -489,11 +486,11 @@
 ;; vsm4r        crypto vector SM4 Rounds instructions
 ;; vsm3me       crypto vector SM3 Message Expansion instructions
 ;; vsm3c        crypto vector SM3 Compression instructions
-;; 18.Vector BF16 instrctions
+;; 18.Vector BF16 instructions
 ;; vfncvtbf16  vector narrowing single floating-point to brain floating-point instruction
 ;; vfwcvtbf16  vector widening brain floating-point to single floating-point instruction
 ;; vfwmaccbf16  vector BF16 widening multiply-accumulate
-;; SiFive custom extension instrctions
+;; SiFive custom extension instructions
 ;; sf_vqmacc      vector matrix integer multiply-add instructions
 ;; sf_vfnrclip     vector fp32 to int8 ranged clip instructions
 ;; sf_vc vector coprocessor interface without side effect
@@ -626,13 +623,18 @@
 				      (const_int 12)))
 
 	  ;; Jumps further than +/- 1 MiB require two instructions.
+	  ;; Also, jumps that cross section boundaries (e.g., from hot to cold
+	  ;; section when -freorder-blocks-and-partition is used) require two
+	  ;; instructions because the linker may place the sections far apart.
 	  (eq_attr "type" "jump")
-	  (if_then_else (and (le (minus (match_dup 0) (pc))
-				 (const_int 1048568))
-			     (le (minus (pc) (match_dup 0))
-				 (const_int 1048572)))
-			(const_int 4)
-			(const_int 8))
+	  (if_then_else (match_test "CROSSING_JUMP_P (insn)")
+			(const_int 8)
+			(if_then_else (and (le (minus (match_dup 0) (pc))
+					       (const_int 1048568))
+					   (le (minus (pc) (match_dup 0))
+					       (const_int 1048572)))
+				      (const_int 4)
+				      (const_int 8)))
 
 	  ;; Conservatively assume calls take two instructions (AUIPC + JALR).
 	  ;; The linker will opportunistically relax the sequence to JAL.
@@ -674,7 +676,8 @@
 ;; Keep this in sync with enum riscv_microarchitecture.
 (define_attr "tune"
   "generic,sifive_7,sifive_p400,sifive_p600,xiangshan,generic_ooo,mips_p8700,
-   tt_ascalon_d8,andes_25_series,andes_23_series,andes_45_series,spacemit_x60"
+   tt_ascalon_d8,andes_25_series,andes_23_series,andes_45_series,spacemit_x60,
+   arcv_rmx100,arcv_rhx100,xt_c908"
   (const (symbol_ref "((enum attr_tune) riscv_microarchitecture)")))
 
 ;; Describe a user's asm statement.
@@ -742,7 +745,7 @@
 	  || (TARGET_64BIT && synthesize_add_extended (operands))))
     DONE;
 
-  /* Constants have already been handled already.  */
+  /* Constants have already been handled.  */
   if (TARGET_64BIT)
     {
       rtx tdest = gen_reg_rtx (DImode);
@@ -1852,33 +1855,41 @@
 	(zero_extend:DI (match_operand:SI 1 "nonimmediate_operand")))]
   "TARGET_64BIT"
 {
+  /* If the source is a suitably extended subreg, then this is just
+     a simple move.  */
   if (SUBREG_P (operands[1]) && SUBREG_PROMOTED_VAR_P (operands[1])
       && SUBREG_PROMOTED_UNSIGNED_P (operands[1]))
     {
       emit_insn (gen_movdi (operands[0], SUBREG_REG (operands[1])));
       DONE;
     }
+
+  /* If the source is a register and we do not have ZBA or similar
+     extensions with similar capabilities, then emit the two
+     shifts now.  */
+  if (!TARGET_ZBA && !TARGET_XTHEADBB
+      && !TARGET_XTHEADMEMIDX && !TARGET_XANDESPERF
+      && register_operand (operands[1], SImode))
+    {
+      /* Intermediate register.  */
+      rtx ireg = gen_reg_rtx (DImode);
+      operands[1] = gen_lowpart (DImode, operands[1]);
+      rtx shiftval = GEN_INT (32);
+      rtx t = gen_rtx_ASHIFT (DImode, operands[1], shiftval);
+      emit_move_insn (ireg, t);
+      t = gen_rtx_LSHIFTRT (DImode, ireg, shiftval);
+      emit_move_insn (operands[0], t);
+      DONE;
+    }
 })
 
-(define_insn_and_split "*zero_extendsidi2_internal"
-  [(set (match_operand:DI     0 "register_operand"     "=r,r")
-	(zero_extend:DI
-	    (match_operand:SI 1 "nonimmediate_operand" " r,m")))]
+(define_insn "*zero_extendsidi2_internal"
+  [(set (match_operand:DI     0 "register_operand"     "=r")
+	(zero_extend:DI (match_operand:SI 1 "memory_operand" "m")))]
   "TARGET_64BIT && !TARGET_ZBA && !TARGET_XTHEADBB && !TARGET_XTHEADMEMIDX
-   && !TARGET_XANDESPERF
-   && !(REG_P (operands[1]) && VL_REG_P (REGNO (operands[1])))"
-  "@
-   #
-   lwu\t%0,%1"
-  "&& reload_completed
-   && REG_P (operands[1])
-   && !paradoxical_subreg_p (operands[0])"
-  [(set (match_dup 0)
-	(ashift:DI (match_dup 1) (const_int 32)))
-   (set (match_dup 0)
-	(lshiftrt:DI (match_dup 0) (const_int 32)))]
-  { operands[1] = gen_lowpart (DImode, operands[1]); }
-  [(set_attr "move_type" "shift_shift,load")
+   && !TARGET_XANDESPERF"
+  "lwu\t%0,%1"
+  [(set_attr "move_type" "load")
    (set_attr "type" "load")
    (set_attr "mode" "DI")])
 
@@ -1886,29 +1897,43 @@
   [(set (match_operand:GPR    0 "register_operand")
 	(zero_extend:GPR
 	    (match_operand:HI 1 "nonimmediate_operand")))]
-  "")
+  ""
+{
+  /* If the source is a suitably extended subreg, then this is just
+     a simple move.  */
+  if (SUBREG_P (operands[1]) && SUBREG_PROMOTED_VAR_P (operands[1])
+      && SUBREG_PROMOTED_UNSIGNED_P (operands[1]))
+    {
+      emit_insn (gen_mov<GPR:mode> (operands[0], SUBREG_REG (operands[1])));
+      DONE;
+    }
 
-(define_insn_and_split "*zero_extendhi<GPR:mode>2"
-  [(set (match_operand:GPR    0 "register_operand"     "=r,r")
-	(zero_extend:GPR
-	    (match_operand:HI 1 "nonimmediate_operand" " r,m")))]
+  /* If the source is a register and we do not have ZBB or similar
+     extensions with similar capabilities, then emit the two
+     shifts now.  */
+  if (!TARGET_ZBB && !TARGET_XTHEADBB
+      && !TARGET_XTHEADMEMIDX && !TARGET_XANDESPERF
+      && register_operand (operands[1], HImode))
+    {
+      /* Intermediate register.  */
+      rtx ireg = gen_reg_rtx (<GPR:MODE>mode);
+      operands[1] = gen_lowpart (<GPR:MODE>mode, operands[1]);
+      rtx shiftval = GEN_INT (GET_MODE_BITSIZE (<GPR:MODE>mode) - 16);
+      rtx t = gen_rtx_ASHIFT (<GPR:MODE>mode, operands[1], shiftval);
+      emit_move_insn (ireg, t);
+      t = gen_rtx_LSHIFTRT (<GPR:MODE>mode, ireg, shiftval);
+      emit_move_insn (operands[0], t);
+      DONE;
+    }
+})
+
+(define_insn "*zero_extendhi<GPR:mode>2"
+  [(set (match_operand:GPR    0 "register_operand"     "=r")
+	(zero_extend:GPR (match_operand:HI 1 "memory_operand" "m")))]
   "!TARGET_ZBB && !TARGET_XTHEADBB && !TARGET_XTHEADMEMIDX
    && !TARGET_XANDESPERF"
-  "@
-   #
-   lhu\t%0,%1"
-  "&& reload_completed
-   && REG_P (operands[1])
-   && !paradoxical_subreg_p (operands[0])"
-  [(set (match_dup 0)
-	(ashift:GPR (match_dup 1) (match_dup 2)))
-   (set (match_dup 0)
-	(lshiftrt:GPR (match_dup 0) (match_dup 2)))]
-  {
-    operands[1] = gen_lowpart (<GPR:MODE>mode, operands[1]);
-    operands[2] = GEN_INT(GET_MODE_BITSIZE(<GPR:MODE>mode) - 16);
-  }
-  [(set_attr "move_type" "shift_shift,load")
+  "lhu\t%0,%1"
+  [(set_attr "move_type" "load")
    (set_attr "type" "load")
    (set_attr "mode" "<GPR:MODE>")])
 
@@ -1916,7 +1941,25 @@
   [(set (match_operand:SUPERQI    0 "register_operand")
 	(zero_extend:SUPERQI
 	    (match_operand:QI 1 "nonimmediate_operand")))]
-  "")
+  ""
+{
+  /* If the destination is not a full word, then do a zero extended
+     load to a full word and a sub-word extraction to get at the
+     appropriate low bits.  This enables more CSE of memory references
+     by having a canonical form.  That in turn can help other optimizations
+     as well.  */
+  if (<SUPERQI:MODE>mode != word_mode)
+    {
+      rtx tdest = gen_reg_rtx (word_mode);
+      emit_move_insn (tdest, gen_rtx_ZERO_EXTEND (word_mode, operands[1]));
+      tdest = gen_lowpart (<SUPERQI:MODE>mode, tdest);
+      SUBREG_PROMOTED_VAR_P (tdest) = 1;
+      SUBREG_PROMOTED_SET (tdest, SRP_UNSIGNED);
+      emit_move_insn (operands[0], tdest);
+      DONE;
+    }
+})
+
 
 (define_insn "*zero_extendqi<SUPERQI:mode>2_internal"
   [(set (match_operand:SUPERQI 0 "register_operand"    "=r,r")
@@ -1966,7 +2009,24 @@
 (define_expand "extend<SHORT:mode><SUPERQI:mode>2"
   [(set (match_operand:SUPERQI 0 "register_operand")
 	(sign_extend:SUPERQI (match_operand:SHORT 1 "nonimmediate_operand")))]
-  "")
+  ""
+{
+  /* If the destination is not a full word, then do a sign extended
+     load to a full word and a sub-word extraction to get at the
+     appropriate low bits.  This enables more CSE of memory references
+     by having a canonical form.  That in turn can help other optimizations
+     as well.  */
+  if (<SUPERQI:MODE>mode != word_mode)
+    {
+      rtx tdest = gen_reg_rtx (word_mode);
+      emit_move_insn (tdest, gen_rtx_SIGN_EXTEND (word_mode, operands[1]));
+      tdest = gen_lowpart (<SUPERQI:MODE>mode, tdest);
+      SUBREG_PROMOTED_VAR_P (tdest) = 1;
+      SUBREG_PROMOTED_SET (tdest, SRP_SIGNED);
+      emit_move_insn (operands[0], tdest);
+      DONE;
+    }
+})
 
 (define_insn_and_split "*extend<SHORT:mode><SUPERQI:mode>2"
   [(set (match_operand:SUPERQI   0 "register_operand"     "=r,r")
@@ -2464,8 +2524,7 @@
   ""
   [(const_int 0)]
 {
-  riscv_move_integer (operands[2], operands[0], INTVAL (operands[1]),
-		      <GPR:MODE>mode);
+  riscv_move_integer (operands[2], operands[0], INTVAL (operands[1]));
   DONE;
 })
 
@@ -2498,8 +2557,7 @@
   "&& 1"
   [(const_int 0)]
 {
-  riscv_move_integer (operands[0], operands[0], INTVAL (operands[1]),
-                      <MODE>mode);
+  riscv_move_integer (operands[0], operands[0], INTVAL (operands[1]));
   DONE;
 }
 [(set_attr "type" "move")])
@@ -2538,6 +2596,17 @@
    (set_attr "mode" "DI")
    (set_attr "type" "move,move,load,store,mtc,fpload,mfc,fmove,fpstore,move")
    (set_attr "ext" "base,base,base,base,d,d,d,d,d,vector")])
+
+(define_expand "movmisaligndi"
+  [(set (match_operand:DI 0 "nonimmediate_operand")
+	(match_operand:DI 1 "general_operand"))]
+  "!TARGET_64BIT && TARGET_ZILSD"
+{
+  if (riscv_expand_zilsd_misaligned_move (operands[0], operands[1]))
+    DONE;
+  else
+    FAIL;
+})
 
 ;; 32-bit Integer moves
 
@@ -2712,6 +2781,17 @@
   [(set_attr "move_type" "move,load,store")
    (set_attr "type" "fmove,fpload,fpstore")
    (set_attr "mode" "DF")])
+
+(define_expand "movmisaligndf"
+  [(set (match_operand:DF 0 "nonimmediate_operand")
+	(match_operand:DF 1 "general_operand"))]
+  "!TARGET_64BIT && TARGET_ZILSD"
+{
+  if (riscv_expand_zilsd_misaligned_move (operands[0], operands[1]))
+    DONE;
+  else
+    FAIL;
+})
 
 (define_insn "movsidf2_low_rv32"
   [(set (match_operand:SI      0 "register_operand" "=  r")
@@ -3065,7 +3145,7 @@
   [(set_attr "type" "shift")
    (set_attr "mode" "SI")])
 
-;; Canonical form for a extend of a logical shift right (sign/zero extraction).
+;; Canonical form for an extend of a logical shift right (sign/zero extraction).
 ;; Special cases, that are ignored (handled elsewhere):
 ;; * Single-bit extraction (Zbs/XTheadBs)
 ;; * Single-bit extraction (Zicondops/XVentanaCondops)
@@ -3147,24 +3227,81 @@
 ;; Handle SImode to DImode zero-extend combined with a left shift.  This can
 ;; occur when unsigned int is used for array indexing.  Split this into two
 ;; shifts.  Otherwise we can get 3 shifts.
+(define_split
+  [(set (match_operand:DI 0 "register_operand")
+	(and:DI (ashift:DI (match_operand:DI 1 "register_operand")
+			   (match_operand:QI 2 "dimode_shift_operand"))
+		(match_operand 3 "consecutive_bits_operand")))
+   (clobber (match_operand:DI 4 "register_operand"))]
+  "TARGET_64BIT
+   && riscv_shamt_matches_mask_p (INTVAL (operands[2]), INTVAL (operands[3]))
+   && !(TARGET_ZBA && clz_hwi (INTVAL (operands[3])) <= 32)"
+  [(set (match_dup 4) (ashift:DI (match_dup 1) (match_dup 5)))
+   (set (match_dup 0) (lshiftrt:DI (match_dup 4) (match_dup 6)))]
+{
+  unsigned HOST_WIDE_INT mask = INTVAL (operands[3]);
+  int leading  = clz_hwi (mask);
+  int trailing = ctz_hwi (mask);
 
-(define_insn_and_split "zero_extendsidi2_shifted"
-  [(set (match_operand:DI 0 "register_operand" "=r")
-	(and:DI (ashift:DI (match_operand:DI 1 "register_operand" "r")
-			   (match_operand:QI 2 "immediate_operand" "I"))
-		(match_operand 3 "immediate_operand" "")))
-   (clobber (match_scratch:DI 4 "=&r"))]
-  "TARGET_64BIT && !TARGET_ZBA
-   && ((INTVAL (operands[3]) >> INTVAL (operands[2])) == 0xffffffff)"
+  operands[5] = GEN_INT (leading + trailing);
+  operands[6] = GEN_INT (leading);
+})
+
+;; Handle logical AND feeding an equality test against zero where an operand
+;; to the AND is a constant requiring synthesis.  Because we only care about
+;; zero/nonzero state after the AND, we may be able to shift both operands
+;; of the AND to the right and eliminate the need for constant synthesis.
+;;
+;; Once mvconst_internal goes away, this likely turns into a simple splitter.
+(define_insn_and_split ""
+  [(set (match_operand:X 0 "register_operand" "=r")
+	(any_eq:X (and:X (match_operand:X 1 "register_operand" "r")
+			 (match_operand 2 "shifted_const_arith_operand"))
+		  (const_int 0)))
+   (clobber (match_scratch:X 3 "=&r"))]
+  "!SMALL_OPERAND (INTVAL (operands[2]))"
   "#"
   "&& reload_completed"
-  [(set (match_dup 4)
-	(ashift:DI (match_dup 1) (const_int 32)))
-   (set (match_dup 0)
-	(lshiftrt:DI (match_dup 4) (match_dup 5)))]
-  "operands[5] = GEN_INT (32 - (INTVAL (operands [2])));"
-  [(set_attr "type" "shift")
-   (set_attr "mode" "DI")])
+  [(set (match_dup 3) (ashiftrt:X (match_dup 1) (match_dup 4)))
+   (set (match_dup 3) (and:X (match_dup 3) (match_dup 2)))
+   (set (match_dup 0) (any_eq:X (match_dup 3) (const_int 0)))]
+{
+  HOST_WIDE_INT shift = ctz_hwi (INTVAL (operands[2]));
+  operands[4] = gen_int_mode (shift, QImode);
+  operands[2] = gen_int_mode (INTVAL (operands[2]) >> shift, word_mode);
+}
+  [(set_attr "type" "shift")])
+
+;; The pattern above is a bridge to this pattern.  Essentially a select
+;; between 0 and 2^n based on the zero/nonzero status of the AND.
+;;
+;; It's no fewer instructions, but the resulting code has fewer data
+;; dependencies and may compress better depending on 2^n.
+(define_insn_and_split ""
+  [(set (match_operand:X 0 "register_operand" "=r")
+	(ashift:X (any_eq:X
+		    (and:X (match_operand:X 1 "register_operand" "r")
+			   (match_operand 2 "shifted_const_arith_operand"))
+		    (const_int 0))
+		  (match_operand 3 "const_int_operand")))
+   (clobber (match_scratch:X 4 "=&r"))
+   (clobber (match_scratch:X 5 "=&r"))]
+  "TARGET_ZICOND && TARGET_ZBS"
+  "#"
+  "&& reload_completed"
+  [(set (match_dup 4) (ashiftrt:X (match_dup 1) (match_dup 6)))
+   (set (match_dup 4) (and:X (match_dup 4) (match_dup 2)))
+   (set (match_dup 5) (match_dup 3))
+   (set (match_dup 0) (if_then_else:X (any_eq:X (match_dup 4) (const_int 0))
+				      (match_dup 5)
+				      (const_int 0)))]
+{
+  HOST_WIDE_INT shift = ctz_hwi (INTVAL (operands[2]));
+  operands[3] = gen_int_mode (HOST_WIDE_INT_1U << INTVAL (operands[3]), word_mode);
+  operands[6] = gen_int_mode (shift, QImode);
+  operands[2] = gen_int_mode (INTVAL (operands[2]) >> shift, word_mode);
+}
+  [(set_attr "type" "shift")])
 
 ;;
 ;;  ....................
@@ -3788,8 +3925,10 @@
   [(set (pc) (label_ref (match_operand 0 "" "")))]
   ""
 {
-  /* Hopefully this does not happen often as this is going
-     to clobber $ra and muck up the return stack predictors.  */
+  /* Use the long form (AUIPC+JALR) if the jump distance exceeds 1 MiB,
+     or if the jump crosses section boundaries (e.g., from hot to cold
+     section when -freorder-blocks-and-partition is used).
+     Note: This clobbers $ra and mucks up the return stack predictors.  */
   if (get_attr_length (insn) == 8)
     return "jump\t%l0,ra";
 
@@ -4003,22 +4142,17 @@
 (define_expand "sibcall"
   [(parallel [(call (match_operand 0 "")
 		    (match_operand 1 ""))
-	      (use (unspec:SI [
-		     (match_operand 2 "const_int_operand")
-	           ] UNSPEC_CALLEE_CC))])]
+	      (use (match_operand 2 ""))])]
   ""
 {
   rtx target = riscv_legitimize_call_address (XEXP (operands[0], 0));
-  emit_call_insn (gen_sibcall_internal (target, operands[1], operands[2]));
+  emit_call_insn (gen_sibcall_internal (target, operands[1]));
   DONE;
 })
 
 (define_insn "sibcall_internal"
   [(call (mem:SI (match_operand 0 "call_insn_operand" "j,S,U"))
-	 (match_operand 1 "" ""))
-   (use (unspec:SI [
-          (match_operand 2 "const_int_operand")
-        ] UNSPEC_CALLEE_CC))]
+	 (match_operand 1 "" ""))]
   "SIBLING_CALL_P (insn)"
   "@
    jr\t%0
@@ -4030,24 +4164,19 @@
   [(parallel [(set (match_operand 0 "")
 		   (call (match_operand 1 "")
 			 (match_operand 2 "")))
-	      (use (unspec:SI [
-		     (match_operand 3 "const_int_operand")
-	           ] UNSPEC_CALLEE_CC))])]
+	      (use (match_operand 3 ""))])]
   ""
 {
   rtx target = riscv_legitimize_call_address (XEXP (operands[1], 0));
-  emit_call_insn (gen_sibcall_value_internal (operands[0], target, operands[2],
-					      operands[3]));
+  emit_call_insn (gen_sibcall_value_internal (operands[0], target,
+					      operands[2]));
   DONE;
 })
 
 (define_insn "sibcall_value_internal"
   [(set (match_operand 0 "" "")
 	(call (mem:SI (match_operand 1 "call_insn_operand" "j,S,U"))
-	      (match_operand 2 "" "")))
-   (use (unspec:SI [
-          (match_operand 3 "const_int_operand")
-        ] UNSPEC_CALLEE_CC))]
+	      (match_operand 2 "" "")))]
   "SIBLING_CALL_P (insn)"
   "@
    jr\t%1
@@ -4058,22 +4187,17 @@
 (define_expand "call"
   [(parallel [(call (match_operand 0 "")
 		    (match_operand 1 ""))
-	      (use (unspec:SI [
-		     (match_operand 2 "const_int_operand")
-	           ] UNSPEC_CALLEE_CC))])]
+	      (use (match_operand 2 ""))])]
   ""
 {
   rtx target = riscv_legitimize_call_address (XEXP (operands[0], 0));
-  emit_call_insn (gen_call_internal (target, operands[1], operands[2]));
+  emit_call_insn (gen_call_internal (target, operands[1]));
   DONE;
 })
 
 (define_insn "call_internal"
   [(call (mem:SI (match_operand 0 "call_insn_operand" "l,S,U"))
 	 (match_operand 1 "" ""))
-   (use (unspec:SI [
-          (match_operand 2 "const_int_operand")
-        ] UNSPEC_CALLEE_CC))
    (clobber (reg:SI RETURN_ADDR_REGNUM))]
   ""
   "@
@@ -4086,14 +4210,11 @@
   [(parallel [(set (match_operand 0 "")
 		   (call (match_operand 1 "")
 			 (match_operand 2 "")))
-	      (use (unspec:SI [
-		     (match_operand 3 "const_int_operand")
-	           ] UNSPEC_CALLEE_CC))])]
+	      (use (match_operand 3 ""))])]
   ""
 {
   rtx target = riscv_legitimize_call_address (XEXP (operands[1], 0));
-  emit_call_insn (gen_call_value_internal (operands[0], target, operands[2],
-					   operands[3]));
+  emit_call_insn (gen_call_value_internal (operands[0], target, operands[2]));
   DONE;
 })
 
@@ -4101,9 +4222,6 @@
   [(set (match_operand 0 "" "")
 	(call (mem:SI (match_operand 1 "call_insn_operand" "l,S,U"))
 	      (match_operand 2 "" "")))
-   (use (unspec:SI [
-          (match_operand 3 "const_int_operand")
-        ] UNSPEC_CALLEE_CC))
    (clobber (reg:SI RETURN_ADDR_REGNUM))]
   ""
   "@
@@ -4123,9 +4241,7 @@
 {
   int i;
 
-  /* Untyped calls always use the RISCV_CC_BASE calling convention.  */
-  emit_call_insn (gen_call (operands[0], const0_rtx,
-			    gen_int_mode (RISCV_CC_BASE, SImode)));
+  emit_call_insn (gen_call (operands[0], const0_rtx, NULL));
 
   for (i = 0; i < XVECLEN (operands[2], 0); i++)
     {
@@ -4384,7 +4500,16 @@
 	 UNSPEC_SSP_SET))
    (set (match_scratch:GPR 2 "=&r") (const_int 0))]
   ""
-  "<load>\t%2, %1\;<store>\t%2, %0\;li\t%2, 0"
+  {
+    rtx moves[][2] = {
+      {operands[2], operands[1]},
+      {operands[0], operands[2]},
+    };
+    for (rtx *op: moves)
+      output_asm_insn (riscv_output_move (op[0], op[1]), op);
+
+    return "li\t%2, 0";
+  }
   [(set_attr "type" "multi")
    (set_attr "length" "12")])
 
@@ -4424,7 +4549,16 @@
 	 UNSPEC_SSP_TEST))
    (clobber (match_scratch:GPR 3 "=&r"))]
   ""
-  "<load>\t%3, %1\;<load>\t%0, %2\;xor\t%0, %3, %0\;li\t%3, 0"
+  {
+    rtx moves[][2] = {
+      {operands[3], operands[1]},
+      {operands[0], operands[2]},
+    };
+    for (rtx *op: moves)
+      output_asm_insn (riscv_output_move (op[0], op[1]), op);
+
+    return "xor\t%0, %3, %0\;li\t%3, 0";
+  }
   [(set_attr "type" "multi")
    (set_attr "length" "12")])
 
@@ -4626,7 +4760,7 @@
     FAIL;
 })
 
-; Split (A<<1) | (A>=0) into a rotate + xor. Using two’s-complement identities:
+; Split (A<<1) | (A>=0) into a rotate + xor.  Using two’s-complement identities:
 ; (A>=0) == ((A >> (W-1)) ^ 1) and (A<<1) | (A>>(W-1)) == ROL1 (A), so the whole
 ; expression equals ROL1 (A) ^ 1.
 (define_split
@@ -4654,7 +4788,7 @@
   [(set_attr "type" "load")
    (set (attr "length") (const_int 8))])
 
-;; The AND is redunant here.  It always turns off the high 32 bits  and the
+;; The AND is redundant here.  It always turns off the high 32 bits and the
 ;; low number of bits equal to the shift count.  Those upper 32 bits will be
 ;; reset by the SIGN_EXTEND at the end.
 ;;
@@ -4960,7 +5094,163 @@
   { operands[3] = GEN_INT (BITS_PER_WORD
 			   - exact_log2 (INTVAL (operands[3]) + 1)); })
 
-;; Standard extensions and pattern for optimization
+;; If a shift count is BITS_PER_WORD - 1 - N, then we can exploit the identity
+;; that -x = ~x + 1 which is equivalent to (-1 - x) = ~x.  When shifting only
+;; low bits of X matter (5 for SI, 6 for DI).  So 31/63 are equivalent to -1
+;; for SI/DI shifts.
+;;
+;; Strangely, even for rv64, the shift computation is done in SI, presumably
+;; something narrowed the arithmetic prior to gimple->rtl expansion.
+;; Ultimately it gets wrapped with a SUBREG narrowing to QI.
+(define_split
+  [(set (match_operand:X 0 "register_operand")
+	(any_shift_rotate:X
+	  (match_operand:X 1 "register_operand")
+	  (subreg:QI (minus:SI (match_operand 2 "bitpos_mask_operand")
+			       (match_operand:SI 3 "register_operand")) 0)))
+    (clobber (match_operand:X 4 "register_operand"))]
+  ""
+  [(set (match_dup 4) (not:X (match_dup 6)))
+   (set (match_dup 0) (any_shift_rotate:X (match_dup 1) (match_dup 5)))]
+ {
+   operands[5] = gen_lowpart (QImode, operands[4]);
+   operands[6] = gen_lowpart (word_mode, operands[3]);
+ })
+
+;; This is the same thing as the prior pattern, but for 32 bit shifts on rv64.
+(define_split
+  [(set (match_operand:DI 0 "register_operand")
+	(sign_extend:DI
+	 (any_shift_rotate:SI
+	  (match_operand:SI 1 "register_operand")
+	  (subreg:QI (minus:SI (const_int 31)
+			       (match_operand:SI 2 "register_operand")) 0))))
+    (clobber (match_operand:DI 3 "register_operand"))]
+  "TARGET_64BIT"
+  [(set (match_dup 3) (not:DI (match_dup 2)))
+   (set (match_dup 0)
+	(sign_extend:DI (any_shift_rotate:SI (match_dup 1)
+					     (match_dup 4))))]
+ {
+   operands[2] = gen_lowpart (DImode, operands[2]);
+   operands[4] = gen_lowpart (QImode, operands[3]);
+ })
+
+;; This is similar using a shift triplet to implement a logical AND when
+;; the mask is a consecutive_bits_operand.
+;;
+;; The difference is we have a left shift in the input RTL and we verify
+;; that clears the appropriate low bits.  So we can get away with just
+;; two shifts.
+(define_split
+  [(set (match_operand:X 0 "register_operand")
+	(and:X (ashift:X (match_operand:X 1 "register_operand")
+			 (match_operand 2 "const_int_operand"))
+		(match_operand 3 "consecutive_bits_operand")))
+   (clobber (match_operand:X 4 "register_operand"))]
+  "(ctz_hwi (INTVAL (operands[3]) & GET_MODE_MASK (word_mode))
+    == INTVAL (operands[2]))"
+  [(set (match_dup 4) (ashift:X (match_dup 1) (match_dup 5)))
+   (set (match_dup 0) (lshiftrt:X (match_dup 4) (match_dup 6)))]
+"{
+  /* We want to left shift by the number of leading zeros in the mask,
+     plus the number of bits shifted left by the pattern.  Remember that
+     a HOST_WIDE_INT may be 64 bits, so clz on that value can count bits
+     we don't care about for rv32.  */
+  HOST_WIDE_INT lshift
+    = clz_hwi (UINTVAL (operands[3])) % BITS_PER_WORD + INTVAL (operands[2]);
+  operands[5] = gen_int_mode (lshift, QImode);
+
+  /* And then we right shift things back into position.  */
+  HOST_WIDE_INT rshift = lshift - INTVAL (operands[2]);
+  operands[6] = gen_int_mode (rshift, QImode);
+}")
+
+;; EQ/NE of a sign bit splat against zero is just GE/LT 0, so we can
+;; recognize it directly.  Note there may be a subreg expression buried
+;; in there
+(define_insn "*sign_bit_splat_equality_test"
+  [(set (pc)
+	(if_then_else
+	 (any_eq
+	  (subreg:SI (ashiftrt:DI (match_operand:DI 1 "register_operand" "r")
+				  (const_int 63)) 0)
+	  (const_int 0))
+	 (label_ref (match_operand 0 "" ""))
+	 (pc)))]
+  "TARGET_64BIT"
+{
+  rtx x = PATTERN (insn);
+
+  /* We'll always have a SET, so it's safe to extract the source.  */
+  x = SET_SRC (x);
+
+  /* Get the condition of the IF_THEN_ELSE.  */
+  x = XEXP (x, 0);
+
+  if (GET_CODE (x) == EQ)
+    {
+      if (get_attr_length (insn) == 12)
+	return "blt\t%1,zero,1f; jump\t%l0,ra; 1:";
+      return "bge\t%1,zero,%l0";
+    }
+  else if (GET_CODE (x) == NE)
+    {
+      if (get_attr_length (insn) == 12)
+	return "bge\t%1,zero,1f; jump\t%l0,ra; 1:";
+      return "blt\t%1,zero,%l0";
+    }
+  else
+    gcc_unreachable ();
+}
+  [(set_attr "type" "branch")
+   (set_attr "mode" "none")])
+
+;; We can save an instruction for this case.  Essentially we can
+;; test the (sanitized) shift count against zero.  This only comes
+;; up for 32 bit objects on rv64.
+(define_split
+  [(set (match_operand:DI 0 "register_operand")
+	(and:DI (subreg:DI
+		 (ashift:SI (const_int 1)
+			    (match_operand:QI 1 "register_operand")) 0)
+		(const_int 1)))
+   (clobber (match_operand:DI 2 "register_operand"))]
+  "TARGET_64BIT"
+  [(set (match_dup 2) (and:DI (match_dup 1) (const_int 31)))
+   (set (match_dup 0) (eq:DI (match_dup 2) (const_int 0)))]
+  { operands[1] = gen_lowpart (DImode, operands[1]); })
+
+;; The basic idea is to realize that we can get the sign extension
+;; for free when sign extracting a field shifting it such that
+;; the sign bit of the field ends up in the SI sign bit.  In that
+;; case it's just a slliw.
+;;
+;; It is tempting to do the extract+shift rewriting independent of
+;; the outer AND.  But that's shown to regress code quality in other
+;; contexts.  So we're being more conservative about trying to
+;; exploit the free sign extension opportunities that show up with
+;; shifted sign extractions
+(define_split
+  [(set (match_operand:DI 0 "register_operand")
+	(and:DI
+	 (ashift:DI (sign_extract:DI (match_operand:DI 1 "register_operand")
+				     (match_operand 2 "const_int_operand")
+				     (match_operand 3 "const_int_operand"))
+		    (match_operand 4 "const_int_operand"))
+	 (match_operand:DI 5 "const_int_operand")))
+   (clobber (match_operand:DI 6 "register_operand"))]
+  "(TARGET_64BIT
+    && INTVAL (operands[2]) + INTVAL (operands[4]) == 32
+    && SMALL_OPERAND (INTVAL (operands[5]) >> INTVAL (operands[4])))"
+  [(set (match_dup 6) (and:DI (match_dup 1) (match_dup 5)))
+   (set (match_dup 0) (sign_extend:DI (ashift:SI (match_dup 7) (match_dup 4))))]
+{
+  HOST_WIDE_INT new_mask = INTVAL (operands[5]) >> INTVAL (operands[4]);
+  operands[5] = GEN_INT (new_mask);
+  operands[7] = gen_lowpart (SImode, operands[6]);
+})
+
 (include "bitmanip.md")
 (include "crypto.md")
 (include "sync.md")
@@ -4993,3 +5283,6 @@
 (include "andes-25-series.md")
 (include "andes-45-series.md")
 (include "spacemit-x60.md")
+(include "xt-c908.md")
+(include "arcv-rmx100.md")
+(include "arcv-rhx100.md")

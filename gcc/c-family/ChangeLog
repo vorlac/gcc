@@ -1,3 +1,124 @@
+2026-06-01  Martin Uecker  <uecker@tugraz.at>
+
+	PR c/98539
+	* c-warn.cc (warn_parm_array_mismatch): Check number of size
+	expressions.
+
+2026-06-01  Mark Wielaard  <mark@klomp.org>
+
+	* c.opt.urls: Regenerate.
+
+2026-05-31  Daniel Barboza  <daniel.barboza@oss.qualcomm.com>
+
+	* c.opt: Removed Wstrict-overflow entry.
+
+2026-05-31  Daniel Barboza  <daniel.barboza@oss.qualcomm.com>
+
+	* c-common.cc (pointer_int_sum): Removed
+	fold_*_overflow_warnings uses.
+
+2026-05-30  Dhruv Chawla  <dhruvc@nvidia.com>
+
+	* c-attribs.cc (append_access_attr): Fix typos.
+	(append_access_attr_idxs): Likewise.
+	(has_attribute): Likewise.
+	* c-common.cc (get_cpp_ttype_from_string_type): Likewise.
+	(cb_get_suggestion): Likewise.
+	(maybe_add_include_fixit): Likewise.
+	* c-common.h (convert_vector_to_array_for_subscript): Likewise.
+	* c-cppbuiltin.cc (builtin_define_type_max): Likewise.
+	* c-format.cc (check_format_info_main): Likewise.
+	(check_format_types): Likewise.
+	* c-omp.cc (c_omp_categorize_directive): Likewise.
+	* c-opts.cc (c_common_post_options): Likewise.
+	* c-ubsan.cc (ubsan_instrument_bounds): Likewise.
+
+2026-05-30  Jakub Jelinek  <jakub@redhat.com>
+
+	* c-attribs.cc (type_valid_for_vector_size): Use BITINT_TYPE_P macro.
+	* c-common.cc (c_common_get_narrower): For ENUMERAL_TYPE with
+	BITINT_TYPE as underlying type convert to the underlying type.
+	(c_common_signed_or_unsigned_type): Use BITINT_TYPE_P macro.
+	(sync_resolve_size): Likewise.
+	(atomic_bitint_fetch_using_cas_loop): Likewise.
+	(resolve_overloaded_builtin): Likewise.
+
+2026-05-23  Daniel Barboza  <daniel.barboza@oss.qualcomm.com>
+
+	* c-warn.cc (warn_for_sign_compare): Remove strict_overflow_p
+	argument from tree_expr_nonnegative_p call.
+
+2026-05-23  Daniel Barboza  <daniel.barboza@oss.qualcomm.com>
+
+	* c-ubsan.cc (ubsan_maybe_instrument_reference_or_call): Removed
+	strict_overflow_p flag.
+
+2026-05-23  Daniel Barboza  <daniel.barboza@oss.qualcomm.com>
+
+	* c-warn.cc (warn_logical_operator): Removed strict_overflow_p
+	variable.
+
+2026-05-22  Julian Brown  <julian@codesourcery.com>
+	    Tobias Burnus  <tburnus@baylibre.com>
+
+	* c-common.h (enum c_omp_region_type): Add C_ORT_UPDATE and
+	C_ORT_OMP_UPDATE codes.
+	* c-omp.cc (omp_basic_map_kind_name): New function.
+	(omp_instantiate_mapper): Add LOC parameter and 'target update'
+	support.
+	(c_omp_instantiate_mappers): Add 'target update' support.
+
+2026-05-22  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/119059
+	* c-cppbuiltin.cc (c_cpp_builtins): For C++26 predefine
+	__cpp_trivial_union to 202502L.
+
+2026-05-15  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/125081
+	* c.opt (Wconstant-logical-operand): New option.
+	* c.opt.urls: Regenerate.
+
+2026-05-14  Tobias Burnus  <tburnus@baylibre.com>
+
+	* c-omp.cc (omp_map_decayed_kind): Handle map modifiers
+	also for declare-mapper's map clauses.
+
+2026-05-11  Jason Merrill  <jason@redhat.com>
+
+	PR c++/124621
+	* c-common.cc (user_facing_original_type_p): Recurse.
+
+2026-05-04  H.J. Lu  <hjl.tools@gmail.com>
+
+	PR c/121911
+	* c-common.cc (c_common_nodes_and_builtins): If the
+	stack_protect_guard_symbol_p hook returns true, declare a global
+	symbol for stack protection guard.
+
+2026-04-29  Julian Brown  <julian@codesourcery.com>
+
+	* c-common.h (c_omp_region_type): Add C_ORT_EXIT_DATA,
+	C_ORT_OMP_EXIT_DATA.
+	(c_omp_instantiate_mappers): Add region type parameter.
+	* c-omp.cc (omp_split_map_kind, omp_join_map_kind,
+	omp_map_decayed_kind): New functions.
+	(omp_instantiate_mapper): Add ORT parameter.  Implement map kind decay
+	for instantiated mapper clauses.
+	(c_omp_instantiate_mappers): Add ORT parameter, pass to
+	omp_instantiate_mapper.
+
+2026-04-28  Jakub Jelinek  <jakub@redhat.com>
+
+	* c-common.cc (c_common_signed_or_unsigned_type): Use
+	build_bitint_type for TREE_CODE (type) == BITINT_TYPE whenever
+	flag_isoc2y even when precision is 1.
+	(c_common_get_alias_set): Don't special case BITINT_TYPE
+	with precision 1 for flag_isoc2y.
+	* c-lex.cc (interpret_integer): Use _BitInt(1) type for 0wb
+	if flag_isoc2y, rather than _BitInt(2).
+
 2026-04-22  Jakub Jelinek  <jakub@redhat.com>
 
 	* c-cppbuiltin.cc (c_cpp_builtins): Bump __cpp_impl_reflection value

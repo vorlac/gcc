@@ -499,11 +499,11 @@ package body Exp_Ch7 is
      (Loc    : Source_Ptr;
       Action : Node_Id;
       Par    : Node_Id) return Node_Id;
-   --  Action is a single statement or object declaration. Par is the proper
-   --  parent of the generated block. Create a transient block whose name is
-   --  the current scope and the only handled statement is Action. If Action
-   --  involves controlled objects or secondary stack usage, the corresponding
-   --  cleanup actions are performed at the end of the block.
+   --  Action is a single statement. Par is the proper parent of the generated
+   --  block. Create a transient block whose name is the current scope and the
+   --  only handled statement is Action. If Action involves controlled objects
+   --  or task objects or secondary stack usage, corresponding cleanup actions
+   --  are performed at the end of the block.
 
    procedure Store_Actions_In_Scope (AK : Scope_Action_Kind; L : List_Id);
    --  Shared processing for the Store_xxx_Actions_In_Scope routines: attach
@@ -1450,7 +1450,7 @@ package body Exp_Ch7 is
                New_Occurrence_Of
                  (RTE (RE_Expunge_Unactivated_Tasks), Loc),
              Parameter_Associations => New_List (
-               New_Occurrence_Of (Activation_Chain_Entity (N), Loc))));
+               Make_Identifier (Loc, Name_uChain))));
 
       --  Attempt to cancel an asynchronous entry call whenever the block which
       --  contains the abortable part is exited.
@@ -2430,6 +2430,14 @@ package body Exp_Ch7 is
             Strict       : Boolean := False)
          is
          begin
+            --  No need to process ignored ghost declarations as they will be
+            --  removed later and therefore do not need finalization
+            --  primitives.
+
+            if Is_Ignored_Ghost_Node (Decl) then
+               return;
+            end if;
+
             --  Library-level tagged type
 
             if Nkind (Decl) = N_Full_Type_Declaration then
@@ -8712,7 +8720,6 @@ package body Exp_Ch7 is
 
       --  Local variables
 
-      Decls    : constant List_Id   := New_List;
       Instrs   : constant List_Id   := New_List (Action);
       Trans_Id : constant Entity_Id := Current_Scope;
 
@@ -8811,11 +8818,48 @@ package body Exp_Ch7 is
       Block :=
         Make_Block_Statement (Loc,
           Identifier                 => New_Occurrence_Of (Trans_Id, Loc),
-          Declarations               => Decls,
+          Declarations               => New_List,
           Handled_Statement_Sequence =>
             Make_Handled_Sequence_Of_Statements (Loc, Statements => Instrs),
           Has_Created_Identifier     => True);
       Set_Parent (Block, Par);
+
+      --  If the transient scope contains a _Master entity, mark it as being
+      --  a task master since Build_Master_Entity could not do it.
+
+      Set_Is_Task_Master (Block, Has_Master_Entity (Trans_Id));
+
+      --  If the transient scope contains a _Chain entity, try to find its
+      --  declaration in the actions to be executed before the main action.
+      --  If found, generate a call to Activate_Tasks on the entity and, in
+      --  either case, set Is_Task_Allocation_Block to block the subsequent
+      --  generation of the same call by Build_Task_Activation_Call.
+
+      if Has_Activation_Chain_Entity (Trans_Id) then
+         declare
+            Before_Actions : List_Id
+              renames Scope_Stack.Table (Scope_Stack.Last).
+                        Actions_To_Be_Wrapped (Before);
+            Act : Node_Id;
+
+         begin
+            Act := First (Before_Actions);
+            while Present (Act) loop
+               if Nkind (Act) = N_Object_Declaration
+                 and then Chars (Defining_Identifier (Act)) = Name_uChain
+               then
+                  Append_To (Before_Actions,
+                    Make_Task_Activation_Call
+                      (Loc, Defining_Identifier (Act)));
+                  exit;
+               end if;
+
+               Next (Act);
+            end loop;
+
+            Set_Is_Task_Allocation_Block (Block);
+         end;
+      end if;
 
       --  Insert actions stuck in the transient scopes as well as all freezing
       --  nodes needed by those actions. Do not insert cleanup actions here,

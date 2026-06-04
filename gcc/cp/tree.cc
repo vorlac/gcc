@@ -855,7 +855,7 @@ build_cplus_new (tree type, tree init, tsubst_flags_t complain)
 }
 
 /* Subroutine of build_vec_init_expr: Build up a single element
-   intialization as a proxy for the full array initialization to get things
+   initialization as a proxy for the full array initialization to get things
    marked as used and any appropriate diagnostics.
 
    This used to be necessary because we were deferring building the actual
@@ -1724,7 +1724,7 @@ apply_identity_attributes (tree result, tree attribs, bool *remove_attributes)
    Because of several reasons:
     * If T is a type that needs structural equality
       its TYPE_CANONICAL (T) will be NULL.
-    * TYPE_CANONICAL (T) desn't carry type attributes
+    * TYPE_CANONICAL (T) doesn't carry type attributes
       and loses template parameter names.
 
    If REMOVE_ATTRIBUTES is non-null, also strip attributes that don't
@@ -2155,12 +2155,9 @@ strip_typedefs_expr (tree t, bool *remove_attributes, unsigned int flags)
 
     case LAMBDA_EXPR:
     case STMT_EXPR:
-      return t;
-
+    /* ^^alias represents the alias itself, not the underlying type.  */
     case REFLECT_EXPR:
-      /* ^^alias represents the alias itself, not the underlying type.  */
-      if (TYPE_P (REFLECT_EXPR_HANDLE (t)))
-	return t;
+      return t;
 
     default:
       break;
@@ -3858,6 +3855,15 @@ build_min_non_dep_op_overload (enum tree_code op,
 	  tree spaceship_non_dep = (TREE_CODE (non_dep) == CALL_EXPR
 				    ? CALL_EXPR_ARG (non_dep, reversed ? 1 : 0)
 				    : TREE_OPERAND (non_dep, reversed ? 1 : 0));
+
+	  tree int_promotion = NULL_TREE;
+	  if (TREE_CODE (spaceship_non_dep) == NOP_EXPR)
+	    {
+	      gcc_checking_assert (TREE_CODE (non_dep) != CALL_EXPR);
+	      int_promotion = TREE_TYPE (spaceship_non_dep);
+	      spaceship_non_dep = TREE_OPERAND (spaceship_non_dep, 0);
+	    }
+
 	  gcc_checking_assert (TREE_CODE (spaceship_non_dep) == CALL_EXPR);
 	  tree spaceship_op0 = va_arg (p, tree);
 	  tree spaceship_op1 = va_arg (p, tree);
@@ -3880,6 +3886,8 @@ build_min_non_dep_op_overload (enum tree_code op,
 	    {
 	      gcc_checking_assert (COMPARISON_CLASS_P (non_dep)
 				   || TREE_CODE (non_dep) == SPACESHIP_EXPR);
+	      if (int_promotion)
+		op0 = build_nop (int_promotion, op0);
 	      if (reversed)
 		std::swap (op0, op1);
 	      return build_min_non_dep (TREE_CODE (non_dep), non_dep, op0, op1);
@@ -4517,20 +4525,7 @@ cp_tree_equal (tree t1, tree t2)
       return true;
 
     case REFLECT_EXPR:
-      {
-	if (REFLECT_EXPR_KIND (t1) != REFLECT_EXPR_KIND (t2))
-	  return false;
-	tree h1 = REFLECT_EXPR_HANDLE (t1);
-	tree h2 = REFLECT_EXPR_HANDLE (t2);
-	if (!cp_tree_equal (h1, h2))
-	  return false;
-	/* ^^alias represents the alias itself, not the underlying type.  */
-	if (TYPE_P (h1)
-	    && (typedef_variant_p (h1) || typedef_variant_p (h2))
-	    && TYPE_NAME (h1) != TYPE_NAME (h2))
-	  return false;
-	return true;
-      }
+      return compare_reflections (t1, t2);
 
     default:
       break;

@@ -284,8 +284,9 @@ enum gfc_statement
   ST_OMP_TASKWAIT, ST_OMP_TASKYIELD, ST_OMP_CANCEL, ST_OMP_CANCELLATION_POINT,
   ST_OMP_TASKGROUP, ST_OMP_END_TASKGROUP, ST_OMP_SIMD, ST_OMP_END_SIMD,
   ST_OMP_DO_SIMD, ST_OMP_END_DO_SIMD, ST_OMP_PARALLEL_DO_SIMD,
-  ST_OMP_END_PARALLEL_DO_SIMD, ST_OMP_DECLARE_SIMD, ST_OMP_DECLARE_REDUCTION,
-  ST_OMP_TARGET, ST_OMP_END_TARGET, ST_OMP_TARGET_DATA, ST_OMP_END_TARGET_DATA,
+  ST_OMP_END_PARALLEL_DO_SIMD, ST_OMP_DECLARE_SIMD, ST_OMP_DECLARE_MAPPER,
+  ST_OMP_DECLARE_REDUCTION, ST_OMP_TARGET, ST_OMP_END_TARGET,
+  ST_OMP_TARGET_DATA, ST_OMP_END_TARGET_DATA,
   ST_OMP_TARGET_UPDATE, ST_OMP_DECLARE_TARGET, ST_OMP_DECLARE_VARIANT,
   ST_OMP_TEAMS, ST_OMP_END_TEAMS, ST_OMP_DISTRIBUTE, ST_OMP_END_DISTRIBUTE,
   ST_OMP_DISTRIBUTE_SIMD, ST_OMP_END_DISTRIBUTE_SIMD,
@@ -500,6 +501,7 @@ enum gfc_isym_id
   GFC_ISYM_C_ASSOCIATED,
   GFC_ISYM_C_F_POINTER,
   GFC_ISYM_C_F_PROCPOINTER,
+  GFC_ISYM_C_F_STRPOINTER,
   GFC_ISYM_C_FUNLOC,
   GFC_ISYM_C_LOC,
   GFC_ISYM_C_SIZEOF,
@@ -875,7 +877,13 @@ enum gfc_omp_at_type
   OMP_AT_EXECUTION
 };
 
-/* Structure and list of supported extension attributes.  */
+/* Structure and list of supported extension attributes.
+
+   The bitmask formed from these values (symbol_attribute.ext_attr) is
+   written to and read from module files, see mio_symbol_attribute.  New
+   attributes must therefore be appended at the end (before EXT_ATTR_LAST)
+   so that the existing bit positions, and thus module compatibility, are
+   preserved.  */
 typedef enum
 {
   EXT_ATTR_DLLIMPORT = 0,
@@ -888,6 +896,8 @@ typedef enum
   EXT_ATTR_NOINLINE,
   EXT_ATTR_NORETURN,
   EXT_ATTR_WEAK,
+  EXT_ATTR_INLINE,
+  EXT_ATTR_ALWAYS_INLINE,
   EXT_ATTR_LAST, EXT_ATTR_NUM = EXT_ATTR_LAST
 }
 ext_attr_id_t;
@@ -995,7 +1005,7 @@ typedef struct
   unsigned always_explicit:1;
 
   /* Set if the symbol is generated and, hence, standard violations
-     shouldn't be flaged.  */
+     shouldn't be flagged.  */
   unsigned artificial:1;
 
   /* Set if the symbol has been referenced in an expression.  No further
@@ -1040,6 +1050,10 @@ typedef struct
   /* This is omp_{out,in,priv,orig} artificial variable in
      !$OMP DECLARE REDUCTION.  */
   unsigned omp_udr_artificial_var:1;
+
+  /* This is a placeholder variable used in an !$OMP DECLARE MAPPER
+     directive.  */
+  unsigned omp_udm_artificial_var:1;
 
   /* Mentioned in OMP DECLARE TARGET.  */
   unsigned omp_declare_target:1;
@@ -1347,33 +1361,34 @@ enum gfc_omp_depend_doacross_op
 
 enum gfc_omp_map_op
 {
-  OMP_MAP_ALLOC,
-  OMP_MAP_IF_PRESENT,
-  OMP_MAP_ATTACH,
-  OMP_MAP_TO,
-  OMP_MAP_FROM,
-  OMP_MAP_TOFROM,
-  OMP_MAP_DELETE,
-  OMP_MAP_DETACH,
-  OMP_MAP_FORCE_ALLOC,
-  OMP_MAP_FORCE_TO,
-  OMP_MAP_FORCE_FROM,
-  OMP_MAP_FORCE_TOFROM,
-  OMP_MAP_FORCE_PRESENT,
-  OMP_MAP_FORCE_DEVICEPTR,
-  OMP_MAP_DEVICE_RESIDENT,
-  OMP_MAP_LINK,
-  OMP_MAP_RELEASE,
-  OMP_MAP_ALWAYS_TO,
-  OMP_MAP_ALWAYS_FROM,
-  OMP_MAP_ALWAYS_TOFROM,
-  OMP_MAP_PRESENT_ALLOC,
-  OMP_MAP_PRESENT_TO,
-  OMP_MAP_PRESENT_FROM,
-  OMP_MAP_PRESENT_TOFROM,
-  OMP_MAP_ALWAYS_PRESENT_TO,
-  OMP_MAP_ALWAYS_PRESENT_FROM,
-  OMP_MAP_ALWAYS_PRESENT_TOFROM
+  OMP_MAP_ALLOC = 0,
+  OMP_MAP_TO = 1 << 0,
+  OMP_MAP_FROM = 1 << 1,
+  OMP_MAP_TOFROM = OMP_MAP_TO | OMP_MAP_FROM,
+  OMP_MAP_IF_PRESENT = 1 << 2,
+  OMP_MAP_ATTACH = 1 << 3,
+  OMP_MAP_DELETE = 1 << 4,
+  OMP_MAP_DETACH = 1 << 5,
+  OMP_MAP_FORCE_ALLOC = 1 << 6,
+  OMP_MAP_FORCE_TO = OMP_MAP_FORCE_ALLOC | OMP_MAP_TO,
+  OMP_MAP_FORCE_FROM = OMP_MAP_FORCE_ALLOC | OMP_MAP_FROM,
+  OMP_MAP_FORCE_TOFROM = OMP_MAP_FORCE_ALLOC | OMP_MAP_TOFROM,
+  OMP_MAP_FORCE_PRESENT = 1 << 7,
+  OMP_MAP_FORCE_DEVICEPTR = 1 << 8,
+  OMP_MAP_DEVICE_RESIDENT = 1 << 9,
+  OMP_MAP_LINK = 1 << 10,
+  OMP_MAP_RELEASE = 1 << 11,
+  OMP_MAP_ALWAYS_TO = (1 << 12) | OMP_MAP_TO,
+  OMP_MAP_ALWAYS_FROM = (1 << 12) | OMP_MAP_FROM,
+  OMP_MAP_ALWAYS_TOFROM = (1 << 12) | OMP_MAP_TOFROM,
+  OMP_MAP_PRESENT_ALLOC = 1 << 13,
+  OMP_MAP_PRESENT_TO = (1 << 13) | OMP_MAP_TO,
+  OMP_MAP_PRESENT_FROM = (1 << 13) | OMP_MAP_FROM,
+  OMP_MAP_PRESENT_TOFROM = (1 << 13) | OMP_MAP_TOFROM,
+  OMP_MAP_ALWAYS_PRESENT_TO = OMP_MAP_ALWAYS_TO | OMP_MAP_PRESENT_TO,
+  OMP_MAP_ALWAYS_PRESENT_FROM = OMP_MAP_ALWAYS_FROM | OMP_MAP_PRESENT_FROM,
+  OMP_MAP_ALWAYS_PRESENT_TOFROM = OMP_MAP_ALWAYS_TOFROM | OMP_MAP_PRESENT_TOFROM,
+  OMP_MAP_UNSET = 1 << 14
 };
 
 enum gfc_omp_defaultmap
@@ -1408,6 +1423,15 @@ enum gfc_omp_linear_op
   OMP_LINEAR_UVAL
 };
 
+typedef struct gfc_omp_namelist_udm
+{
+  /* When adding more struct members, change the struct use in gfc_omp_namelist
+     to a pointer and move the struct definition down, placing it after
+     '#define gfc_get_omp_udm'.  */
+  struct gfc_omp_udm *udm;
+}
+gfc_omp_namelist_udm;
+
 /* For use in OpenMP clauses in case we need extra information
    (aligned clause alignment, linear clause step, etc.).  */
 
@@ -1421,7 +1445,7 @@ typedef struct gfc_omp_namelist
       gfc_omp_depend_doacross_op depend_doacross_op;
       struct
         {
-	  ENUM_BITFIELD (gfc_omp_map_op) op:8;
+	  ENUM_BITFIELD (gfc_omp_map_op) op : 16;
 	  bool readonly;
         } map;
       gfc_expr *align;
@@ -1453,6 +1477,7 @@ typedef struct gfc_omp_namelist
   union
     {
       struct gfc_omp_namelist_udr *udr;
+      struct gfc_omp_namelist_udm udm;
       gfc_namespace *ns;
       gfc_expr *allocator;
       struct gfc_symbol *traits_sym;
@@ -1466,7 +1491,7 @@ gfc_omp_namelist;
 
 #define gfc_get_omp_namelist() XCNEW (gfc_omp_namelist)
 
-enum
+enum gfc_omp_list_type
 {
   OMP_LIST_FIRST,
   OMP_LIST_PRIVATE = OMP_LIST_FIRST,
@@ -1508,7 +1533,8 @@ enum
   OMP_LIST_DESTROY,
   OMP_LIST_INTEROP,
   OMP_LIST_ADJUST_ARGS,
-  OMP_LIST_NUM /* Must be the last.  */
+  OMP_LIST_NUM, /* Must be the last (together with OMP_LIST_NONE).  */
+  OMP_LIST_NONE = OMP_LIST_NUM
 };
 
 /* Because a symbol can belong to multiple namelists, they must be
@@ -1847,6 +1873,28 @@ typedef struct gfc_omp_namelist_udr
 gfc_omp_namelist_udr;
 #define gfc_get_omp_namelist_udr() XCNEW (gfc_omp_namelist_udr)
 
+
+typedef struct gfc_omp_udm
+{
+  struct gfc_omp_udm *next;
+  locus where; /* Where the !$omp declare mapper construct occurred.  */
+
+  const char *mapper_id;
+  gfc_typespec ts;
+
+  struct gfc_symbol *var_sym;
+  struct gfc_namespace *mapper_ns;
+
+  /* FIXME: We don't need a whole gfc_omp_clauses here.  We only use the
+     OMP_LIST_MAP clause list; however, the used resolve_omp_clauses
+     requires the full set.  */
+  gfc_omp_clauses *clauses;
+
+  tree backend_decl;
+}
+gfc_omp_udm;
+#define gfc_get_omp_udm() XCNEW (gfc_omp_udm)
+
 /* The gfc_st_label structure is a BBT attached to a namespace that
    records the usage of statement labels within that space.  */
 
@@ -2026,7 +2074,7 @@ typedef struct gfc_symbol
      function).
      gen_mark is used to check duplicate mappings for OpenMP
      use_device_ptr/use_device_addr/private/shared clauses (see generic_head in
-     above functon).
+     above function).
      reduc_mark is used to check duplicate mappings for OpenMP reduction
      clauses.  */
   struct gfc_symbol *old_symbol;
@@ -2215,6 +2263,7 @@ typedef struct gfc_symtree
     gfc_common_head *common;
     gfc_typebound_proc *tb;
     gfc_omp_udr *omp_udr;
+    gfc_omp_udm *omp_udm;
   }
   n;
   unsigned import_only:1;
@@ -2270,6 +2319,8 @@ typedef struct gfc_namespace
   gfc_symtree *common_root;
   /* Tree containing all the OpenMP user defined reductions.  */
   gfc_symtree *omp_udr_root;
+  /* Tree containing all the OpenMP user defined mappers.  */
+  gfc_symtree *omp_udm_root;
 
   /* Tree containing type-bound procedures.  */
   gfc_symtree *tb_sym_root;
@@ -2396,6 +2447,9 @@ typedef struct gfc_namespace
 
   /* Set to 1 for !$OMP DECLARE REDUCTION namespaces.  */
   unsigned omp_udr_ns:1;
+
+  /* Set to 1 for !$OMP DECLARE MAPPER namespaces.  */
+  unsigned omp_udm_ns:1;
 
   /* Set to 1 for !$ACC ROUTINE namespaces.  */
   unsigned oacc_routine:1;
@@ -3807,6 +3861,8 @@ int gfc_find_symbol (const char *, gfc_namespace *, int, gfc_symbol **);
 bool gfc_find_sym_tree (const char *, gfc_namespace *, int, gfc_symtree **);
 int gfc_get_symbol (const char *, gfc_namespace *, gfc_symbol **,
 		    locus * = NULL);
+bool gfc_find_symbol_by_name (const char *, gfc_namespace *,
+				    gfc_symbol **);
 bool gfc_verify_c_interop (gfc_typespec *);
 bool gfc_verify_c_interop_param (gfc_symbol *);
 bool verify_bind_c_sym (gfc_symbol *, gfc_typespec *, int, gfc_common_head *);
@@ -3914,7 +3970,7 @@ void gfc_free_iterator (gfc_iterator *, int);
 void gfc_free_forall_iterator (gfc_forall_iterator *);
 void gfc_free_alloc_list (gfc_alloc *);
 void gfc_free_namelist (gfc_namelist *);
-void gfc_free_omp_namelist (gfc_omp_namelist *, bool, bool, bool, bool);
+void gfc_free_omp_namelist (gfc_omp_namelist *, enum gfc_omp_list_type);
 void gfc_free_equiv (gfc_equiv *);
 void gfc_free_equiv_until (gfc_equiv *, gfc_equiv *);
 void gfc_free_data (gfc_data *);
@@ -3935,8 +3991,12 @@ void gfc_free_omp_declare_variant_list (gfc_omp_declare_variant *list);
 void gfc_free_omp_declare_simd (gfc_omp_declare_simd *);
 void gfc_free_omp_declare_simd_list (gfc_omp_declare_simd *);
 void gfc_free_omp_udr (gfc_omp_udr *);
+void gfc_free_omp_udm (gfc_omp_udm *);
 void gfc_free_omp_variants (gfc_omp_variant *);
 gfc_omp_udr *gfc_omp_udr_find (gfc_symtree *, gfc_typespec *);
+gfc_omp_udm *gfc_omp_udm_find (gfc_symtree *, gfc_typespec *);
+gfc_omp_udm *gfc_find_omp_udm (gfc_namespace *ns, const char *mapper_id,
+			       gfc_typespec *ts);
 void gfc_resolve_omp_allocate (gfc_namespace *, gfc_omp_namelist *);
 void gfc_resolve_omp_assumptions (gfc_omp_assumptions *);
 void gfc_resolve_omp_directive (gfc_code *, gfc_namespace *);
@@ -3946,6 +4006,7 @@ void gfc_resolve_omp_parallel_blocks (gfc_code *, gfc_namespace *);
 void gfc_resolve_omp_do_blocks (gfc_code *, gfc_namespace *);
 void gfc_resolve_omp_declare (gfc_namespace *);
 void gfc_resolve_omp_udrs (gfc_symtree *);
+void gfc_resolve_omp_udms (gfc_symtree *);
 void gfc_omp_save_and_clear_state (struct gfc_omp_saved_state *);
 void gfc_omp_restore_state (struct gfc_omp_saved_state *);
 void gfc_free_expr_list (gfc_expr_list *);
@@ -4132,6 +4193,7 @@ void gfc_free_interface (gfc_interface *);
 void gfc_drop_interface_elements_before (gfc_interface **, gfc_interface *);
 bool gfc_compare_derived_types (gfc_symbol *, gfc_symbol *);
 bool gfc_compare_types (gfc_typespec *, gfc_typespec *);
+int gfc_symbol_rank (gfc_symbol *);
 bool gfc_check_dummy_characteristics (gfc_symbol *, gfc_symbol *,
 				      bool, char *, int);
 bool gfc_check_result_characteristics (gfc_symbol *, gfc_symbol *,

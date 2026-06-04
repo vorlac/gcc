@@ -1160,7 +1160,7 @@ assign_discriminators (void)
 	      bb_id++;
 	    }
 	}
-      /* If basic block has multiple sucessors, consdier every edge as a
+      /* If basic block has multiple successors, consider every edge as a
 	 separate block.  */
       if (!single_succ_p (bb))
 	bb_id++;
@@ -1712,7 +1712,6 @@ group_case_labels_stmt (gswitch *stmt)
   int old_size = gimple_switch_num_labels (stmt);
   int i, next_index, new_size;
   basic_block default_bb = NULL;
-  hash_set<tree> *removed_labels = NULL;
 
   default_bb = gimple_switch_default_bb (cfun, stmt);
 
@@ -1728,12 +1727,9 @@ group_case_labels_stmt (gswitch *stmt)
       gcc_assert (base_case);
       base_bb = label_to_block (cfun, CASE_LABEL (base_case));
 
-      /* Discard cases that have the same destination as the default case or
-	 whose destination blocks have already been removed as unreachable.  */
+      /* Discard cases that have the same destination as the default case.  */
       if (base_bb == NULL
-	  || base_bb == default_bb
-	  || (removed_labels
-	      && removed_labels->contains (CASE_LABEL (base_case))))
+	  || base_bb == default_bb)
 	{
 	  i++;
 	  continue;
@@ -1756,8 +1752,6 @@ group_case_labels_stmt (gswitch *stmt)
 	  /* Merge the cases if they jump to the same place,
 	     and their ranges are consecutive.  */
 	  if (merge_bb == base_bb
-	      && (removed_labels == NULL
-		  || !removed_labels->contains (CASE_LABEL (merge_case)))
 	      && wi::to_wide (CASE_LOW (merge_case)) == bhp1)
 	    {
 	      base_high
@@ -1768,46 +1762,6 @@ group_case_labels_stmt (gswitch *stmt)
 	    }
 	  else
 	    break;
-	}
-
-      /* Discard cases that have an unreachable destination block.  */
-      if (EDGE_COUNT (base_bb->succs) == 0
-	  && gimple_seq_unreachable_p (bb_seq (base_bb))
-	  /* Don't optimize this if __builtin_unreachable () is the
-	     implicitly added one by the C++ FE too early, before
-	     -Wreturn-type can be diagnosed.  We'll optimize it later
-	     during switchconv pass or any other cfg cleanup.  */
-	  && (gimple_in_ssa_p (cfun)
-	      || (LOCATION_LOCUS (gimple_location (last_nondebug_stmt (base_bb)))
-		  != BUILTINS_LOCATION)))
-	{
-	  edge base_edge = find_edge (gimple_bb (stmt), base_bb);
-	  if (base_edge != NULL)
-	    {
-	      for (gimple_stmt_iterator gsi = gsi_start_bb (base_bb);
-		   !gsi_end_p (gsi); gsi_next (&gsi))
-		if (glabel *stmt = dyn_cast <glabel *> (gsi_stmt (gsi)))
-		  {
-		    if (FORCED_LABEL (gimple_label_label (stmt))
-			|| DECL_NONLOCAL (gimple_label_label (stmt)))
-		      {
-			/* Forced/non-local labels aren't going to be removed,
-			   but they will be moved to some neighbouring basic
-			   block. If some later case label refers to one of
-			   those labels, we should throw that case away rather
-			   than keeping it around and referring to some random
-			   other basic block without an edge to it.  */
-			if (removed_labels == NULL)
-			  removed_labels = new hash_set<tree>;
-			removed_labels->add (gimple_label_label (stmt));
-		      }
-		  }
-		else
-		  break;
-	      remove_edge_and_dominated_blocks (base_edge);
-	    }
-	  i = next_index;
-	  continue;
 	}
 
       if (new_size < i)
@@ -1822,7 +1776,6 @@ group_case_labels_stmt (gswitch *stmt)
   if (new_size < old_size)
     gimple_switch_set_num_labels (stmt, new_size);
 
-  delete removed_labels;
   return new_size < old_size;
 }
 
@@ -2791,7 +2744,7 @@ stmt_starts_bb_p (gimple *stmt, gimple *prev_stmt)
 	  && gimple_code (prev_stmt) != GIMPLE_LABEL
 	  && (gimple_code (prev_stmt) != GIMPLE_CALL
 	      || ! gimple_call_internal_p (prev_stmt, IFN_PHI)))
-	/* PHI nodes start a new block unless preceeded by a label
+	/* PHI nodes start a new block unless preceded by a label
 	   or another PHI.  */
 	return true;
     }
@@ -7199,7 +7152,7 @@ move_stmt_op (tree *tp, int *walk_subtrees, void *data)
 }
 
 /* Helper for move_stmt_r.  Given an EH region number for the source
-   function, map that to the duplicate EH regio number in the dest.  */
+   function, map that to the duplicate EH region number in the dest.  */
 
 static int
 move_stmt_eh_region_nr (int old_nr, struct move_stmt_d *p)
@@ -9359,8 +9312,8 @@ gimple_account_profile_record (basic_block bb,
     }
 }
 
-struct cfg_hooks gimple_cfg_hooks = {
-  "gimple",
+const struct cfg_hooks gimple_cfg_hooks = {
+  IR_GIMPLE,
   gimple_verify_flow_info,
   gimple_dump_bb,		/* dump_bb  */
   gimple_dump_bb_for_graph,	/* dump_bb_for_graph  */
@@ -10235,7 +10188,7 @@ ifconvertable_edge (edge e)
 	return false;
     }
 
-  /* If convertables are only for conditionals. */
+  /* If convertibles are only for conditionals. */
   if (!is_a<gcond*>(*gsi_last_nondebug_bb (bb0)))
     return false;
 

@@ -1795,7 +1795,7 @@ dump_alias_pair (dr_with_seg_len_pair_t *alias_pair, const char *indent)
    memory of store_ptr_0 cannot be between the memory of load_ptr_0 and
    load_ptr_1.)
 
-   we then can use only the following expression to finish the alising checks
+   we then can use only the following expression to finish the aliasing checks
    between store_ptr_0 & load_ptr_0 and store_ptr_0 & load_ptr_1:
 
    ((store_ptr_0 + store_segment_length_0) <= load_ptr_0)
@@ -2037,7 +2037,7 @@ create_ifn_alias_checks (tree *cond_expr,
   tree addr_a = DR_BASE_ADDRESS (dr_a.dr);
   tree addr_b = DR_BASE_ADDRESS (dr_b.dr);
 
-  /* See whether the target suports what we want to do.  WAW checks are
+  /* See whether the target supports what we want to do.  WAW checks are
      equivalent to WAR checks here.  */
   internal_fn ifn = (alias_pair.flags & DR_ALIAS_RAW
 		     ? IFN_CHECK_RAW_PTRS
@@ -2676,7 +2676,6 @@ create_runtime_alias_checks (class loop *loop,
 {
   tree part_cond_expr;
 
-  fold_defer_overflow_warnings ();
   for (const dr_with_seg_len_pair_t &alias_pair : alias_pairs)
     {
       gcc_assert (alias_pair.flags);
@@ -2694,7 +2693,6 @@ create_runtime_alias_checks (class loop *loop,
       else
 	*cond_expr = part_cond_expr;
     }
-  fold_undefer_and_ignore_overflow_warnings ();
 }
 
 /* Check if OFFSET1 and OFFSET2 (DR_OFFSETs of some data-refs) are identical

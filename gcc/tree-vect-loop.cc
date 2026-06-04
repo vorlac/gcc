@@ -656,7 +656,7 @@ edge
 vec_init_loop_exit_info (class loop *loop)
 {
   /* Before we begin we must first determine which exit is the main one and
-     which are auxilary exits.  */
+     which are auxiliary exits.  */
   auto_vec<edge> exits = get_loop_exit_edges (loop);
   if (exits.length () == 0)
     return NULL;
@@ -775,7 +775,9 @@ _loop_vec_info::_loop_vec_info (class loop *loop_in, vec_info_shared *shared)
     drs_advanced_by (NULL_TREE),
     vec_loop_main_exit (NULL),
     vec_epilogue_loop_main_exit (NULL),
-    scalar_loop_main_exit (NULL)
+    scalar_loop_main_exit (NULL),
+    early_break_needs_epilogue (false),
+    early_break_niters_var (NULL)
 {
   /* CHECKME: We want to visit all BBs before their successors (except for
      latch blocks, for which this assertion wouldn't hold).  In the simple
@@ -1244,7 +1246,7 @@ vect_verify_full_masking_avx512 (loop_vec_info loop_vinfo)
   return true;
 }
 
-/* Check whether we can use vector access with length based on precison
+/* Check whether we can use vector access with length based on precision
    comparison.  So far, to keep it simple, we only allow the case that the
    precision of the target supported length is larger than the precision
    required by loop niters.  */
@@ -1307,7 +1309,7 @@ vect_verify_loop_lens (loop_vec_info loop_vinfo)
      - the Pmode precision
 
      If min_ni_prec is less than the precision of the current niters,
-     we perfer to still use the niters type.  Prefer to use Pmode and
+     we prefer to still use the niters type.  Prefer to use Pmode and
      wider IV to avoid narrow conversions.  */
 
   unsigned int ni_prec
@@ -1413,7 +1415,7 @@ vect_compute_single_scalar_iteration_cost (loop_vec_info loop_vinfo)
 	  /* We are using vect_prologue here to avoid scaling twice
 	     by the inner loop factor.  */
 	  record_stmt_cost (&LOOP_VINFO_SCALAR_ITERATION_COST (loop_vinfo),
-			    factor, kind, stmt_info, 0, vect_prologue);
+			    factor, kind, stmt_info, 0, vect_body);
         }
     }
 
@@ -1705,6 +1707,13 @@ vect_create_loop_vinfo (class loop *loop, vec_info_shared *shared,
   LOOP_VINFO_EARLY_BREAKS (loop_vinfo)
     = !LOOP_VINFO_LOOP_CONDS (loop_vinfo).is_empty ();
 
+  /* At the moment we can't support no epilogs for multiple exits, result of
+     the first compare should be masked by that of the second.  We can only
+     allow it if the early exits have the same live values.  for differing
+     values we have to calculate a third mask to disambiguate. */
+  LOOP_VINFO_EARLY_BRK_NEEDS_EPILOG (loop_vinfo)
+    = LOOP_VINFO_LOOP_CONDS (loop_vinfo).length () > 1;
+
   if (info->inner_loop_cond)
     {
       /* If we have an estimate on the number of iterations of the inner
@@ -1767,7 +1776,7 @@ vect_analyze_loop_costing (loop_vec_info loop_vinfo,
 
   /* If we know the number of iterations we can do better, for the
      epilogue we can also decide whether the main loop leaves us
-     with enough iterations, prefering a smaller vector epilog then
+     with enough iterations, preferring a smaller vector epilog then
      also possibly used for the case we skip the vector loop.  */
   if (LOOP_VINFO_NITERS_KNOWN_P (loop_vinfo))
     {
@@ -2159,7 +2168,7 @@ vect_analyze_loop_2 (loop_vec_info loop_vinfo, int masked_p, bool &fatal,
     orig_loop_vinfo = loop_vinfo;
   gcc_assert (orig_loop_vinfo);
 
-  /* We can't mask on niters for uncounted loops due to unkown upper bound.  */
+  /* We can't mask on niters for uncounted loops due to unknown upper bound.  */
   if (LOOP_VINFO_NITERS_UNCOUNTED_P (loop_vinfo))
     LOOP_VINFO_CAN_USE_PARTIAL_VECTORS_P (loop_vinfo) = false;
 
@@ -2302,7 +2311,7 @@ start_over:
   gcc_assert (LOOP_VINFO_MASKS (loop_vinfo).is_empty ());
 
   /* Apply the suggested unrolling factor, this was determined by the backend
-     during finish_cost the first time we ran the analyzis for this
+     during finish_cost the first time we ran the analysis for this
      vector mode.  */
   if (applying_suggested_uf)
     LOOP_VINFO_VECT_FACTOR (loop_vinfo) *= loop_vinfo->suggested_unroll_factor;
@@ -2702,20 +2711,6 @@ again:
 		= STMT_VINFO_DEF_TYPE (stmt_info);
 	    }
 	}
-      for (gimple_stmt_iterator si = gsi_start_bb (bb);
-	   !gsi_end_p (si); gsi_next (&si))
-	{
-	  if (is_gimple_debug (gsi_stmt (si)))
-	    continue;
-	  stmt_vec_info stmt_info = loop_vinfo->lookup_stmt (gsi_stmt (si));
-	  if (STMT_VINFO_IN_PATTERN_P (stmt_info))
-	    {
-	      stmt_vec_info pattern_stmt_info
-		= STMT_VINFO_RELATED_STMT (stmt_info);
-	      if (STMT_VINFO_SLP_VECT_ONLY_PATTERN (pattern_stmt_info))
-		STMT_VINFO_IN_PATTERN_P (stmt_info) = false;
-	    }
-	}
     }
   /* Free optimized alias test DDRS.  */
   LOOP_VINFO_LOWER_BOUNDS (loop_vinfo).truncate (0);
@@ -3012,7 +3007,7 @@ vect_analyze_loop (class loop *loop, gimple *loop_vectorized_call,
 
       if (loop_vinfo)
 	{
-	  /*  Analyzis has been successful so update the VF value.  The
+	  /*  Analysis has been successful so update the VF value.  The
 	      VF should always be a multiple of unroll_factor and we want to
 	      capture the original VF here.  */
 	  cached_vf_per_mode[last_mode_i]
@@ -3189,7 +3184,7 @@ vect_analyze_loop (class loop *loop, gimple *loop_vectorized_call,
 		break;
 	    }
 
-	  /* Revert back to the default from the suggested prefered
+	  /* Revert back to the default from the suggested preferred
 	     epilogue vectorization mode.  */
 	  masked_p = -1;
 	  if (mode_i == vector_modes.length ())
@@ -3815,7 +3810,7 @@ vect_is_simple_reduction (loop_vec_info loop_info, stmt_vec_info phi_info,
     }
 
   /* If this isn't a nested cycle or if the nested cycle reduction value
-     is used ouside of the inner loop we cannot handle uses of the reduction
+     is used outside of the inner loop we cannot handle uses of the reduction
      value.  */
   if (nlatch_def_loop_uses > 1 || nphi_def_loop_uses > 1)
     {
@@ -3937,17 +3932,14 @@ vect_get_peel_iters_epilogue (loop_vec_info loop_vinfo, int peel_iters_prologue)
     }
 }
 
-/* Calculate cost of peeling the loop PEEL_ITERS_PROLOGUE times.  */
+/* Calculate cost of peeling the scalar loop PEEL_ITERS_PROLOGUE times for
+   a prologue and the corresponding times for the epilogue.  */
 int
-vect_get_known_peeling_cost (loop_vec_info loop_vinfo, int peel_iters_prologue,
-			     int *peel_iters_epilogue,
-			     stmt_vector_for_cost *scalar_cost_vec,
-			     stmt_vector_for_cost *prologue_cost_vec,
-			     stmt_vector_for_cost *epilogue_cost_vec)
+vect_get_known_peeling_cost (loop_vec_info loop_vinfo, int peel_iters_prologue)
 {
   int retval = 0;
 
-  *peel_iters_epilogue
+  int peel_iters_epilogue
     = vect_get_peel_iters_epilogue (loop_vinfo, peel_iters_prologue);
 
   if (!LOOP_VINFO_NITERS_KNOWN_P (loop_vinfo))
@@ -3955,27 +3947,15 @@ vect_get_known_peeling_cost (loop_vec_info loop_vinfo, int peel_iters_prologue,
       /* If peeled iterations are known but number of scalar loop
 	 iterations are unknown, count a taken branch per peeled loop.  */
       if (peel_iters_prologue > 0)
-	retval = record_stmt_cost (prologue_cost_vec, 1, cond_branch_taken,
-				   vect_prologue);
-      if (*peel_iters_epilogue > 0)
-	retval += record_stmt_cost (epilogue_cost_vec, 1, cond_branch_taken,
-				    vect_epilogue);
+	retval = builtin_vectorization_cost (cond_branch_taken, NULL_TREE, 0);
+      if (peel_iters_epilogue > 0)
+	retval += builtin_vectorization_cost (cond_branch_taken, NULL_TREE, 0);
     }
 
-  stmt_info_for_cost *si;
-  int j;
-  if (peel_iters_prologue)
-    FOR_EACH_VEC_ELT (*scalar_cost_vec, j, si)
-      retval += record_stmt_cost (prologue_cost_vec,
-				  si->count * peel_iters_prologue,
-				  si->kind, si->stmt_info, si->misalign,
-				  vect_prologue);
-  if (*peel_iters_epilogue)
-    FOR_EACH_VEC_ELT (*scalar_cost_vec, j, si)
-      retval += record_stmt_cost (epilogue_cost_vec,
-				  si->count * *peel_iters_epilogue,
-				  si->kind, si->stmt_info, si->misalign,
-				  vect_epilogue);
+  retval += ((peel_iters_prologue + peel_iters_epilogue)
+	     * loop_vinfo->scalar_costs->body_cost ());
+  retval += (((peel_iters_prologue != 0) + (peel_iters_epilogue != 0))
+	     * loop_vinfo->scalar_costs->outside_cost ());
 
   return retval;
 }
@@ -4158,6 +4138,11 @@ vect_estimate_min_profitable_iters (loop_vec_info loop_vinfo,
 	   iterations are unknown, count a taken branch per peeled loop.  */
 	epilogue_need_br_taken_cost = true;
     }
+
+  /* The way we cummulate peeling costs into the vector prologue/epilogue
+     cost is a bit awkward given we cannot reuse scalar_costs which is
+     already computed and also because it cannot take into account any
+     epilogue vectorization we'll carry out in the end.  */
 
   stmt_info_for_cost *si;
   int j;
@@ -5929,7 +5914,7 @@ vect_create_epilog_for_reduction (loop_vec_info loop_vinfo,
 							neutral_op);
       for (unsigned int i = 0; i < group_size; ++i)
 	{
-	  /* If there's no univeral neutral value, we can use the
+	  /* If there's no universal neutral value, we can use the
 	     initial scalar value from the original PHI.  This is used
 	     for MIN and MAX reduction, for example.  */
 	  if (!neutral_op)
@@ -6830,7 +6815,7 @@ vectorizable_lane_reducing (loop_vec_info loop_vinfo, stmt_vec_info stmt_info,
     return false;
 
   /* Lane-reducing pattern inside any inner loop of LOOP_VINFO is not
-     recoginized.  */
+     recognized.  */
   gcc_assert (!nested_in_vect_loop_p (LOOP_VINFO_LOOP (loop_vinfo), stmt_info));
   gcc_assert (VECT_REDUC_INFO_TYPE (reduc_info) == TREE_CODE_REDUCTION);
 
@@ -7462,7 +7447,7 @@ vectorizable_reduction (loop_vec_info loop_vinfo,
       else if (needs_fold_left_reduction_p (op.type, orig_code))
 	{
 	  /* When vectorizing a reduction chain w/o SLP the reduction PHI
-	     is not directy used in stmt.  */
+	     is not directly used in stmt.  */
 	  if (reduc_chain_length != 1)
 	    {
 	      if (dump_enabled_p ())
@@ -7500,7 +7485,6 @@ vectorizable_reduction (loop_vec_info loop_vinfo,
        || reduction_type == INTEGER_INDUC_COND_REDUCTION
        || reduction_type == CONST_COND_REDUCTION
        || reduction_type == EXTRACT_LAST_REDUCTION)
-      && 1
       && ncopies > 1)
     {
       if (dump_enabled_p ())
@@ -7891,7 +7875,7 @@ vect_emulate_mixed_dot_prod (loop_vec_info loop_vinfo, stmt_vec_info stmt_info,
     std::swap (vop[0], vop[1]);
 
   /* Convert all inputs to signed types.  */
-  for (int i = 0; i < 3; ++i)
+  for (int i = 1; i < 3; ++i)
     if (TYPE_UNSIGNED (TREE_TYPE (vop[i])))
       {
 	tree tmp = make_ssa_name (signed_type_for (TREE_TYPE (vop[i])));
@@ -7905,17 +7889,25 @@ vect_emulate_mixed_dot_prod (loop_vec_info loop_vinfo, stmt_vec_info stmt_info,
 
   /* Create a vector of -128.  */
   tree min_narrow_elttype = TYPE_MIN_VALUE (narrow_elttype);
-  tree min_narrow = build_vector_from_val (narrow_vectype,
-					   min_narrow_elttype);
+  tree min_narrow = build_vector_from_val (TREE_TYPE (vop[0]),
+					   fold_convert
+					     (TREE_TYPE (TREE_TYPE (vop[0])),
+					      min_narrow_elttype));
 
   /* Create a vector of 64.  */
   auto half_wi = wi::lrshift (wi::to_wide (min_narrow_elttype), 1);
   tree half_narrow = wide_int_to_tree (narrow_elttype, half_wi);
   half_narrow = build_vector_from_val (narrow_vectype, half_narrow);
 
-  /* Emit: SUB_RES = VOP[0] - 128.  */
-  tree sub_res = make_ssa_name (narrow_vectype);
+  /* Emit: SUB_RES = VOP[0] - 128 in an unsigned type.  */
+  tree sub_res = make_ssa_name (TREE_TYPE (vop[0]));
   new_stmt = gimple_build_assign (sub_res, PLUS_EXPR, vop[0], min_narrow);
+  vect_finish_stmt_generation (loop_vinfo, stmt_info, new_stmt, gsi);
+
+  vop[0] = make_ssa_name (narrow_vectype);
+  new_stmt = gimple_build_assign (vop[0], VIEW_CONVERT_EXPR,
+				  build1 (VIEW_CONVERT_EXPR, narrow_vectype,
+					  sub_res));
   vect_finish_stmt_generation (loop_vinfo, stmt_info, new_stmt, gsi);
 
   /* Emit:
@@ -7938,7 +7930,7 @@ vect_emulate_mixed_dot_prod (loop_vec_info loop_vinfo, stmt_vec_info stmt_info,
 
   tree stage3 = make_ssa_name (wide_vectype);
   new_stmt = gimple_build_assign (stage3, DOT_PROD_EXPR,
-				  sub_res, vop[1], stage2);
+				  vop[0], vop[1], stage2);
   vect_finish_stmt_generation (loop_vinfo, stmt_info, new_stmt, gsi);
 
   /* Convert STAGE3 to the reduction type.  */
@@ -8868,7 +8860,7 @@ vectorizable_recurr (loop_vec_info loop_vinfo, stmt_vec_info stmt_info,
     }
   /* Skip inserted vectorized stmts for the latch definition.  We have to
      insert after those.  */
-  while (gimple_uid (gsi_stmt (gsi2)) == 0);
+  while (gsi_stmt (gsi2) && gimple_uid (gsi_stmt (gsi2)) == 0);
 
   for (unsigned i = 0; i < ncopies; ++i)
     {
@@ -10174,7 +10166,10 @@ vectorizable_live_operation (vec_info *vinfo, stmt_vec_info stmt_info,
   if (vect_is_reduction (slp_node))
     {
       if (!vec_stmt_p)
-	return true;
+	{
+	  SLP_TREE_LIVE_LANES (slp_node).safe_push (slp_index);
+	  return true;
+	}
       /* For SLP reductions we vectorize the epilogue for all involved stmts
 	 together.  For SLP reduction chains we only get here once.  */
       if (SLP_INSTANCE_KIND (slp_node_instance) == slp_inst_kind_reduc_group
@@ -10298,6 +10293,7 @@ vectorizable_live_operation (vec_info *vinfo, stmt_vec_info stmt_info,
       if (!loop_vinfo)
 	record_stmt_cost (cost_vec, 1, vec_to_scalar, slp_node,
 			  0, vect_epilogue);
+      SLP_TREE_LIVE_LANES (slp_node).safe_push (slp_index);
       return true;
     }
 
@@ -10427,12 +10423,12 @@ vectorizable_live_operation (vec_info *vinfo, stmt_vec_info stmt_info,
       FOR_EACH_IMM_USE_STMT (use_stmt, imm_iter, lhs)
 	if (!is_gimple_debug (use_stmt)
 	    && (!(use_stmt_info = vinfo->lookup_stmt (use_stmt))
-		|| !PURE_SLP_STMT (vect_stmt_to_vectorize (use_stmt_info))))
+		|| !PURE_SLP_STMT (use_stmt_info)))
 	  {
 	    /* ???  This can happen when the live lane ends up being
 	       rooted in a vector construction code-generated by an
 	       external SLP node (and code-generation for that already
-	       happened).  See gcc.dg/vect/bb-slp-47.c.
+	       happened).
 	       Doing this is what would happen if that vector CTOR
 	       were not code-generated yet so it is not too bad.
 	       ???  In fact we'd likely want to avoid this situation
@@ -10446,7 +10442,7 @@ vectorizable_live_operation (vec_info *vinfo, stmt_vec_info stmt_info,
 		if (dump_enabled_p ())
 		  dump_printf_loc (MSG_MISSED_OPTIMIZATION, vect_location,
 				   "Using original scalar computation for "
-				   "live lane because use preceeds vector "
+				   "live lane because use precedes vector "
 				   "def\n");
 		continue;
 	      }
@@ -10718,7 +10714,7 @@ vect_record_loop_len (loop_vec_info loop_vinfo, vec_loop_lens *lens,
 /* Given a complete set of lengths LENS, extract length number INDEX
    for an rgroup that operates on NVECTORS vectors of type VECTYPE,
    where 0 <= INDEX < NVECTORS.  Return a value that contains FACTOR
-   multipled by the number of elements that should be processed.
+   multiplied by the number of elements that should be processed.
    Insert any set-up statements before GSI.  */
 
 tree
@@ -10873,7 +10869,7 @@ scale_profile_for_vect_loop (class loop *loop, edge exit_e, unsigned vf, bool fl
       if (dump_file && (dump_flags & TDF_DETAILS))
 	fprintf (dump_file,
 		 "Vectorization factor %i seems too large for profile "
-		 "prevoiusly believed to be consistent; reducing.\n", vf);
+		 "previously believed to be consistent; reducing.\n", vf);
       vf /= 2;
     }
 
@@ -11071,10 +11067,10 @@ vect_update_ivs_after_vectorizer_for_early_breaks (loop_vec_info loop_vinfo)
 {
   DUMP_VECT_SCOPE ("vect_update_ivs_after_vectorizer_for_early_breaks");
 
-  if (!LOOP_VINFO_EARLY_BREAKS (loop_vinfo))
+  if (!LOOP_VINFO_EARLY_BREAKS (loop_vinfo)
+      /* If no peeling was done then we have no IV to update.  */
+      || !LOOP_VINFO_EARLY_BRK_NITERS_VAR (loop_vinfo))
     return;
-
-  gcc_assert (LOOP_VINFO_EARLY_BRK_NITERS_VAR (loop_vinfo));
 
   tree phi_var = LOOP_VINFO_EARLY_BRK_NITERS_VAR (loop_vinfo);
   tree niters_skip = LOOP_VINFO_MASK_SKIP_NITERS (loop_vinfo);
@@ -11157,7 +11153,7 @@ vect_update_ivs_after_vectorizer_for_early_breaks (loop_vec_info loop_vinfo)
   /* Write the init_stmts in the loop-preheader block.  */
   auto psi = gsi_last_nondebug_bb (pe->src);
   gsi_insert_seq_after (&psi, init_stmts, GSI_LAST_NEW_STMT);
-  /* Wite the adjustments in the header block.  */
+  /* Write the adjustments in the header block.  */
   basic_block bb = loop->header;
   auto si = gsi_after_labels (bb);
   gsi_insert_seq_before (&si, stmts, GSI_SAME_STMT);

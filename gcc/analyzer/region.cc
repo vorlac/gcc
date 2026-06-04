@@ -44,6 +44,24 @@ along with GCC; see the file COPYING3.  If not see
 
 namespace ana {
 
+bool
+compare_bit_offsets_p (bit_offset_t a,
+		       enum tree_code op,
+		       bit_offset_t b)
+{
+  switch (op)
+    {
+    default:
+      gcc_unreachable ();
+    case EQ_EXPR: return a == b;
+    case NE_EXPR: return a != b;
+    case GE_EXPR: return a >= b;
+    case LE_EXPR: return a <= b;
+    case GT_EXPR: return a > b;
+    case LT_EXPR: return a < b;
+    }
+}
+
 region_offset
 region_offset::make_byte_offset (const region *base_region,
 				 const svalue *num_bytes_sval)
@@ -94,25 +112,27 @@ region_offset::calc_symbolic_byte_offset (region_model_manager *mgr) const
 void
 region_offset::dump_to_pp (pretty_printer *pp, bool simple) const
 {
+  pp_string (pp, "{");
+  m_base_region->dump_to_pp (pp, simple);
   if (symbolic_p ())
     {
-      /* We don't bother showing the base region.  */
-      pp_string (pp, "byte ");
+      pp_string (pp, " byte ");
       m_sym_offset->dump_to_pp (pp, simple);
     }
   else
     {
       if (m_offset % BITS_PER_UNIT == 0)
 	{
-	  pp_string (pp, "byte ");
+	  pp_string (pp, " byte ");
 	  pp_wide_int (pp, m_offset / BITS_PER_UNIT, SIGNED);
 	}
       else
 	{
-	  pp_string (pp, "bit ");
+	  pp_string (pp, " bit ");
 	  pp_wide_int (pp, m_offset, SIGNED);
 	}
     }
+  pp_string (pp, "}");
 }
 
 DEBUG_FUNCTION void
@@ -371,6 +391,109 @@ strip_types (const region_offset &offset, region_model_manager &mgr)
 		    mgr));
   else
     return offset;
+}
+
+/* Ignoring base regions, compare the byte offset of OFFSET_A and OFFSET_B
+   within their respective base regions.  */
+
+static tristate
+eval_byte_offset_comparison (region_offset offset_a,
+			     enum tree_code op,
+			     region_offset offset_b,
+			     const region_model &model)
+{
+  if (offset_a.concrete_p ())
+    {
+      if (offset_b.concrete_p ())
+	{
+	  // Concrete vs concrete: we know the result:
+	  return compare_bit_offsets_p (offset_a.get_bit_offset (),
+					op,
+					offset_b.get_bit_offset ());
+	}
+      else
+	{
+	  // Concrete vs symbolic
+	  // TODO: There may be room for improved precision here
+	  return tristate::unknown ();
+	}
+    }
+  else
+    {
+      if (offset_b.concrete_p ())
+	{
+	  // Symbolic vs concrete
+	  // TODO: There may be room for improved precision here
+	  return tristate::unknown ();
+	}
+      else
+	{
+	  // Symbolic vs symbolic
+	  const svalue *offset_sval_a = offset_a.get_symbolic_byte_offset ();
+	  const svalue *offset_sval_b = offset_b.get_symbolic_byte_offset ();
+	  return model.eval_condition (offset_sval_a, op, offset_sval_b);
+	}
+    }
+}
+
+/* Evaluate the condition LHS_OFFSET OP RHS_OFFSET for comparing
+   pointers.
+
+   See if they point to the same base region, and if we know about
+   the offsets within their regions.
+
+   Use MODEL for aliasing information and any knowledge from
+   constraint_manager about ordering of pointers.  */
+
+tristate
+eval_region_offset_comparison (region_offset lhs_offset,
+			       enum tree_code op,
+			       region_offset rhs_offset,
+			       const region_model &model)
+{
+  /* Try to determine if they're the same base region.  */
+  const tristate same_base_region
+    = model.get_store ()->eval_alias (lhs_offset.get_base_region (),
+				      rhs_offset.get_base_region (),
+				      model);
+
+  /* Try to determine if they're the same offset relative to their
+     base region.  */
+  const tristate same_byte_offset
+    = eval_byte_offset_comparison (lhs_offset, EQ_EXPR, rhs_offset, model);
+
+  /* With that, we might know if they're equal/non-equal.  */
+  const tristate equality = same_base_region.and_(same_byte_offset);
+
+  switch (op)
+    {
+    default:
+      gcc_unreachable ();
+
+    case EQ_EXPR:
+      return equality;
+
+    case NE_EXPR:
+      return equality.not_ ();
+
+    case GE_EXPR:
+    case LE_EXPR:
+      if (equality.is_true ())
+	return tristate (true);
+      else if (same_base_region.is_true ())
+	return eval_byte_offset_comparison (lhs_offset, op, rhs_offset, model);
+      else
+	return tristate::unknown ();
+
+    case GT_EXPR:
+    case LT_EXPR:
+      if (equality.is_true ())
+	return tristate (false);
+      else if (same_base_region.is_true ())
+	return eval_byte_offset_comparison (lhs_offset, op, rhs_offset, model);
+      else
+	return tristate::unknown ();
+    }
 }
 
 /* class region and its various subclasses.  */
@@ -1102,7 +1225,7 @@ region::accept (visitor *v) const
     m_parent->accept (v);
 }
 
-/* Return true if this is a symbolic region for deferencing an
+/* Return true if this is a symbolic region for dereferencing an
    unknown ptr.
    We shouldn't attempt to bind values for this region (but
    can unbind values for other regions).  */
@@ -1713,15 +1836,15 @@ const svalue *
 decl_region::calc_svalue_for_constructor (tree ctor,
 					  region_model_manager *mgr) const
 {
-  /* Create a binding map, applying ctor to it, using this
+  /* Create a concrete_binding_map, applying ctor to it, using this
      decl_region as the base region when building child regions
      for offset calculations.  */
-  binding_map map (*mgr->get_store_manager ());
+  concrete_binding_map map;
   if (!map.apply_ctor_to_region (this, ctor, mgr))
     return mgr->get_or_create_unknown_svalue (get_type ());
 
   /* Return a compound svalue for the map we built.  */
-  return mgr->get_or_create_compound_svalue (get_type (), map);
+  return mgr->get_or_create_compound_svalue (get_type (), std::move (map));
 }
 
 /* Get an svalue for CTOR, a CONSTRUCTOR for this region's decl.  */
@@ -1778,7 +1901,7 @@ decl_region::get_svalue_for_initializer (region_model_manager *mgr) const
       binding_cluster c (*mgr->get_store_manager (), this);
       c.zero_fill_region (mgr->get_store_manager (), this);
       return mgr->get_or_create_compound_svalue (TREE_TYPE (m_decl),
-						 c.get_map ());
+						 c.get_map ().get_concrete_bindings ());
     }
 
   /* LTO can write out error_mark_node as the DECL_INITIAL for simple scalar

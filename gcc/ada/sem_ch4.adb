@@ -1812,7 +1812,7 @@ package body Sem_Ch4 is
         and then Has_Static_Predicate_Aspect (Exp_Type)
         and then Preanalysis_Active
       then
-         null;
+         Analyze_Choices (Alternatives (N), Exp_Type);
 
       --  Call Analyze_Choices and Check_Choices to do the rest of the work
 
@@ -2482,6 +2482,8 @@ package body Sem_Ch4 is
          Error_Msg_N ("object renaming or constant declaration expected", A);
       end Check_Action_OK;
 
+      --  Local variables
+
       A        : Node_Id;
       EWA_Scop : Entity_Id;
 
@@ -2496,6 +2498,8 @@ package body Sem_Ch4 is
       Set_Scope  (EWA_Scop, Current_Scope);
       Set_Parent (EWA_Scop, N);
       Push_Scope (EWA_Scop);
+
+      Set_Scope_Link (N, EWA_Scop);
 
       --  If this Expression_With_Actions node comes from source, then it
       --  represents a declare_expression; increment the counter to take note
@@ -2514,11 +2518,13 @@ package body Sem_Ch4 is
 
       Analyze_Expression (Expression (N));
       Set_Etype (N, Etype (Expression (N)));
-      End_Scope;
 
       if Comes_From_Source (N) then
          In_Declare_Expr := In_Declare_Expr - 1;
       end if;
+
+      pragma Assert (Current_Scope = Scope_Link (N));
+      End_Scope;
    end Analyze_Expression_With_Actions;
 
    ---------------------------
@@ -4528,9 +4534,36 @@ package body Sem_Ch4 is
       Expr : constant Node_Id   := Expression (N);
       Mark : constant Entity_Id := Subtype_Mark (N);
 
-      I    : Interp_Index;
-      It   : Interp;
-      T    : Entity_Id;
+      function Same_Class_Wide_Type (Typ, CW_Typ : Entity_Id) return Boolean;
+      --  Return whether Typ is the same class-wide type as CW_Typ. This is
+      --  essentially an equality test modulo the Non_Limited_View attribute.
+
+      --------------------------
+      -- Same_Class_Wide_Type --
+      --------------------------
+
+      function Same_Class_Wide_Type (Typ, CW_Typ : Entity_Id) return Boolean is
+         Btyp : constant Entity_Id := Base_Type (Typ);
+
+      begin
+         if Ekind (Btyp) /= E_Class_Wide_Type then
+            return False;
+         end if;
+
+         if Has_Non_Limited_View (Btyp) then
+            return Non_Limited_View (Btyp) = Base_Type (CW_Typ);
+         else
+            return Btyp = Base_Type (CW_Typ);
+         end if;
+      end Same_Class_Wide_Type;
+
+      --  Local variables
+
+      I  : Interp_Index;
+      It : Interp;
+      T  : Entity_Id;
+
+   --  Start of processing for Analyze_Qualified_Expression
 
    begin
       Find_Type (Mark);
@@ -4569,7 +4602,7 @@ package body Sem_Ch4 is
 
       if Is_Class_Wide_Type (T) then
          if not Is_Overloaded (Expr) then
-            if Base_Type (Etype (Expr)) /= Base_Type (T)
+            if not Same_Class_Wide_Type (Etype (Expr), T)
               and then Etype (Expr) /= Raise_Type
             then
                if Nkind (Expr) = N_Aggregate then
@@ -4583,7 +4616,7 @@ package body Sem_Ch4 is
             Get_First_Interp (Expr, I, It);
 
             while Present (It.Nam) loop
-               if Base_Type (It.Typ) /= Base_Type (T) then
+               if not Same_Class_Wide_Type (It.Typ, T) then
                   Remove_Interp (I);
                end if;
 
@@ -4637,6 +4670,7 @@ package body Sem_Ch4 is
 
       Cond    : constant Node_Id := Condition (N);
       Loc     : constant Source_Ptr := Sloc (N);
+      Filter  : Node_Id;
       Loop_Id : Entity_Id;
       QE_Scop : Entity_Id;
 
@@ -4732,8 +4766,10 @@ package body Sem_Ch4 is
 
       if Present (Iterator_Specification (N)) then
          Loop_Id := Defining_Identifier (Iterator_Specification (N));
+         Filter  := Iterator_Filter (Iterator_Specification (N));
       else
          Loop_Id := Defining_Identifier (Loop_Parameter_Specification (N));
+         Filter  := Iterator_Filter (Loop_Parameter_Specification (N));
       end if;
 
       declare
@@ -4782,11 +4818,17 @@ package body Sem_Ch4 is
       begin
          if Warn_On_Suspicious_Contract
            and then not Is_Internal_Name (Chars (Loop_Id))
+           and then not Has_Junk_Name (Loop_Id)
          then
-            if not Referenced (Loop_Id, Cond) then
-               Error_Msg_N ("?.t?unused variable &", Loop_Id);
-            else
+            --  If there is a filter, then it is less clear whether the loop
+            --  variable is used or not; just ignore this case, for simplicity.
+
+            if Present (Filter) then
+               null;
+            elsif Referenced (Loop_Id, Cond) then
                Check_Subexpr (Cond, Kind => Full);
+            elsif not Is_Trivial_Boolean (Cond) then
+               Error_Msg_N ("?.t?unused variable &", Loop_Id);
             end if;
          end if;
       end;

@@ -185,6 +185,10 @@ along with GCC; see the file COPYING3.  If not see
 #define m_ZNVER (m_ZNVER1 | m_ZNVER2 | m_ZNVER3 | m_ZNVER4 | m_ZNVER5 | m_ZNVER6)
 #define m_AMD_MULTIPLE (m_ATHLON_K8 | m_AMDFAM10 | m_BDVER | m_BTVER \
 			| m_ZNVER)
+#define m_C86_4G_M4 (HOST_WIDE_INT_1U<<PROCESSOR_C86_4G_M4)
+#define m_C86_4G_M6 (HOST_WIDE_INT_1U<<PROCESSOR_C86_4G_M6)
+#define m_C86_4G_M7 (HOST_WIDE_INT_1U<<PROCESSOR_C86_4G_M7)
+#define m_C86_4G (m_C86_4G_M4 | m_C86_4G_M6 | m_C86_4G_M7)
 
 #define m_GENERIC (HOST_WIDE_INT_1U<<PROCESSOR_GENERIC)
 
@@ -814,7 +818,10 @@ static const struct processor_costs *processor_cost_table[] =
   &znver3_cost,		/* PROCESSOR_ZNVER3.		*/
   &znver4_cost,		/* PROCESSOR_ZNVER4.		*/
   &znver5_cost,		/* PROCESSOR_ZNVER5.		*/
-  &znver5_cost		/* PROCESSOR_ZNVER6.		*/
+  &znver5_cost,		/* PROCESSOR_ZNVER6.		*/
+  &c86_4g_m4_cost,	/* PROCESSOR_C86_4G_M4.		*/
+  &c86_4g_m6_cost,	/* PROCESSOR_C86_4G_M6.		*/
+  &c86_4g_m7_cost	/* PROCESSOR_C86_4G_M7.		*/
 };
 
 /* Guarantee that the array is aligned with enum processor_type.  */
@@ -871,7 +878,7 @@ ix86_function_specific_restore (struct gcc_options *opts,
   opts->x_ix86_tune_memset_strategy = ptr->x_ix86_tune_memset_strategy;
   opts->x_ix86_tune_no_default = ptr->x_ix86_tune_no_default;
   ix86_tune_cost = processor_cost_table[ix86_tune];
-  /* TODO: ix86_cost should be chosen at instruction or function granuality
+  /* TODO: ix86_cost should be chosen at instruction or function granularity
      so for cold code we use size_cost even in !optimize_size compilation.  */
   if (opts->x_optimize_size)
     ix86_cost = &ix86_size_cost;
@@ -1447,7 +1454,7 @@ ix86_valid_target_attribute_tree (tree fndecl, tree args,
 	opts->x_ix86_tune_string
 	  = ggc_strdup (option_strings[IX86_FUNCTION_SPECIFIC_TUNE]);
       /* If we have explicit arch string and no tune string specified, set
-	 tune_string to NULL and later it will be overriden by arch_string
+	 tune_string to NULL and later it will be overridden by arch_string
 	 so target clones can get proper optimization.  */
       else if (option_strings[IX86_FUNCTION_SPECIFIC_ARCH]
 	       || orig_tune_defaulted)
@@ -1952,7 +1959,7 @@ ix86_override_options_after_change_1 (struct gcc_options *opts,
 	OPTS (flag_web) = OPTS (flag_unroll_loops);
       if (!OPTS_SET_P (flag_rename_registers))
 	OPTS (flag_rename_registers) = OPTS (flag_unroll_loops);
-      /* -fcunroll-grow-size default follws -f[no]-unroll-loops.  */
+      /* -fcunroll-grow-size default follows -f[no]-unroll-loops.  */
       if (!OPTS_SET_P (flag_cunroll_grow_size))
 	OPTS (flag_cunroll_grow_size)
 	  = (OPTS (flag_unroll_loops)
@@ -2525,7 +2532,7 @@ ix86_option_override_internal (bool main_args_p,
   ix86_override_options_after_change_1 (opts, opts_set);
 
   ix86_tune_cost = processor_cost_table[ix86_tune];
-  /* TODO: ix86_cost should be chosen at instruction or function granuality
+  /* TODO: ix86_cost should be chosen at instruction or function granularity
      so for cold code we use size_cost even in !optimize_size compilation.  */
   if (opts->x_optimize_size)
     ix86_cost = &ix86_size_cost;

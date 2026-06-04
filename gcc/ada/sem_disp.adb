@@ -96,6 +96,14 @@ package body Sem_Disp is
    --  Check whether a primitive operation is inherited from an operation
    --  declared in the visible part of its package.
 
+   procedure Override_Dispatching_Operation
+     (Tagged_Type : Entity_Id;
+      Prev_Op     : Entity_Id;
+      New_Op      : Entity_Id);
+   --  Replace an implicit dispatching operation of the type Tagged_Type
+   --  with an explicit one. Prev_Op is an inherited primitive operation which
+   --  is overridden by the explicit declaration of New_Op.
+
    -------------------------------
    -- Add_Dispatching_Operation --
    -------------------------------
@@ -292,14 +300,19 @@ package body Sem_Disp is
      (Typ  : Entity_Id;
       Subp : Entity_Id)
    is
-      Formal    : Entity_Id;
-      Ctrl_Type : Entity_Id;
+      Ctrl_Type  : Entity_Id;
+      Formal     : Entity_Id;
+      Ovr_Formal : Entity_Id := Empty;
 
    begin
       --  We skip the check for thunks
 
       if Is_Thunk (Subp) then
          return;
+      end if;
+
+      if Present (Overridden_Operation (Subp)) then
+         Ovr_Formal := First_Formal (Overridden_Operation (Subp));
       end if;
 
       Formal := First_Formal (Subp);
@@ -309,7 +322,29 @@ package body Sem_Disp is
          --  Common Ada case
 
          if not Has_First_Controlling_Parameter_Aspect (Typ) then
-            Ctrl_Type := Check_Controlling_Type (Etype (Formal), Subp);
+
+            --  Formals of a type specifying aspect First_Controlling_Parameter
+            --  are not candidate controlling parameters when they are not
+            --  the first formal of the dispatching primitive. For example:
+            --
+            --     type T1 is tagged ...
+            --     type T2 is tagged ... with First_Controlling_Parameter;
+            --     procedure Prim (X : T1; Y : T2);
+            --
+            --  When T2 does not have the First_Controlling_Parameter aspect
+            --  this example is rejected because a primitive can be dispatching
+            --  in only one type. However, T2 cannot be a candidate controlling
+            --  type for Prim because Y is not its first formal. Therefore,
+            --  this example is accepted.
+
+            if Is_Tagged_Type (Etype (Formal))
+              and then Has_First_Controlling_Parameter_Aspect (Etype (Formal))
+              and then Formal /= First_Formal (Subp)
+            then
+               null;
+            else
+               Ctrl_Type := Check_Controlling_Type (Etype (Formal), Subp);
+            end if;
 
          --  Type with the First_Controlling_Parameter aspect: for overriding
          --  primitives of a parent type that lacks this aspect, we cannot be
@@ -332,13 +367,19 @@ package body Sem_Disp is
              (Ekind (Subp) = E_Function
                 and then Is_Operator_Name (Chars (Subp)))
          then
-            Ctrl_Type := Check_Controlling_Type (Etype (Formal), Subp);
+            --  Overriding a parent primitive
+
+            if Present (Ovr_Formal)
+              and then not Is_Controlling_Formal (Ovr_Formal)
+            then
+               null;
+            else
+               Ctrl_Type := Check_Controlling_Type (Etype (Formal), Subp);
+            end if;
          end if;
 
          if Present (Ctrl_Type) then
-
-            --  Obtain the full type in case we are looking at an incomplete
-            --  view.
+            --  Use the full view for an incomplete type
 
             if Ekind (Ctrl_Type) = E_Incomplete_Type
               and then Present (Full_View (Ctrl_Type))
@@ -346,8 +387,7 @@ package body Sem_Disp is
                Ctrl_Type := Full_View (Ctrl_Type);
             end if;
 
-            --  When controlling type is concurrent and declared within a
-            --  generic or inside an instance use corresponding record type.
+            --  Use the corresponding record type for a concurrent type
 
             if Is_Concurrent_Type (Ctrl_Type)
               and then Present (Corresponding_Record_Type (Ctrl_Type))
@@ -415,6 +455,10 @@ package body Sem_Disp is
             end if;
          end if;
 
+         if Present (Overridden_Operation (Subp)) then
+            Next_Formal (Ovr_Formal);
+         end if;
+
          Next_Formal (Formal);
       end loop;
 
@@ -439,6 +483,22 @@ package body Sem_Disp is
          Ctrl_Type := Check_Controlling_Type (Etype (Subp), Subp);
 
          if Present (Ctrl_Type) then
+            --  Use the full view for an incomplete type
+
+            if Ekind (Ctrl_Type) = E_Incomplete_Type
+              and then Present (Full_View (Ctrl_Type))
+            then
+               Ctrl_Type := Full_View (Ctrl_Type);
+            end if;
+
+            --  Use the corresponding record type for a concurrent type
+
+            if Is_Concurrent_Type (Ctrl_Type)
+              and then Present (Corresponding_Record_Type (Ctrl_Type))
+            then
+               Ctrl_Type := Corresponding_Record_Type (Ctrl_Type);
+            end if;
+
             if Ctrl_Type = Typ then
                Set_Has_Controlling_Result (Subp);
 
@@ -1147,8 +1207,6 @@ package body Sem_Disp is
    ---------------------------------
 
    procedure Check_Dispatching_Operation (Subp, Old_Subp : Entity_Id) is
-      function Is_Access_To_Subprogram_Wrapper (E : Entity_Id) return Boolean;
-      --  Return True if E is an access to subprogram wrapper
 
       procedure Warn_On_Late_Primitive_After_Private_Extension
         (Typ  : Entity_Id;
@@ -1156,22 +1214,6 @@ package body Sem_Disp is
       --  Prim is a dispatching primitive of the tagged type Typ. Warn on Prim
       --  if it is a public primitive defined after some private extension of
       --  the tagged type.
-
-      -------------------------------------
-      -- Is_Access_To_Subprogram_Wrapper --
-      -------------------------------------
-
-      function Is_Access_To_Subprogram_Wrapper (E : Entity_Id) return Boolean
-      is
-         Decl_N : constant Node_Id := Unit_Declaration_Node (E);
-         Par_N  : constant Node_Id := Parent (List_Containing (Decl_N));
-
-      begin
-         --  Access to subprogram wrappers are declared in the freezing actions
-
-         return Nkind (Par_N) = N_Freeze_Entity
-           and then Ekind (Entity (Par_N)) = E_Access_Subprogram_Type;
-      end Is_Access_To_Subprogram_Wrapper;
 
       ----------------------------------------------------
       -- Warn_On_Late_Primitive_After_Private_Extension --
@@ -1246,9 +1288,7 @@ package body Sem_Disp is
 
       --  Wrappers of access to subprograms are not primitive subprograms.
 
-      elsif Is_Wrapper (Subp)
-        and then Is_Access_To_Subprogram_Wrapper (Subp)
-      then
+      elsif Is_Access_To_Subprogram_Wrapper (Subp) then
          return;
       end if;
 
@@ -2400,6 +2440,14 @@ package body Sem_Disp is
             pragma Assert (False);
             return Empty;
          end if;
+
+      --  Deal with controlling function wrappers
+
+      elsif Ekind (Subp) = E_Function
+        and then Has_Controlling_Result (Subp)
+        and then Is_Wrapper (Subp)
+      then
+         return Check_Controlling_Type (Etype (Subp), Subp);
 
       --  General case
 

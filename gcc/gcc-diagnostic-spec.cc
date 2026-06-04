@@ -59,7 +59,6 @@ nowarn_spec_t::nowarn_spec_t (opt_code opt)
     case OPT_Woverflow:
     case OPT_Wshift_count_negative:
     case OPT_Wshift_count_overflow:
-    case OPT_Wstrict_overflow:
       m_bits = NW_VFLOW;
       break;
 
@@ -121,7 +120,7 @@ nowarn_spec_t::nowarn_spec_t (opt_code opt)
 GTY(()) nowarn_map_t *nowarn_map;
 
 /* Return the no-warning disposition for location LOC and option OPT
-   or for all/any otions by default.  */
+   or for all/any options by default.  */
 
 bool
 warning_suppressed_at (location_t loc, opt_code opt /* = all_warnings */)
@@ -140,7 +139,7 @@ warning_suppressed_at (location_t loc, opt_code opt /* = all_warnings */)
   return false;
 }
 
- /* Change the supression of warnings for location LOC.
+ /* Change the suppression of warnings for location LOC.
     OPT controls which warnings are affected.
     The wildcard OPT of -1 controls all warnings.
     If SUPP is true (the default), enable the suppression of the warnings.

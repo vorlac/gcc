@@ -37,6 +37,7 @@ with Elists;         use Elists;
 with Errout;         use Errout;
 with Eval_Fat;
 with Exp_Dist;       use Exp_Dist;
+with Exp_Put_Image;  use Exp_Put_Image;
 with Exp_Util;       use Exp_Util;
 with Expander;       use Expander;
 with Freeze;         use Freeze;
@@ -1518,6 +1519,8 @@ package body Sem_Attr is
          if Nkind (Subp_Decl) not in N_Abstract_Subprogram_Declaration
                                    | N_Entry_Declaration
                                    | N_Expression_Function
+                                   | N_Formal_Abstract_Subprogram_Declaration
+                                   | N_Formal_Concrete_Subprogram_Declaration
                                    | N_Full_Type_Declaration
                                    | N_Generic_Subprogram_Declaration
                                    | N_Subprogram_Body
@@ -6173,7 +6176,13 @@ package body Sem_Attr is
                   --  Otherwise the prefix denotes some unrelated function
 
                   else
-                     Error_Msg_Name_2 := Chars (Spec_Id);
+                     if Is_Access_To_Subprogram_Wrapper (Spec_Id) then
+                        Error_Msg_Name_2 :=
+                          Chars (Etype (Last_Formal (Spec_Id)));
+                     else
+                        Error_Msg_Name_2 := Chars (Spec_Id);
+                     end if;
+
                      Error_Attr
                        ("incorrect prefix for attribute %, expected %", P);
                   end if;
@@ -6184,8 +6193,17 @@ package body Sem_Attr is
                elsif Is_Access_Subprogram_Type (Pref_Id) then
                   if Pref_Id = Spec_Id then
                      Set_Etype (N, Etype (Designated_Type (Spec_Id)));
+
+                  --  Otherwise the prefix denotes some unrelated function
+
                   else
-                     Error_Msg_Name_2 := Chars (Spec_Id);
+                     if Is_Access_To_Subprogram_Wrapper (Spec_Id) then
+                        Error_Msg_Name_2 :=
+                          Chars (Etype (Last_Formal (Spec_Id)));
+                     else
+                        Error_Msg_Name_2 := Chars (Spec_Id);
+                     end if;
+
                      Error_Attr
                        ("incorrect prefix for attribute %, expected %", P);
                   end if;
@@ -8096,6 +8114,10 @@ package body Sem_Attr is
       function Mantissa return Uint;
       --  Returns the Mantissa value for the prefix type
 
+      procedure Fold_Compile_Time_Known_Enumeration_Image (Expr : Node_Id);
+      --  Folds 'Image of a compile-time known enumeration value into a string
+      --  literal whose contents depend on whether names are available.
+
       procedure Set_Bounds;
       --  Used for First, Last and Length attributes applied to an array or
       --  array subtype. Sets the variables Lo_Bound and Hi_Bound to the low
@@ -8192,6 +8214,37 @@ package body Sem_Attr is
              and then
            Compile_Time_Known_Value (Type_High_Bound (Typ));
       end Compile_Time_Known_Bounds;
+
+      -----------------------------------------------
+      -- Fold_Compile_Time_Known_Enumeration_Image --
+      -----------------------------------------------
+
+      procedure Fold_Compile_Time_Known_Enumeration_Image (Expr : Node_Id) is
+         Lit : constant Entity_Id := Expr_Value_E (Expr);
+         Typ : constant Entity_Id := First_Subtype (Etype (Expr));
+
+      begin
+         pragma Assert (Ekind (Lit) = E_Enumeration_Literal);
+
+         Start_String;
+
+         --  If Discard_Names is in effect for the type, either specifically
+         --  or globally, then we emit the numeric representation of the 'Pos
+         --  attribute of the enumeration literal with a leading space.
+
+         if Discard_Names (Typ) or else Global_Discard_Names then
+            UI_Image (Enumeration_Pos (Lit), Decimal);
+            Store_String_Char  (' ');
+            Store_String_Chars (UI_Image_Buffer (1 .. UI_Image_Length));
+         else
+            Get_Unqualified_Decoded_Name_String (Chars (Lit));
+            Set_Casing (All_Upper_Case);
+            Store_String_Chars (Name_Buffer (1 .. Name_Len));
+         end if;
+
+         Rewrite (N, Make_String_Literal (Loc, Strval => End_String));
+         Analyze_And_Resolve (N, Standard_String);
+      end Fold_Compile_Time_Known_Enumeration_Image;
 
       ----------------
       -- Fore_Value --
@@ -8478,43 +8531,20 @@ package body Sem_Attr is
 
       --  Attribute 'Img applied to a static enumeration value is static, and
       --  we will do the folding right here (things get confused if we let this
-      --  case go through the normal circuitry).
+      --  case go through the normal circuitry) provided that the default Image
+      --  implementation has not been overridden. Likewise for 'Image applied
+      --  to an object, except that it is never static, see a few lines below.
 
-      if Id = Attribute_Img
-        and then Is_Entity_Name (P)
-        and then Is_Enumeration_Type (Etype (Entity (P)))
-        and then Is_OK_Static_Expression (P)
+      if (Id = Attribute_Img
+           or else (Id = Attribute_Image and then Is_Object_Reference (P)))
+        and then Is_Enumeration_Type (Etype (P))
+        and then not Is_Character_Type (Etype (P))
+        and then Compile_Time_Known_Value (P)
+        and then not Image_Must_Call_Put_Image (N)
       then
-         declare
-            Lit : constant Entity_Id := Expr_Value_E (P);
-            Typ : constant Entity_Id := Etype (Entity (P));
-            Str : String_Id;
-
-         begin
-            Start_String;
-
-            --  If Discard_Names is in effect for the type, then we emit the
-            --  numeric representation of the prefix literal 'Pos attribute,
-            --  prefixed with a single space.
-
-            if Discard_Names (Typ) then
-               UI_Image (Enumeration_Pos (Lit), Decimal);
-               Store_String_Char  (' ');
-               Store_String_Chars (UI_Image_Buffer (1 .. UI_Image_Length));
-            else
-               Get_Unqualified_Decoded_Name_String (Chars (Lit));
-               Set_Casing (All_Upper_Case);
-               Store_String_Chars (Name_Buffer (1 .. Name_Len));
-            end if;
-
-            Str := End_String;
-
-            Rewrite (N, Make_String_Literal (Loc, Strval => Str));
-            Analyze_And_Resolve (N, Standard_String);
-            Set_Is_Static_Expression (N, True);
-         end;
-
-         return;
+         Fold_Compile_Time_Known_Enumeration_Image (P);
+         Set_Is_Static_Expression
+           (N, Id = Attribute_Img and then Is_OK_Static_Expression (P));
       end if;
 
       --  Special processing for cases where the prefix is an object or value,
@@ -9716,32 +9746,19 @@ package body Sem_Attr is
       -- Image --
       -----------
 
-      --  Image is a scalar attribute, but is never static, because it is
-      --  not a static function (having a non-scalar argument (RM 4.9(22)).
+      --  Image is a scalar attribute, but is never static, because it is not
+      --  a static function (as having a non-scalar result type (RM 4.9(22)).
       --  However, we can constant-fold the image of an enumeration literal
-      --  if names are available and default Image implementation has not
-      --  been overridden.
+      --  if the default Image implementation has not been overridden.
 
       when Attribute_Image =>
-         if Is_Entity_Name (E1)
-           and then Ekind (Entity (E1)) = E_Enumeration_Literal
-           and then not Discard_Names (First_Subtype (Etype (E1)))
-           and then not Global_Discard_Names
-           and then not Has_Aspect (Etype (E1), Aspect_Put_Image)
+         if Is_Enumeration_Type (Etype (P))
+           and then not Is_Character_Type (Etype (P))
+           and then Compile_Time_Known_Value (E1)
+           and then not Image_Must_Call_Put_Image (N)
          then
-            declare
-               Lit : constant Entity_Id := Entity (E1);
-               Str : String_Id;
-            begin
-               Start_String;
-               Get_Unqualified_Decoded_Name_String (Chars (Lit));
-               Set_Casing (All_Upper_Case);
-               Store_String_Chars (Name_Buffer (1 .. Name_Len));
-               Str := End_String;
-               Rewrite (N, Make_String_Literal (Loc, Strval => Str));
-               Analyze_And_Resolve (N, Standard_String);
-               Set_Is_Static_Expression (N, False);
-            end;
+            Fold_Compile_Time_Known_Enumeration_Image (E1);
+            Set_Is_Static_Expression (N, False);
          end if;
 
       -------------------
@@ -11705,8 +11722,16 @@ package body Sem_Attr is
                   --  spec expressions). The profile of the subprogram is not
                   --  frozen at this point.
 
+                  --  Taking the 'Access of an expression function freezes its
+                  --  expression (RM 13.14(10.3)).
+
                   if not Preanalysis_Active then
-                     Freeze_Before (N, Entity (P), Do_Freeze_Profile => False);
+                     if Is_Expression_Function (Entity (P)) then
+                        Freeze_Expression (P);
+                     else
+                        Freeze_Before
+                          (N, Entity (P), Do_Freeze_Profile => False);
+                     end if;
                   end if;
 
                --  If it is a type, there is nothing to resolve.
@@ -11715,7 +11740,12 @@ package body Sem_Attr is
 
                elsif Is_Overloadable (Entity (P)) then
                   if not Preanalysis_Active then
-                     Freeze_Before (N, Entity (P), Do_Freeze_Profile => False);
+                     if Is_Expression_Function (Entity (P)) then
+                        Freeze_Expression (P);
+                     else
+                        Freeze_Before
+                          (N, Entity (P), Do_Freeze_Profile => False);
+                     end if;
                   end if;
 
                --  Nothing to do if prefix is a type name
@@ -12496,8 +12526,8 @@ package body Sem_Attr is
                   Scop      : constant Entity_Id := Scope (Subp_Id);
                   Subp_Decl : constant Node_Id   :=
                                 Unit_Declaration_Node (Subp_Id);
-                  Flag_Id   : Entity_Id;
-                  Subp_Body : Node_Id;
+
+                  Flag_Id : Entity_Id;
 
                --  If the access has been taken and the body of the subprogram
                --  has not been see yet, indirect calls must be protected with
@@ -12549,58 +12579,6 @@ package body Sem_Attr is
                      --  where processing depends on correct scope setting.
 
                      Set_Scope (Flag_Id, Scop);
-                  end if;
-
-                  --  Taking the 'Access of an expression function freezes its
-                  --  expression (RM 13.14 10.3/3). This does not apply to an
-                  --  expression function that acts as a completion because the
-                  --  generated body is immediately analyzed and the expression
-                  --  is automatically frozen.
-
-                  if Is_Expression_Function (Subp_Id)
-                    and then Present (Corresponding_Body (Subp_Decl))
-                  then
-                     Subp_Body :=
-                       Unit_Declaration_Node (Corresponding_Body (Subp_Decl));
-
-                     --  The body has already been analyzed when the expression
-                     --  function acts as a completion.
-
-                     if Analyzed (Subp_Body) then
-                        null;
-
-                     --  Attribute 'Access may appear within the generated body
-                     --  of the expression function subject to the attribute:
-
-                     --    function F is (... F'Access ...);
-
-                     --  If the expression function is on the scope stack, then
-                     --  the body is currently being analyzed. Do not reanalyze
-                     --  it because this will lead to infinite recursion.
-
-                     elsif In_Open_Scopes (Subp_Id) then
-                        null;
-
-                     --  If reference to the expression function appears in an
-                     --  inner scope, for example as an actual in an instance,
-                     --  this is not a freeze point either.
-
-                     elsif Scope (Subp_Id) /= Current_Scope then
-                        null;
-
-                     --  Dispatch tables are not a freeze point either
-
-                     elsif Nkind (Parent (N)) = N_Unchecked_Type_Conversion
-                       and then Is_Dispatch_Table_Entity (Etype (Parent (N)))
-                     then
-                        null;
-
-                      --  Analyze the body of the expression function to freeze
-                      --  the expression.
-
-                     else
-                        Analyze (Subp_Body);
-                     end if;
                   end if;
                end;
             end if;

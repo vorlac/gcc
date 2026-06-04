@@ -4885,7 +4885,7 @@ type_valid_for_vector_size (tree type, tree atname, tree args,
       || !tree_fits_uhwi_p (TYPE_SIZE_UNIT (type))
       || TREE_CODE (type) == BOOLEAN_TYPE
       || hardbool_p
-      || TREE_CODE (type) == BITINT_TYPE)
+      || BITINT_TYPE_P (type))
     {
       if (error_p)
 	error ("invalid vector type for attribute %qE", atname);
@@ -5407,7 +5407,7 @@ append_access_attr (tree node[3], tree attrs, const char *attrstr,
   rdwr_map new_idxs;
   init_attr_rdwr_indices (&new_idxs, ataccess);
 
-  /* The current access specification alrady applied.  */
+  /* The current access specification already applied.  */
   rdwr_map cur_idxs;
   init_attr_rdwr_indices (&cur_idxs, attrs);
 
@@ -5613,9 +5613,9 @@ append_access_attr_idxs (tree node[3], tree attrs, const char *attrstr,
 
 /* Handle the access attribute for function type NODE[0], with the function
    DECL optionally in NODE[1].  The handler is called both in response to
-   an explict attribute access on a declaration with a mode and one or two
+   an explicit attribute access on a declaration with a mode and one or two
    positional arguments, and for internally synthesized access specifications
-   with a string argument optionally followd by a DECL or expression
+   with a string argument optionally followed by a DECL or expression
    representing a VLA bound.  To speed up parsing, the handler transforms
    the attribute and its arguments into a string.  */
 
@@ -6468,12 +6468,18 @@ handle_optimize_attribute (tree *node, tree name, tree args,
   else
     {
       struct cl_optimization cur_opts;
+      struct cl_target_option cur_target;
       tree old_opts = DECL_FUNCTION_SPECIFIC_OPTIMIZATION (*node);
+      tree old_target = DECL_FUNCTION_SPECIFIC_TARGET (*node);
 
       /* Save current options.  */
       cl_optimization_save (&cur_opts, &global_options, &global_options_set);
-      tree prev_target_node = build_target_option_node (&global_options,
-							&global_options_set);
+      cl_target_option_save (&cur_target, &global_options, &global_options_set);
+
+      tree prev_target_node
+	= old_target
+	    ? old_target
+	    : build_target_option_node (&global_options, &global_options_set);
 
       /* If we previously had some optimization options, use them as the
 	 default.  */
@@ -6492,6 +6498,10 @@ handle_optimize_attribute (tree *node, tree name, tree args,
 	cl_optimization_restore (&global_options, &global_options_set,
 				 TREE_OPTIMIZATION (old_opts));
 
+      if (old_target)
+	cl_target_option_restore (&global_options, &global_options_set,
+				  TREE_TARGET_OPTION (old_target));
+
       /* Parse options, and update the vector.  */
       parse_optimize_options (args, true);
       DECL_FUNCTION_SPECIFIC_OPTIMIZATION (*node)
@@ -6509,7 +6519,7 @@ handle_optimize_attribute (tree *node, tree name, tree args,
       cl_optimization_restore (&global_options, &global_options_set,
 			       &cur_opts);
       cl_target_option_restore (&global_options, &global_options_set,
-				TREE_TARGET_OPTION (prev_target_node));
+				&cur_target);
 
       if (saved_global_options != NULL)
 	{
@@ -7031,7 +7041,7 @@ has_attribute (location_t atloc, tree t, tree attr, tree (*convert)(tree))
 		  if (TREE_CODE (v1) == IDENTIFIER_NODE
 		      || TREE_CODE (v2) == IDENTIFIER_NODE)
 		    /* Two identifiers are the same if their values are
-		       equal (that's handled above).  Otherwise ther are
+		       equal (that's handled above).  Otherwise they are
 		       either not the same or oneis not an identifier.  */
 		    return false;
 

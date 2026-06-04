@@ -294,9 +294,12 @@ public:
     : m_to_int_mode (to_int_mode)
   {}
 
-  unsigned int call_properties (const function_instance &) const override
+  unsigned int call_properties (const function_instance &fi) const override
   {
-    return CP_WRITE_MEMORY;
+    if (fi.mode_suffix_id == MODE_wb)
+      return CP_WRITE_MEMORY | CP_READ_MEMORY;
+    else
+      return CP_WRITE_MEMORY;
   }
 
   machine_mode memory_vector_mode (const function_instance &fi) const override
@@ -478,6 +481,14 @@ public:
     unsigned int element_bits = fi.type_suffix (0).element_bits;
     type_suffix_index suffix = find_type_suffix (TYPE_unsigned, element_bits);
     return type_suffixes[suffix].vector_mode;
+  }
+
+  unsigned int call_properties (const function_instance &fi) const override
+  {
+    if (fi.mode_suffix_id == MODE_wb)
+      return CP_WRITE_MEMORY | CP_READ_MEMORY;
+    else
+      return CP_READ_MEMORY;
   }
 
   rtx expand (function_expander &e) const override
@@ -742,7 +753,7 @@ public:
 
 /* Map the vidup / vddup function directly to CODE (UNSPEC, M) where M is the
    vector mode associated with type suffix 0.  We need this special case
-   because in MODE_wb the builtins derefrence the first parameter and update
+   because in MODE_wb the builtins dereference the first parameter and update
    its contents.  We also have to insert the two additional parameters needed
    by the builtins compared to the intrinsics.  In wrapping mode, we have to
    match the 'hack' to make sure the 'wrap' parameters is in odd register.  */
@@ -875,7 +886,7 @@ public:
 
 /* Map the vshlc function directly to CODE (UNSPEC, M) where M is the vector
    mode associated with type suffix 0.  We need this special case because the
-   intrinsics derefrence the second parameter and update its contents.  */
+   intrinsics dereference the second parameter and update its contents.  */
 class vshlc_impl : public function_base
 {
 public:

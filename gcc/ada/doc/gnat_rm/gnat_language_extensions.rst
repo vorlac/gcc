@@ -272,9 +272,9 @@ Examples
       S : Segment := (1 .. 2 => (0, 0));
       T : Triangle := (1 .. 3 => (1 .. 2 => (0, 0)));
    begin
-      S := (S with delta (1).X | (2).Y => 12, (1).Y => 15);
+      S := (S with delta (1).X => 11, (2).Y => 12, (1).Y => 15);
 
-      pragma Assert (S (1).X = 12);
+      pragma Assert (S (1).X = 11);
       pragma Assert (S (2).Y = 12);
       pragma Assert (S (1).Y = 15);
 
@@ -584,6 +584,30 @@ Restricting the position of controlling parameter offers several advantages:
 
 * The result of a function is never a controlling result.
 
+``Unsigned_Base_Range`` aspect
+------------------------------
+
+A new pragma/aspect, ``Unsigned_Base_Range``, is introduced to explicitly
+enforce the use of an unsigned base type for signed integer types.
+RM-3.5.4(9) mandates a symmetric base range for signed integer types. This
+requirement often requires the use of larger data types for arithmetic
+operations, potentially introducing undesirable run-time overhead and
+performance penalties, particularly in embedded systems. For instance,
+on a 64-bit architecture, a 64-bit multiplication can be performed with
+a single hardware instruction, whereas a 128-bit multiplication requires
+multiple instructions and intermediate steps.
+
+Here is an example of this feature:
+
+.. code-block:: ada
+
+  type Uns_64 is range 0 .. 2 ** 64 - 1
+    with Size => 64,
+         Unsigned_Base_Range => True;
+
+It ensures that arithmetic operations of type ``Uns_64`` are carried
+out using 64 bits.
+
 Generalized Finalization
 ------------------------
 
@@ -611,8 +635,9 @@ Here is the archetypal example:
     procedure Finalize   (Obj : in out T);
     procedure Initialize (Obj : in out T);
 
-The three procedures have the same profile, with a single ``in out`` parameter,
-and also have the same dynamic semantics as for controlled types:
+The three procedures must be primitive operations of ``T`` and have a single
+``in out`` parameter. They need not be all specified by the aspect. If they
+are specified, they have the same dynamic semantics as for controlled types:
 
  - ``Initialize`` is called when an object of type ``T`` is declared without
    initialization expression.
@@ -1501,7 +1526,7 @@ descendant of T (including T itself)
 * shall have a Size that does not exceed the specified value; and
 
 * shall have a (possibly inherited) ``Size'Class`` aspect that does not exceed
-  the specifed value; and
+  the specified value; and
 
 * shall be undiscriminated; and
 
@@ -1746,6 +1771,9 @@ another sequence of statements is completed, whether normally or abnormally.
 
 This feature is similar to the one with the same name in other languages such as Java.
 
+Note that ``finally`` is a keyword but it is not a reserved word. This is a
+configuration that does not exist in standard Ada.
+
 Syntax
 ^^^^^^
 
@@ -1800,7 +1828,8 @@ Destructors
 -----------
 
 The :ada:`Destructor` extension adds a new finalization mechanism that
-significantly differs standard Ada in how it interacts with type derivation.
+significantly differs from standard Ada in how it interacts with type
+derivation.
 
 New syntax is introduced to make it possible to define "destructors" for record
 types, tagged or untagged. Here's a simple example:

@@ -1669,6 +1669,10 @@ extern const char * const reg_note_name[];
      Pseudo registers cannot be mentioned in this list.  */
 #define CALL_INSN_FUNCTION_USAGE(INSN)	XEXP(INSN, 7)
 
+/* Specifies the callee's ABI as an index in the range [0, NUM_ABI_IDS - 1].
+   See function-abi.h for more details.  */
+#define CALL_INSN_ABI_ID(INSN) XCINT(INSN, 8, CALL_INSN)
+
 /* The label-number of a code-label.  The assembler label
    is made from `L' and the label-number printed in decimal.
    Label numbers are unique in a compilation.  */
@@ -3146,7 +3150,7 @@ extern bool const_vec_series_p_1 (const_rtx, rtx *, rtx *);
 
    { B, B + S, B + 2 * S, B + 3 * S, ... }
 
-   for a nonzero S.  Store B and S in *BASE_OUT and *STEP_OUT on sucess.  */
+   for a nonzero S.  Store B and S in *BASE_OUT and *STEP_OUT on success.  */
 
 inline bool
 const_vec_series_p (const_rtx x, rtx *base_out, rtx *step_out)
@@ -3164,7 +3168,7 @@ const_vec_series_p (const_rtx x, rtx *base_out, rtx *step_out)
    { B, B + S, B + 2 * S, B + 3 * S, ... }
 
    where B and S are constant or nonconstant.  Store B and S in
-   *BASE_OUT and *STEP_OUT on sucess.  */
+   *BASE_OUT and *STEP_OUT on success.  */
 
 inline bool
 vec_series_p (const_rtx x, rtx *base_out, rtx *step_out)
@@ -3496,6 +3500,7 @@ public:
 				  rtx, rtx, rtx);
   rtx simplify_relational_operation (rtx_code, machine_mode, machine_mode,
 				     rtx, rtx);
+  rtx simplify_ior_with_common_term (machine_mode, rtx, rtx);
   rtx simplify_subreg (machine_mode, rtx, machine_mode, poly_uint64);
 
   rtx lowpart_subreg (machine_mode, rtx, machine_mode);
@@ -4169,6 +4174,65 @@ extern int reload_completed;
 
 /* Nonzero after thread_prologue_and_epilogue_insns has run.  */
 extern int epilogue_completed;
+
+/* Set to true once the first split pass after register allocation has
+   been run.  Ports can treat that split pass as a "lowering" pass,
+   with some instructions only being valid before the lowering
+   and others only being valid after the lowering.
+
+   One use of this variable is to cope with address calculations during
+   register allocation.  The register allocator needs to be able to perform
+   address arithmetic (such as addition) at arbitrary points in the program,
+   regardless of whether the condition-code flags are live at that point.
+   If a target cannot add without clobbering the condition-code flags,
+   it must either (1) hide the condition-code flags entirely from RTL
+   or (2) ensure that the condition-code flags are never live before
+   or during register allocation.
+
+   (2) requires a boundary between "the condition-code flags are never live"
+   and "the condition-code flags might be live".  reload_completed can be
+   used for this purpose, provided that all clobbers of the CC register
+   are explicit before and during register allocation.
+
+   However, if the condition-code flags are never live before or during
+   register allocation, there is no real need for patterns to have an explicit
+   clobber of the flags at that point.  Not having a clobber would allow more
+   recog attempts to succeed, both before and during register allocation.
+
+   post_ra_split_completed is an alternative boundary to reload_completed.
+   It allows sets and uses of the condition-code flags, such as individual
+   comparison and jump instructions, to be introduced in the first split pass
+   after register allocation, while also allowing new implicit clobbers of
+   the condition-code flags to be introduced at any time before that point.
+
+   Ports that use post_ra_split_completed for this purpose would have an
+   "unlowered" form with the following properties:
+
+   (a) The condition-code flags are never live between instructions.
+       (That is, they are never defined by one instruction and used
+       by another instruction.)
+
+   (b) As a consequence, new clobbers of the condition-code flags
+       can be introduced at any time.
+
+   (c) RTL instruction patterns (such as addition) can omit clobbers of the
+       condition-code flags even if the flags are in fact clobbered.
+
+   In contrast, the "lowered" form would have these properties:
+
+   (d) The condition-code flags can be live between instructions.
+       That is, RTL instruction patterns can set the condition-code flags
+       or use the condition-code flags.
+
+   (e) All clobbers of the condition-code flags must be explicit in the RTL
+       instruction patterns.
+
+   Instructions covered by (c) would require !post_ra_split_completed
+   and would need to be split into instructions that satisfy (d) or (e).
+   Instructions covered by (d) would require post_ra_split_completed,
+   so that they are not accidentally matched before lowering has taken
+   place.  */
+extern bool post_ra_split_completed;
 
 /* Set to 1 while reload_as_needed is operating.
    Required by some machines to handle any generated moves differently.  */

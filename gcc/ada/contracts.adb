@@ -452,6 +452,8 @@ package body Contracts is
 
          if Nkind (Decl) in N_Abstract_Subprogram_Declaration
                           | N_Entry_Declaration
+                          | N_Formal_Abstract_Subprogram_Declaration
+                          | N_Formal_Concrete_Subprogram_Declaration
                           | N_Generic_Subprogram_Declaration
                           | N_Subprogram_Declaration
          then
@@ -751,13 +753,13 @@ package body Contracts is
                   if Freeze_Types
                     and then Present (Corresponding_Aspect (Prag))
                   then
-                     Freeze_Expr_Types
-                       (Def_Id => Subp_Id,
-                        Typ    => Standard_Boolean,
+                     Freeze_Expr_Types_Before
+                       (N      => Bod,
                         Expr   =>
                           Expression
                             (First (Pragma_Argument_Associations (Prag))),
-                        N      => Bod);
+                        Def_Id => Subp_Id,
+                        Typ    => Standard_Boolean);
                   end if;
 
                   Analyze_Pre_Post_Condition_In_Decl_Part (Prag, Freeze_Id);
@@ -2329,7 +2331,7 @@ package body Contracts is
                --  An Initialization procedure must be considered visible even
                --  though it is internally generated.
 
-               if Is_Init_Proc (Defining_Entity (Subp_Decl)) then
+               if Is_Init_Proc (Subp_Id) then
                   return True;
 
                elsif Ekind (Scope (Typ)) /= E_Package then
@@ -2341,10 +2343,8 @@ package body Contracts is
                --  last check.
 
                elsif not Comes_From_Source (Subp_Decl)
-                 and then
-                   (Nkind (Original_Node (Subp_Decl)) /= N_Expression_Function
-                      or else not
-                        Comes_From_Source (Defining_Entity (Subp_Decl)))
+                 and then (not Is_Expression_Function (Subp_Id)
+                            or else not Comes_From_Source (Subp_Id))
                then
                   return False;
 
@@ -2356,8 +2356,7 @@ package body Contracts is
                   declare
                      Decls      : constant List_Id   :=
                                     List_Containing (Subp_Decl);
-                     Subp_Scope : constant Entity_Id :=
-                                    Scope (Defining_Entity (Subp_Decl));
+                     Subp_Scope : constant Entity_Id := Scope (Subp_Id);
                      Typ_Scope  : constant Entity_Id := Scope (Typ);
 
                   begin
@@ -2385,8 +2384,7 @@ package body Contracts is
                     (Nkind (Parent (Subp_Decl)) = N_Compilation_Unit);
 
                   declare
-                     Subp_Scope : constant Entity_Id :=
-                                    Scope (Defining_Entity (Subp_Decl));
+                     Subp_Scope : constant Entity_Id := Scope (Subp_Id);
                      Typ_Scope  : constant Entity_Id := Scope (Typ);
 
                   begin
@@ -3104,13 +3102,13 @@ package body Contracts is
                      if Freeze_T
                        and then Present (Corresponding_Aspect (Prag))
                      then
-                        Freeze_Expr_Types
-                          (Def_Id => Subp_Id,
-                           Typ    => Standard_Boolean,
+                        Freeze_Expr_Types_Before
+                          (N      => Body_Decl,
                            Expr   =>
                              Expression
                                (First (Pragma_Argument_Associations (Prag))),
-                           N      => Body_Decl);
+                           Def_Id => Subp_Id,
+                           Typ    => Standard_Boolean);
                      end if;
 
                      Prepend_Pragma_To_Decls (Prag);
@@ -3379,12 +3377,12 @@ package body Contracts is
       --  Step 6: Construct subprogram _wrapped_statements
 
       --  When no statements are present we still need to insert contract
-      --  related declarations.
+      --  related declarations. There's also no need to create the contracts
+      --  wrapper when the subprogram is marked as not returning, since
+      --  postconditions and invariant checks won't be reached in that case.
 
-      if No (Stmts) then
+      if No (Stmts) or else No_Return (Subp_Id) then
          Prepend_List_To (Declarations (Body_Decl), Decls);
-
-      --  Otherwise, we need a wrapper
 
       else
          Build_Subprogram_Contract_Wrapper (Body_Id, Stmts, Decls, Result);

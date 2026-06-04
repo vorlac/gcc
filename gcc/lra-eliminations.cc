@@ -801,7 +801,7 @@ mark_not_eliminable (rtx x, machine_mode mem_mode)
 	    curr_sp_change += offset;
 	}
       else if (REG_P (XEXP (x, 0))
-	       && REGNO (XEXP (x, 0)) >= FIRST_PSEUDO_REGISTER)
+	       && REGNO (XEXP (x, 0)) < FIRST_PSEUDO_REGISTER)
 	{
 	  /* If we modify the source of an elimination rule, disable
 	     it.  Do the same if it is the destination and not the
@@ -1327,7 +1327,7 @@ init_elim_table (void)
 
   /* Build the FROM and TO REG rtx's.  Note that code in gen_rtx_REG
      will cause, e.g., gen_rtx_REG (Pmode, STACK_POINTER_REGNUM) to
-     equal stack_pointer_rtx.  We depend on this. Threfore we switch
+     equal stack_pointer_rtx.  We depend on this. Therefore we switch
      off that we are in LRA temporarily.  */
   lra_in_progress = false;
   for (ep = reg_eliminate; ep < &reg_eliminate[NUM_ELIMINABLE_REGS]; ep++)

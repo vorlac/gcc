@@ -22,10 +22,10 @@
   "@internal The stack register.")
 
 (define_register_constraint "Uci" "W8_W11_REGS"
-  "@internal r8-r11, which can be used to index ZA.")
+  "GPRs r8-r11, can be used to index ZA.")
 
 (define_register_constraint "Ucj" "W12_W15_REGS"
-  "@internal r12-r15, which can be used to index ZA.")
+  "GPRs r12-r15, can be used to index ZA.")
 
 (define_register_constraint "Ucs" "TAILCALL_ADDR_REGS"
   "@internal Registers suitable for an indirect tail call")
@@ -503,6 +503,13 @@
  (and (match_code "const_vector")
       (match_test "aarch64_simd_valid_xor_imm (op)")))
 
+(define_constraint "Dc"
+ "@internal
+  A constraint that matches an FP constant vector in which the low register
+  element can be materialized using FMOV and all other elements are zero."
+ (and (match_code "const_vector")
+      (match_test "aarch64_const_vec_fmov_p (op)")))
+
 (define_constraint "Dn"
   "@internal
  A constraint that matches vector of immediates."
@@ -524,6 +531,11 @@
  (and (match_code "const_int")
       (match_test "aarch64_simd_scalar_immediate_valid_for_move (op,
 						 QImode)")))
+(define_constraint "Da"
+  "@internal
+  A constraint that matches all sub-64-bit AdvSIMD vectors."
+  (and (match_code "const_vector")
+       (match_test "aarch64_advsimd_sub_dword_mode_p (GET_MODE (op))")))
 
 (define_constraint "Dt"
   "@internal

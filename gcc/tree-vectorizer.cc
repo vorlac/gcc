@@ -723,7 +723,6 @@ vec_info::new_stmt_vec_info (gimple *stmt)
   STMT_VINFO_REDUC_IDX (res) = -1;
   STMT_VINFO_REDUC_DEF (res) = NULL;
   STMT_VINFO_SLP_VECT_ONLY (res) = false;
-  STMT_VINFO_SLP_VECT_ONLY_PATTERN (res) = false;
 
   if (is_a <loop_vec_info> (this)
       && gimple_code (stmt) == GIMPLE_PHI
@@ -1846,6 +1845,17 @@ vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
   return record_stmt_cost (stmt_info, where, cost);
 }
 
+unsigned int
+vector_costs::add_slp_cost (slp_tree,
+			    const array_slice<stmt_info_for_cost> &cost_vec)
+{
+  unsigned int sum = 0;
+  for (auto item : cost_vec)
+    sum += ::add_stmt_cost (this, item.count, item.kind, item.stmt_info,
+			    item.node, item.vectype, item.misalign, item.where);
+  return sum;
+}
+
 /* See the comment above the declaration for details.  */
 
 void
@@ -2036,7 +2046,7 @@ vector_costs::compare_inside_loop_cost (const vector_costs *other) const
   HOST_WIDE_INT est_rel_other_max
     = estimated_poly_value (rel_other, POLY_VALUE_MAX);
 
-  /* Check first if we can make out an unambigous total order from the minimum
+  /* Check first if we can make out an unambiguous total order from the minimum
      and maximum estimates.  */
   if (est_rel_this_min < est_rel_other_min
       && est_rel_this_max < est_rel_other_max)

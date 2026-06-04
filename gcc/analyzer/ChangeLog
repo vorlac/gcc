@@ -1,3 +1,631 @@
+2026-05-30  Dhruv Chawla  <dhruvc@nvidia.com>
+
+	* access-diagram.cc: Fix typos.
+	* analyzer.cc (fixup_tree_for_diagnostic_1): Likewise.
+	(tree_to_json): Likewise.
+	* bounds-checking.cc: Likewise.
+	* constraint-manager.cc (constraint_manager::impossible_derived_conditions_p): Likewise.
+	* diagnostic-manager.cc (prune_frame): Likewise.
+	* engine.cc (get_eh_outedge): Likewise.
+	(maybe_process_run_of_enodes): Likewise.
+	* inlining-iterator.h: Likewise.
+	* ops.cc (call_and_return_op::execute): Likewise.
+	* pending-diagnostic.h (class pending_diagnostic): Likewise.
+	* region-model-asm.cc: Likewise.
+	* region-model.cc (check_one_function_attr_null_terminated_string_arg): Likewise.
+	(region_model::deref_rvalue): Likewise.
+	(region_model::scan_for_null_terminator): Likewise.
+	(region_model::check_for_null_terminated_string_arg): Likewise.
+	(model_merger::mergeable_svalue_p): Likewise.
+	(test_canonicalization_4): Likewise.
+	* region.cc (region::accept): Likewise.
+	* setjmp-longjmp.cc (region_model::on_longjmp): Likewise.
+	* sm-fd.cc: Likewise.
+	* sm-malloc.cc: Likewise.
+	* sm-taint.cc: Likewise.
+	* store.cc (binding_cluster::maybe_get_compound_binding): Likewise.
+	(binding_cluster::can_merge_p): Likewise.
+	(store::replay_call_summary): Likewise.
+	* svalue.cc (svalue::can_merge_p): Likewise.
+	(widening_svalue::eval_condition_without_cm): Likewise.
+
+2026-05-20  David Malcolm  <dmalcolm@redhat.com>
+
+	* region-model-manager.cc
+	(region_model_manager::maybe_fold_binop): Fold
+	"(X POINTER_PLUS Y) POINTER_DIFF_EXPR X" to Y.
+
+2026-05-19  David Malcolm  <dmalcolm@redhat.com>
+
+	PR analyzer/125304
+	* common.h (compare_bit_offsets_p): New decl.
+	(eval_region_offset_comparison): New decl.
+	* region-model.cc (region_model::on_assignment): Pass *this to
+	store::set_value to help determination of aliasing.
+	(region_model::set_value): Likewise.
+	(region_model::eval_condition): Likewise for
+	region_svalue::eval_condition.
+	* region.cc (compare_bit_offsets_p): New.
+	(region_offset::dump_to_pp): Dump the base region, wrapping the
+	whole thing in braces.
+	(eval_byte_offset_comparison): New.
+	(eval_region_offset_comparison): New.
+	* store.cc (store::set_value): Add "model" param and pass it to
+	eval_alias.
+	(store::eval_alias): Add "model" param and pass to eval_alias_1.
+	Add early return of true when checking a base region against
+	itself.  Replace final return of "unknown" with logic that
+	compares the kinds of the two base regions, and may be able
+	to return "false" rather than "unknown".
+	(store::eval_alias_1): Add "model" param and pass to eval_alias.
+	Assert that we have two different base_regions.
+	(store::replay_call_summary_cluster): Pass model to set_value.
+	* store.h (store::set_value): Add "model" param.
+	(store::eval_alias): Likewise.
+	(store::eval_alias_1): Likewise.
+	* svalue.cc (region_svalue::eval_condition): Likewise.
+	Reimplement in terms of eval_region_offset_comparison.
+	* svalue.h (region_svalue::eval_condition): Add "model" param.
+
+2026-05-19  David Malcolm  <dmalcolm@redhat.com>
+
+	PR analyzer/124104
+	* svalue.cc (binop_svalue::maybe_get_value_range_1): Bail out for
+	incompatible types.
+
+2026-05-18  David Malcolm  <dmalcolm@redhat.com>
+
+	* analyzer.opt (-param=analyzer-bb-explosion-factor=): Rename to...
+	(-param=analyzer-supernode-explosion-factor=): ...this.
+	* engine.cc (exploded_graph::process_worklist): Update for change
+	to param name.  Clarify the -Wanalyzer-too-complex message when
+	hitting the overall limit on enodes by also showing the number
+	of snodes.
+
+2026-05-18  David Malcolm  <dmalcolm@redhat.com>
+
+	* engine.cc (exploded_node::status_to_str): Drop unused field
+	m_num_processed_stmts.
+	(exploded_node::dump): Likewise.
+	(exploded_node::to_json): Likewise.
+	* exploded-graph.h (exploded_node::m_num_processed_stmts):
+	Likewise.
+
+2026-05-06  David Malcolm  <dmalcolm@redhat.com>
+
+	* svalue.cc (svalue::make_dump_widget): Show value ranges in
+	svalue dumps.
+
+2026-05-06  David Malcolm  <dmalcolm@redhat.com>
+
+	* analyzer-logging.h (class text_art::canvas): New forward decl.
+	(logger::log_canvas): New decl.
+	* diagnostic-manager.cc (path_builder::get_supergraph): New.
+	(logger::log_canvas): New.
+	(dump_to_logger): New.
+	(log_region_model): New.
+	(epath_rewind_context::epath_rewind_context): Add params
+	src_model and dst_model, using them to initialize m_src_model and
+	m_dst_model.
+	(epath_rewind_context::get_src_region_model): New.
+	(epath_rewind_context::get_dst_region_model): New.
+	(epath_rewind_context::m_src_model): New.
+	(epath_rewind_context::m_dst_model): New.
+	(make_raw_dst_region_model): New.
+	(diagnostic_manager::annotate_exploded_path): Walk EPATH forwards,
+	populating new vectors src_models and dst_models without state
+	purging or merging, so that we can reliably rewind state.  Pass
+	these models to epath_rewind_context when rewinding state.
+	* engine.cc (interprocedural_call::try_to_rewind_data_flow): Get
+	src and dst region_model instances via vfuncs of ctxt, rather than
+	accessing the eedge.
+	* ops.cc (rewind_context::on_data_origin): Get src and dst
+	region_model instances via vfuncs of ctxt, rather than accessing
+	the eedge.
+	(greturn_op::try_to_rewind_data_flow): Likewise.
+	* ops.h (rewind_context::rewind_context): Drop param "eedge".
+	(rewind_context::get_src_region_model): New vfunc.
+	(rewind_context::get_dst_region_model): New vfunc.
+	(rewind_context::m_eedge): Drop field.
+
+2026-05-06  David Malcolm  <dmalcolm@redhat.com>
+
+	* analyzer.cc (printable_expr_p): New.
+	* call-info.cc: Include "analyzer/state-transition.h".
+	(call_info::add_events_to_path): Add state_transition param.
+	* call-info.h (call_info::add_events_to_path): Likewise.
+	* callsite-expr.h: New file, based on material from supergraph.h.
+	(class callsite_expr_element): New.
+	* checker-event.cc: Include "analyzer/callsite-expr.h" and
+	"analyzer/state-transition.h".
+	(event_kind_to_string): Handle event_kind::state_transition.
+	(state_transition_event::print_desc): New.
+	(state_transition_event::prepare_for_emission): New.
+	(function_entry_event::function_entry_event): Drop.
+	(function_entry_event::print_desc): Use any m_state_trans.
+	(function_entry_event::prepare_for_emission): New.
+	(call_event::call_event): Add "state_trans" param and store it in
+	m_state_trans.
+	(call_event::print_desc): Use m_state_trans if present to call
+	describe_call_with_state, adding a fallback wording for
+	pending_diagnostic subclasses that don't implement it.
+	(call_event::prepare_for_emission): New, storing event id into
+	state_transition.
+	(return_event::return_event): Add "state_trans" param and store it
+	in m_state_trans.
+	(return_event::print_desc): Use m_state_trans if present to call
+	describe_return_of_state.
+	(return_event::prepare_for_emission): New, storing event id into
+	state_transition.
+	* checker-event.h (enum class event_kind): Add state_transition.
+	(class state_transition_event): New.
+	(function_entry_event::function_entry_event): Add "state_trans"
+	param and store it in m_state_trans.  Drop 2nd ctor.
+	(function_entry_event::prepare_for_emission): New decl.
+	(function_entry_event::get_state_transition_at_call): New.
+	(function_entry_event::m_state_trans): New.
+	(call_event::call_event): Add "state_trans" param.
+	(call_event::prepare_for_emission): New decl.
+	(call_event::get_state_transition_at_call): New.
+	(call_event::m_state_trans): New.
+	(return_event::return_event): Add "state_trans" param.
+	(return_event::prepare_for_emission): New decl.
+	(return_event::m_state_trans): New.
+	* common.h: Define INCLUDE_ALGORITHM.
+	(class state_transition): New forward decl
+	(class state_transition_at_call): New forward decl
+	(class state_transition_at_return): New forward decl
+	(printable_expr_p): New decl.
+	(struct diagnostic_state): New.
+	(struct rewind_context): New forward decl.
+	(custom_edge_info::add_events_to_path): Add "state_trans" param.
+	(try_to_rewind_data_flow): New vfunc.
+	* diagnostic-manager.cc (compatible_epath_p): Update for change
+	from m_edges to m_elements.
+	(diagnostic_manager::emit_saved_diagnostic):  Make "epath"
+	non-const.  Call annotate_exploded_path on it and log before and
+	after.  Update for new param to add_events_for_eedge.
+	(class epath_rewind_context): New.
+	(diagnostic_manager::annotate_exploded_path): New.
+	(diagnostic_manager::build_emission_path): Update for change from
+	m_edges to m_elements.  Pass any state transition to
+	add_events_for_eedge.
+	(diagnostic_manager::add_events_for_eedge): Add "state_trans"
+	parameter.  Pass it when creating events, and if we don't create
+	an event referencing it, make a state_transition_event for it.
+	(diagnostic_manager::prune_for_sm_diagnostic): Handl
+	event_kind::state_transition.
+	* diagnostic-manager.h (saved_diagnostic::get_best_epath): Drop
+	"const" from return value.
+	(diagnostic_manager::annotate_exploded_path): New decl.
+	(diagnostic_manager::add_events_for_eedge): Add "state_trans"
+	param.
+	* engine.cc: Include "pretty-print-markup.h".
+	(leak_ploc_fixer_for_epath::fixup_for_epath): Update for change
+	from m_edges to m_elements.
+	(throw_custom_edge::add_events_to_path): Add state_transition
+	param.
+	(unwind_custom_edge::add_events_to_path): Likewise.
+	(interprocedural_call::print): Use get_gcall.
+	(interprocedural_call::update_model): Likewise.
+	(interprocedural_call::add_events_to_path): Likewise.  Pass
+	state_transition if of correct subclass.
+	(interprocedural_call::try_to_rewind_data_flow): New.
+	(interprocedural_call::get_gcall): New.
+	(interprocedural_return::add_events_to_path): Add state_transition
+	param and pass if of correct subclass.
+	(interprocedural_return::try_to_rewind_data_flow): New.
+	(tainted_args_function_info::add_events_to_path): Add
+	state_transition param.
+	(tainted_args_call_info::add_events_to_path): Likewise.
+	* event-loc-info.h (event_loc_info_for_function_entry): New decl.
+	* exploded-graph.h (interprocedural_call::interprocedural_call):
+	Pass and store call_and_return_op rather than gcall.
+	(interprocedural_call::add_events_to_path): Add state_trans param.
+	(interprocedural_call::try_to_rewind_data_flow): New.
+	(interprocedural_call::m_call_stmt): Replace with...
+	(interprocedural_call::m_op): ...this.
+	(interprocedural_return::add_events_to_path): Add state_trans
+	param.
+	(interprocedural_return::try_to_rewind_data_flow): New.
+	(rewind_info_t::add_events_to_path): New.
+	* exploded-path.cc (exploded_path::exploded_path): Drop explicit
+	copy ctor.
+	(diagnostic_state::dump_to_pp): New.
+	(diagnostic_state::dump): New.
+	(exploded_path::find_stmt_backwards): Update for change from
+	m_edges to m_elements.
+	(exploded_path::get_final_enode): Likewise.
+	(exploded_path::feasible_p): Likewise.
+	(exploded_path::dump_to_pp): Likewise.  Dump state transitions.
+	(exploded_path::maybe_log): New.
+	(exploded_path::reverse): New.
+	* exploded-path.h: Include "analyzer/checker-event.h" and
+	"analyzer/state-transition.h".
+	(struct exploded_path::element_t): New.
+	(exploded_path::exploded_path): Replace ctors with "= default".
+	(exploded_path::length): Reimplement.
+	(exploded_path::maybe_log): New decl.
+	(exploded_path::append_edge): New.
+	(exploded_path::reverse): New.
+	(exploded_path::m_edges): Replace with...
+	(exploded_path::m_elements): ...this, using std::vector rather
+	than auto_vec.
+	* feasible-graph.cc (feasible_graph::make_epath): Update for
+	change from m_edges to m_elements.
+	* infinite-recursion.cc
+	(infinite_recursion_diagnostic::add_function_entry_event): Add
+	"state_trans" param and pass it to base class call.
+	(recursive_function_entry_event::recursive_function_entry_event):
+	Pass nullptr for state transition.
+	* ops.cc: Include "analyzer/callsite-expr.h" and
+	"analyzer/state-transition.h".
+	(event_loc_info_for_function_entry): New.
+	(rewind_context::on_data_origin): New.
+	(rewind_context::on_data_flow): New.
+	(gassign_op::try_to_rewind_data_flow): New.
+	(greturn_op::try_to_rewind_data_flow): New.
+	(call_and_return_op::execute): Update for change to
+	interprocedural_call.
+	(call_and_return_op::try_to_rewind_data_flow): New.
+	(phis_for_edge_op::try_to_rewind_data_flow): New.
+	* ops.h (struct rewind_context): New.
+	(operation::try_to_rewind_data_flow): New vfunc.
+	(gassign_op::try_to_rewind_data_flow): New.
+	(predict_op::try_to_rewind_data_flow): New.
+	(greturn_op::try_to_rewind_data_flow): New.
+	(call_and_return_op::try_to_rewind_data_flow): New.
+	(control_flow_op::try_to_rewind_data_flow): New.
+	(phis_for_edge_op::try_to_rewind_data_flow): New.
+	* pending-diagnostic.cc (interesting_t::add_read_region): New.
+	(interesting_t::dump_to_pp): Dump m_read_regions.
+	(pending_diagnostic::add_function_entry_event): Add "state_trans"
+	param and pass it to function_entry_event.  Call
+	event_loc_info_for_function_entry.
+	(pending_diagnostic::add_call_event): Add "state_trans" param and
+	pass it to call_event.
+	* pending-diagnostic.h: Include "analyzer/state-transition.h".
+	(struct interesting_t): Update leading comment.
+	(interesting_t::add_read_region): New.
+	(interesting_t::m_read_regions): New.
+	(struct origin_of_state): New.
+	(call_with_state::call_with_state): Add state_trans param and use
+	it to initialize m_state_trans and m_src_event_id.
+	(call_with_state::m_state_trans): New field.
+	(call_with_state::m_src_event_id): New field.
+	(return_of_state::return_of_state): Add state_trans param and use
+	it to initialize m_state_trans and m_src_event_id.
+	(return_of_state::m_state_trans): New field.
+	(return_of_state::m_src_event_id): New field.
+	(struct copy_of_state): New.
+	(struct use_of_state): New.
+	(pending_diagnostic::describe_origin_of_state): New vfunc.
+	(pending_diagnostic::describe_copy_of_state): New vfunc.
+	(pending_diagnostic::describe_use_of_state): New vfunc.
+	(pending_diagnostic::add_function_entry_event): Add "state_trans"
+	param.
+	(pending_diagnostic::add_call_event): Likewise.
+	* poisoned-value-diagnostic.cc
+	(poisoned_value_diagnostic::mark_interesting_stuff): Add call to
+	add_read_region.
+	* region-model.cc: Include "analyzer/state-transition.h".
+	(callsite_expr::maybe_get_param_location): New.
+	(callsite_expr::get_param_tree): New.
+	(div_by_zero_diagnostic::div_by_zero_diagnostic): Add
+	"divisor_reg" param and use it to initialize m_divisor_reg.
+	(div_by_zero_diagnostic::mark_interesting_stuff): New.
+	(div_by_zero_diagnostic::add_function_entry_event): New.
+	(div_by_zero_diagnostic::describe_origin_of_state): New.
+	(div_by_zero_diagnostic::describe_call_with_state): New.
+	(div_by_zero_diagnostic::describe_return_of_state): New.
+	(div_by_zero_diagnostic::describe_copy_of_state): New.
+	(div_by_zero_diagnostic::describe_use_of_state): New.
+	(div_by_zero_diagnostic::m_divisor_reg): New field.
+	(region_model::get_gassign_result): Pass region to calls to
+	make_shift_count_negative_diagnostic,
+	make_shift_count_overflow_diagnostic, and
+	div_by_zero_diagnostic.
+	(exception_thrown_from_unrecognized_call::add_events_to_path): Add
+	state_transition param.
+	* region-model.h (make_shift_count_negative_diagnostic): Add
+	"src_region" param.
+	(make_shift_count_overflow_diagnostic): Likewise.
+	* region.h: Include "analyzer/store.h" and
+	"text-art/tree-widget.h".
+	* setjmp-longjmp.cc (rewind_info_t::add_events_to_path): Add
+	state_transition param.
+	* shift-diagnostics.cc
+	(shift_count_negative_diagnostic::shift_count_negative_diagnostic):
+	Add src_region param and use it to initialize m_src_region.
+	(shift_count_negative_diagnostic::mark_interesting_stuff): New.
+	(shift_count_negative_diagnostic::m_src_region): New.
+	(make_shift_count_negative_diagnostic): Add src_region param.
+	(shift_count_overflow_diagnostic::shift_count_overflow_diagnostic):
+	Add src_region param and use it to initialize m_src_region.
+	(shift_count_overflow_diagnostic::mark_interesting_stuff): New.
+	(shift_count_overflow_diagnostic::m_src_region): New field.
+	(make_shift_count_overflow_diagnostic): Add src_region param.
+	* sm-signal.cc (signal_delivery_edge_info_t::add_events_to_path):
+	Add state_transition param.
+	* state-transition.cc: New file.
+	* state-transition.h: New file.
+	* supergraph.h (class callsite_expr): Move to callsite-expr.h.
+	* varargs.cc (va_arg_diagnostic::add_call_event): Add state_trans
+	param.
+
+2026-05-05  Jakub Jelinek  <jakub@redhat.com>
+
+	* kf.cc (kf_strcasecmp::impl_call_post): Remove unused variable.
+
+2026-05-04  David Malcolm  <dmalcolm@redhat.com>
+
+	* svalue.cc (binop_svalue::maybe_get_value_range): Update for
+	renaming of value_range::set_type to value_range::set_range_class.
+	(unaryop_svalue::maybe_get_value_range): Likewise.
+
+2026-04-28  David Malcolm  <dmalcolm@redhat.com>
+
+	PR analyzer/124217
+	* analyzer.opt (Wanalyzer-div-by-zero): New.
+	* analyzer.opt.urls: Regenerate.
+	* region-model.cc (class div_by_zero_diagnostic): New.
+	(region_model::get_gassign_result): Add warning for division by
+	zero if ctxt is non-null.  Bail out on such cases even if ctxt
+	is null.
+	* svalue.cc (type_can_have_value_range_p): Also handle frange.
+
+2026-04-28  David Malcolm  <dmalcolm@redhat.com>
+
+	* diagnostic-manager.cc: Include "analyzer/exploded-path.h".
+	* engine.cc: Likewise.
+	(exploded_path::exploded_path): Move to exploded-path.cc.
+	(exploded_path::find_stmt_backwards): Likewise.
+	(exploded_path::get_final_enode): Likewise.
+	(exploded_path::feasible_p): Likewise.
+	(exploded_path::dump_to_pp): Likewise.
+	(exploded_path::dump): Likewise.
+	(exploded_path::dump_to_file): Likewise.
+	* exploded-graph.h (class exploded_path): Move to exploded-path.h.
+	(shortest_exploded_paths): Likewise.
+	* exploded-path.cc: New file, taken from the above.
+	* exploded-path.h: Likewise.
+	* feasible-graph.cc: Include "analyzer/exploded-path.h".
+
+2026-04-28  David Malcolm  <dmalcolm@redhat.com>
+
+	* analyzer.cc (is_setjmp_call_p): Move to setjmp-longjmp.cc.
+	(is_longjmp_call_p): Likewise.
+	* engine.cc (setjmp_record::cmp): Likewise.
+	(setjmp_svalue::accept): Likewise.
+	(setjmp_svalue::dump_to_pp): Likewise.
+	(setjmp_svalue::print_dump_widget_label): Likewise.
+	(setjmp_svalue::add_dump_widget_children): Likewise.
+	(setjmp_svalue::get_enode_index): Likewise.
+	(valid_longjmp_stack_p): Likewise.
+	(class stale_jmp_buf): Likewise.
+	(exploded_node::on_longjmp): Likewise.
+	(rewind_info_t::update_model): Likewise.
+	(rewind_info_t::add_events_to_path): Likewise.
+	* region-model.cc (region_model::on_setjmp): Likewise.
+	(region_model::on_longjmp): Likewise.
+	* setjmp-longjmp.cc: New file, made from the above material.
+	* svalue.cc: Update comment.
+
+2026-04-28  David Malcolm  <dmalcolm@redhat.com>
+
+	* poisoned-value-diagnostic.cc: New file, taken from material in
+	region-model.cc.
+	* region-model.cc (class poisoned_value_diagnostic): Move to
+	poisoned-value-diagnostic.cc.
+	(class shift_count_negative_diagnostic): Move to
+	shift-diagnostics.cc.
+	(class shift_count_overflow_diagnostic): Likewise.
+	(region_model::get_gassign_result): Use factory functions when
+	creating diagnostics so that the subclasses can be moved to their
+	own source files.
+	(region_model::check_for_poison): Likewise.
+	(region_model::deref_rvalue): Likewise.
+	(class write_to_const_diagnostic): Move to
+	write-to-const-diagnostics.cc.
+	(class write_to_string_literal_diagnostic): Likewise.
+	(region_model::check_for_writable_region): Use factory functions
+	when creating diagnostics so that the subclasses can be moved to
+	their own source files.
+	* region-model.h (make_poisoned_value_diagnostic): New decl.
+	(make_shift_count_negative_diagnostic): New decl.
+	(make_shift_count_overflow_diagnostic): New decl.
+	(make_write_to_const_diagnostic): New decl.
+	(make_write_to_string_literal_diagnostic): New decl.
+	* shift-diagnostics.cc: New file, taken from material in
+	region-model.cc.
+	* write-to-const-diagnostics.cc: Likewise.
+
+2026-04-28  David Malcolm  <dmalcolm@redhat.com>
+
+	PR analyzer/123145
+	* access-diagram.cc
+	(compound_svalue_spatial_item::compound_svalue_spatial_item):
+	Update for compound_svalue using concrete_binding_map rather than
+	binding_map.
+	* bounds-checking.cc (strip_types): Likewise.
+	* call-summary.cc
+	(call_summary_replay::convert_svalue_from_summary_1): Update for
+	reimplementation of class binding_map.
+	(call_summary_replay::convert_svalue_from_summary_1): Likewise.
+	* infinite-recursion.cc (contains_unknown_p): Update for
+	compound_svalue using concrete_binding_map rather than
+	binding_map.
+	* program-state.cc (sm_state_map::impl_set_state): Likewise.
+	* region-model-manager.cc (maybe_undo_optimize_bit_field_compare):
+	Likewise.
+	(maybe_undo_optimize_bit_field_compare): Avoid building a
+	concrete_binding key by using get_any_exact_binding.
+	(region_model_manager::get_or_create_compound_svalue): New
+	overload, consuming a concrete_binding_map &&.
+	* region-model-manager.h
+	(region_model_manager::get_or_create_compound_svalue): New decl
+	for the above.
+	* region-model-reachability.cc (reachable_regions::handle_sval):
+	Update for compound_svalue using concrete_binding_map rather than
+	binding_map.
+	(reachable_regions::handle_parm): Likewise.
+	* region-model.cc (region_model::scan_for_null_terminator_1): Port
+	from binding_map to concrete_binding_map.
+	(exposure_through_uninit_copy::calc_num_uninit_bits): Update for
+	compound_svalue using concrete_binding_map rather than
+	binding_map.
+	(contains_uninit_p): Likewise.
+	* region.cc (decl_region::calc_svalue_for_constructor): Port from
+	binding_map to concrete_binding_map.
+	(decl_region::get_svalue_for_initializer): Update call to
+	get_or_create_compound_svalue.
+	* store.cc (concrete_binding_map::dump_to_pp): New.
+	(concrete_binding_map::dump): New.
+	(concrete_binding_map::add_to_tree_widget): New.
+	(concrete_binding_map::validate): New.
+	(binding_map::cmp): Convert to...
+	(concrete_binding_map::cmp): ...this.
+	(concrete_binding_map::get_any_exact_binding): New.
+	(concrete_binding_map::calc_complexity): New.
+	(concrete_binding_map::remove_overlapping_binding): New.
+	(concrete_binding_map::remove_overlapping_bindings): New.
+	(concrete_binding_map::get_overlapping_bindings): New.
+	(binding_map::put): Update for change to m_concrete.
+	(binding_map::validate): Likewise.
+	(binding_map::apply_ctor_to_region): Convert to...
+	(concrete_binding_map::apply_ctor_to_region): ...this.
+	(binding_map::apply_ctor_val_to_range): Convert to...
+	(concrete_binding_map::apply_ctor_val_to_range): ...this.
+	(binding_map::apply_ctor_pair_to_child_region): Convert to...
+	(concrete_binding_map::apply_ctor_pair_to_child_region): ...this.
+	(binding_map::remove_overlapping_bindings): Move part of
+	implementation to
+	concrete_binding_map::remove_overlapping_binding.
+	(binding_cluster::bind_compound_sval): Simplify using
+	concrete_binding_map.
+	(binding_cluster::maybe_get_compound_binding): Likewise.
+	(store::replay_call_summary_cluster): Update for change
+	to compound_svalue.
+	* store.h: Include "analyzer/complexity.h".
+	(class concrete_binding_map): New, based on
+	binding_map::concrete_bindings_t.
+	(binding_map::concrete_bindings_t): Use concrete_binding_map.
+	(binding_map::empty_p): Update for above.
+	(binding_map::apply_ctor_to_region): Drop decl.
+	(binding_map::cmp): Likewise.
+	(binding_map::apply_ctor_val_to_range): Likewise.
+	(binding_map::apply_ctor_pair_to_child_region): Likewise.
+	* svalue.cc (svalue::cmp_ptr): Update for change to
+	compound_svalue.
+	(compound_svalue::compound_svalue): Port from binding_map to
+	concrete_binding_map.
+	(compound_svalue::accept): Likewise.
+	(compound_svalue::calc_complexity): Drop.
+	(compound_svalue::maybe_fold_bits_within): Port from binding_map
+	to concrete_binding_map.
+	* svalue.h (class compound_svalue): Update leading comment.  Port
+	from binding_map to concrete_binding_map.
+
+2026-04-28  Virginia Kodsy  <virginiahany9@gmail.com>
+
+	* kf.cc (class kf_strcasecmp): New.
+	(kf_strcasecmp::impl_call_post): New.
+	(register_known_functions): Register BUILT_IN_STRCASECMP,
+	"strcasecmp", and "__builtin_strcasecmp".
+
+2026-04-28  Ridham Khurana  <khurana.ridham222@gmail.com>
+
+	* kf.cc (class kf_getenv): New.
+	(kf_getenv::impl_call_post): New.
+	(register_known_functions): Register kf_getenv.
+
+2026-04-28  Tomás Ortín Fernández  <quanrong@mailbox.org>
+
+	PR analyzer/105890
+	* kf.cc (class kf_mktemp_family): Add nested outcome enum,
+	constructor, and nested failure and success classes.
+	(kf_mktemp_family::check_template_with_suffixlen_arg): Remove.
+	(kf_mktemp_family::check_template): Remove.  Both replaced
+	by...
+	(kf_mktemp_family::check_for_string_literal_arg): ...this.
+	(kf_mktemp_family::get_trailing_len): New.
+	(kf_mktemp_family::impl_call_post): New.
+	(class kf_mktemp_simple): Add constructor taking outcome.
+	Replace check_template with check_for_string_literal_arg.
+	Remove set_any_lhs_with_defaults call.
+	(class kf_mkostemp): Add constructor.  Replace check_template
+	with check_for_string_literal_arg.  Remove
+	set_any_lhs_with_defaults call.
+	(class kf_mkostemps): Likewise.
+	(class kf_mkstemps): Likewise.
+	(register_known_functions): Pass outcome to kf_mktemp_simple
+	instantiations.
+	* region-model.cc (region_model::update_for_null_return): New.
+	* region-model.h (class region_model): Add
+	update_for_null_return.
+
+2026-04-28  Tomás Ortín Fernández  <quanrong@mailbox.org>
+
+	PR analyzer/105890
+	* analyzer-language.cc (stash_named_constants): Stash O_CREAT,
+	O_EXCL, and O_RDWR for use by kf.cc.
+	* analyzer.opt: Rename -Wanalyzer-mkstemp-missing-suffix to
+	-Wanalyzer-mktemp-missing-placeholder and
+	-Wanalyzer-mkstemp-of-string-literal to
+	-Wanalyzer-mktemp-of-string-literal.  Add
+	-Wanalyzer-mkostemp-redundant-flags.  Fix alphabetical ordering.
+	* analyzer.opt.urls: Regenerate.
+	* kf.cc (class mkstemp_of_string_literal): Rename to...
+	(class mktemp_of_string_literal): ...this.
+	(class mkstemp_missing_suffix): Rename to...
+	(class mktemp_missing_placeholder): ...this.  Add trailing_len
+	parameter for suffixed variants.
+	(class mkostemp_redundant_flags): New diagnostic class.
+	(class kf_mktemp_family): New base class with shared template
+	and flags checking logic.
+	(kf_mktemp_family::check_template_with_suffixlen_arg): New.
+	(kf_mktemp_family::check_template): New.
+	(kf_mktemp_family::check_flags): New.
+	(kf_mktemp_family::check_placeholder): New.
+	(class kf_mkstemp): Rename to...
+	(class kf_mktemp_simple): ...this.  Generalize to handle mktemp,
+	mkstemp, and mkdtemp.
+	(class kf_mkostemp): New known_function handler.
+	(class kf_mkostemps): New known_function handler.
+	(class kf_mkstemps): New known_function handler.
+	(register_known_functions): Register all mktemp family handlers.
+
+2026-04-28  Tomás Ortín Fernández  <quanrong@mailbox.org>
+
+	PR analyzer/105890
+	* analyzer.opt: Add -Wanalyzer-mkstemp-missing-suffix and
+	-Wanalyzer-mkstemp-of-string-literal.
+	* analyzer.opt.urls: Add URL entries for the new warnings.
+	* kf.cc (class mkstemp_of_string_literal): New diagnostic class
+	for mkstemp called on a string literal.
+	(class mkstemp_missing_suffix): New diagnostic class for mkstemp
+	called with a template missing the "XXXXXX" suffix.
+	(class kf_mkstemp): New known_function handler for mkstemp.
+	(register_known_functions): Register kf_mkstemp.
+
+2026-04-28  Saksham Gupta  <io.sakshamgupta@gmail.com>
+
+	* kf.cc (class kf_atoi_family): New class.
+	(register_known_functions): Register atoi, atol, and atoll.
+
+2026-04-28  David Malcolm  <dmalcolm@redhat.com>
+
+	* access-diagram.cc
+	(access_diagram_impl::add_aligned_child_table): Use
+	std::make_unique rather than "new".
+	(access_diagram_impl::add_valid_vs_invalid_ruler): Likewise.
+	* checker-path.h (checker_path::replace_event): Use
+	std::unique_ptr.
+	* diagnostic-manager.cc
+	(diagnostic_manager::consolidate_conditions): Use std::make_unique
+	rather than "new".
+	* feasible-graph.cc (feasible_graph::make_epath): Likewise.
+
 2026-04-16  Torbjörn SVENSSON  <torbjorn.svensson@foss.st.com>
 
 	* engine.cc (impl_region_model_context::on_unexpected_tree_code): Print

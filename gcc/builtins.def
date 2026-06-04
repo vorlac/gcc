@@ -218,7 +218,8 @@ along with GCC; see the file COPYING3.  If not see
 	       false, true, true, ATTRS, false, \
 	       flag_openacc)
 /* Set NONANSI_P = false to enable the builtins also with -fno-nonansi-builtins,
-   esp. as -std=c++../c.. imply that flag and -fopenacc should be othogonal.  */
+   esp. as -std=c++../c.. imply that flag and -fopenacc should be
+   orthogonal.  */
 #undef DEF_GOACC_BUILTIN_COMPILER
 #define DEF_GOACC_BUILTIN_COMPILER(ENUM, NAME, TYPE, ATTRS) \
   DEF_BUILTIN (ENUM, "__builtin_" NAME, BUILT_IN_NORMAL, TYPE, TYPE,    \
@@ -235,7 +236,7 @@ along with GCC; see the file COPYING3.  If not see
 		|| flag_openmp \
 		|| flag_tree_parallelize_loops > 1))
 /* Set NONANSI_P = false to enable the builtins also with -fno-nonansi-builtins,
-   esp. as -std=c++../c.. imply that flag and -fopenmp should be othogonal.  */
+   esp. as -std=c++../c.. imply that flag and -fopenmp should be orthogonal.  */
 #undef DEF_GOMP_BUILTIN_COMPILER
 #define DEF_GOMP_BUILTIN_COMPILER(ENUM, NAME, TYPE, ATTRS) \
   DEF_BUILTIN (ENUM, "__builtin_" NAME, BUILT_IN_NORMAL, TYPE, TYPE,    \
@@ -1024,6 +1025,11 @@ DEF_GCC_BUILTIN        (BUILT_IN_BSWAP16, "bswap16", BT_FN_UINT16_UINT16, ATTR_C
 DEF_GCC_BUILTIN        (BUILT_IN_BSWAP32, "bswap32", BT_FN_UINT32_UINT32, ATTR_CONST_NOTHROW_LEAF_LIST)
 DEF_GCC_BUILTIN        (BUILT_IN_BSWAP64, "bswap64", BT_FN_UINT64_UINT64, ATTR_CONST_NOTHROW_LEAF_LIST)
 DEF_GCC_BUILTIN        (BUILT_IN_BSWAP128, "bswap128", BT_FN_UINT128_UINT128, ATTR_CONST_NOTHROW_LEAF_LIST)
+DEF_GCC_BUILTIN        (BUILT_IN_BITREVERSE8, "bitreverse8", BT_FN_UINT8_UINT8, ATTR_CONST_NOTHROW_LEAF_LIST)
+DEF_GCC_BUILTIN        (BUILT_IN_BITREVERSE16, "bitreverse16", BT_FN_UINT16_UINT16, ATTR_CONST_NOTHROW_LEAF_LIST)
+DEF_GCC_BUILTIN        (BUILT_IN_BITREVERSE32, "bitreverse32", BT_FN_UINT32_UINT32, ATTR_CONST_NOTHROW_LEAF_LIST)
+DEF_GCC_BUILTIN        (BUILT_IN_BITREVERSE64, "bitreverse64", BT_FN_UINT64_UINT64, ATTR_CONST_NOTHROW_LEAF_LIST)
+DEF_GCC_BUILTIN        (BUILT_IN_BITREVERSE128, "bitreverse128", BT_FN_UINT128_UINT128, ATTR_CONST_NOTHROW_LEAF_LIST)
 
 DEF_EXT_LIB_BUILTIN    (BUILT_IN_CLEAR_CACHE, "__clear_cache", BT_FN_VOID_PTR_PTR, ATTR_NOTHROW_LEAF_LIST)
 /* [trans-mem]: Adjust BUILT_IN_TM_CALLOC if BUILT_IN_CALLOC is changed.  */

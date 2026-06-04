@@ -193,8 +193,8 @@
 
 ;; The following ISA attributes are actually not architecture specific,
 ;; but depend on (optimization) options.  This is because the "enabled"
-;; attribut can't depend on more than one other attribute.  This means
-;; that 3op must work for all ISAs, and hence a 'flat' attribue scheme
+;; attribute can't depend on more than one other attribute.  This means
+;; that 3op must work for all ISAs, and hence a 'flat' attribute scheme
 ;; can be used (as opposed to a true cartesian product).
 
 ;; 3op  : alternative is a 3-operand insn
@@ -397,7 +397,7 @@
 ;; The following is used by nonlocal_goto and setjmp.
 ;; The receiver pattern will create no instructions since internally
 ;; virtual_stack_vars = hard_frame_pointer + 1 so the RTL become R28=R28
-;; This avoids creating add/sub offsets in frame_pointer save/resore.
+;; This avoids creating add/sub offsets in frame_pointer save/restore.
 ;; The 'null' receiver also avoids  problems with optimisation
 ;; not recognising incoming jmp and removing code that resets frame_pointer.
 ;; The code derived from builtins.cc.
@@ -546,33 +546,18 @@
 ;;========================================================================
 ;; Move stuff around
 
-;; Expand helper for mov<mode>.
-(define_expand "gen_load<mode>_libgcc"
-  [(set (match_dup 3)
-        (match_dup 2))
-   (set (reg:MOVMODE 22)
-        (match_operand:MOVMODE 1 "memory_operand"))
-   (set (match_operand:MOVMODE 0 "register_operand")
-        (reg:MOVMODE 22))]
-  "avr_load_libgcc_p (operands[1])"
-  {
-    operands[3] = gen_rtx_REG (HImode, REG_Z);
-    operands[2] = force_operand (XEXP (operands[1], 0), NULL_RTX);
-    operands[1] = replace_equiv_address (operands[1], operands[3]);
-    set_mem_addr_space (operands[1], ADDR_SPACE_FLASH);
-  })
-
-;; "load_qi_libgcc"
-;; "load_hi_libgcc"
+;; On devices without LPMx, __flash values > 2 bytes
+;; are loaded with libgcc's __load_<size>.
+;; Must be prior to the mov<mode> insns.
+;; "load_qi_libgcc" (unused)
+;; "load_hi_libgcc" (unused)
 ;; "load_psi_libgcc"
 ;; "load_si_libgcc"
 ;; "load_sf_libgcc"
 (define_insn_and_split "load_<mode>_libgcc"
-  [(set (reg:MOVMODE 22)
-        (match_operand:MOVMODE 0 "memory_operand" "m"))]
-  "avr_load_libgcc_p (operands[0])
-   && REG_P (XEXP (operands[0], 0))
-   && REG_Z == REGNO (XEXP (operands[0], 0))"
+  [(set (match_operand:MOVMODE 0 "register_operand" "={r22}")
+        (match_operand:MOVMODE 1 "memory_operand"     "m"))]
+  "avr_load_libgcc_p (operands[1])"
   "#"
   "&& reload_completed"
   [(scratch)]
@@ -823,12 +808,8 @@
         DONE;
       }
 
-    if (avr_load_libgcc_p (src))
-      {
-        // For the small devices, do loads per libgcc call.
-        emit_insn (gen_gen_load<mode>_libgcc (dest, src));
-        DONE;
-      }
+    // The avr_load_libgcc_p (src) insns are handled above by
+    // "load_<mode>_libgcc".  They look like ordinary move insns.
   })
 
 ;;========================================================================
@@ -3756,39 +3737,18 @@
 ; divmod
 
 ;; Generate lib1funcs.S calls ourselves, because:
-;;  - we know exactly which registers are clobbered (for QI and HI
-;;    modes, some of the call-used registers are preserved)
-;;  - we get both the quotient and the remainder at no extra cost
-;;  - we split the patterns only after the first CSE passes because
-;;    CSE has problems to operate on hard regs.
-;;
-(define_insn_and_split "divmodqi4"
-  [(set (match_operand:QI 0 "pseudo_register_operand")
-        (div:QI (match_operand:QI 1 "pseudo_register_operand")
-                (match_operand:QI 2 "pseudo_register_operand")))
-   (set (match_operand:QI 3 "pseudo_register_operand")
-        (mod:QI (match_dup 1) (match_dup 2)))
-   (clobber (reg:QI 22))
-   (clobber (reg:QI 23))
-   (clobber (reg:QI 24))
-   (clobber (reg:QI 25))]
-  ""
-  { gcc_unreachable(); }
-  ""
-  [(set (reg:QI 24) (match_dup 1))
-   (set (reg:QI 22) (match_dup 2))
-   (parallel [(set (reg:QI 24) (div:QI (reg:QI 24) (reg:QI 22)))
-              (set (reg:QI 25) (mod:QI (reg:QI 24) (reg:QI 22)))
-              (clobber (reg:QI 22))
-              (clobber (reg:QI 23))])
-   (set (match_dup 0) (reg:QI 24))
-   (set (match_dup 3) (reg:QI 25))])
+;; - We know exactly which registers are clobbered, and for QI, HI
+;;   and PSI modes, some of the call-used registers are preserved.
+;; - We get both the quotient and the remainder at no extra cost.
 
-(define_insn_and_split "*divmodqi4_call_split"
-  [(set (reg:QI 24) (div:QI (reg:QI 24) (reg:QI 22)))
-   (set (reg:QI 25) (mod:QI (reg:QI 24) (reg:QI 22)))
-   (clobber (reg:QI 22))
-   (clobber (reg:QI 23))]
+(define_insn_and_split "divmodqi4"
+  [(set (match_operand:QI 0 "register_operand"        "={r24}")
+        (div:QI (match_operand:QI 1 "register_operand" "{r24}")
+                (match_operand:QI 2 "register_operand" "{r22}")))
+   (set (match_operand:QI 3 "register_operand"        "={r25}")
+        (mod:QI (match_dup 1)
+                (match_dup 2)))
+   (clobber (match_scratch:HI 4                       "={r22}"))]
   ""
   "#"
   "&& reload_completed"
@@ -3798,38 +3758,20 @@
 (define_insn "*divmodqi4_call"
   [(set (reg:QI 24) (div:QI (reg:QI 24) (reg:QI 22)))
    (set (reg:QI 25) (mod:QI (reg:QI 24) (reg:QI 22)))
-   (clobber (reg:QI 22))
-   (clobber (reg:QI 23))
+   (clobber (reg:HI 22))
    (clobber (reg:CC REG_CC))]
   "reload_completed"
   "%~call __divmodqi4"
   [(set_attr "type" "xcall")])
 
 (define_insn_and_split "udivmodqi4"
- [(set (match_operand:QI 0 "pseudo_register_operand")
-       (udiv:QI (match_operand:QI 1 "pseudo_register_operand")
-                (match_operand:QI 2 "pseudo_register_operand")))
-  (set (match_operand:QI 3 "pseudo_register_operand")
-       (umod:QI (match_dup 1) (match_dup 2)))
-  (clobber (reg:QI 22))
-  (clobber (reg:QI 23))
-  (clobber (reg:QI 24))
-  (clobber (reg:QI 25))]
-  ""
-  { gcc_unreachable(); }
-  ""
-  [(set (reg:QI 24) (match_dup 1))
-   (set (reg:QI 22) (match_dup 2))
-   (parallel [(set (reg:QI 24) (udiv:QI (reg:QI 24) (reg:QI 22)))
-              (set (reg:QI 25) (umod:QI (reg:QI 24) (reg:QI 22)))
-              (clobber (reg:QI 23))])
-   (set (match_dup 0) (reg:QI 24))
-   (set (match_dup 3) (reg:QI 25))])
-
-(define_insn_and_split "*udivmodqi4_call_split"
-  [(set (reg:QI 24) (udiv:QI (reg:QI 24) (reg:QI 22)))
-   (set (reg:QI 25) (umod:QI (reg:QI 24) (reg:QI 22)))
-   (clobber (reg:QI 23))]
+  [(set (match_operand:QI 0 "register_operand"         "={r24}")
+        (udiv:QI (match_operand:QI 1 "register_operand" "{r24}")
+                 (match_operand:QI 2 "register_operand" "{r22}")))
+   (set (match_operand:QI 3 "register_operand"         "={r25}")
+        (umod:QI (match_dup 1)
+                 (match_dup 2)))
+   (clobber (match_scratch:QI 4                        "={r23}"))]
   ""
   "#"
   "&& reload_completed"
@@ -3845,33 +3787,18 @@
   "%~call __udivmodqi4"
   [(set_attr "type" "xcall")])
 
-(define_insn_and_split "divmodhi4"
-  [(set (match_operand:HI 0 "pseudo_register_operand")
-        (div:HI (match_operand:HI 1 "pseudo_register_operand")
-                (match_operand:HI 2 "pseudo_register_operand")))
-   (set (match_operand:HI 3 "pseudo_register_operand")
-        (mod:HI (match_dup 1) (match_dup 2)))
-   (clobber (reg:QI 21))
-   (clobber (reg:HI 22))
-   (clobber (reg:HI 24))
-   (clobber (reg:HI 26))]
-  ""
-  { gcc_unreachable(); }
-  ""
-  [(set (reg:HI 24) (match_dup 1))
-   (set (reg:HI 22) (match_dup 2))
-   (parallel [(set (reg:HI 22) (div:HI (reg:HI 24) (reg:HI 22)))
-              (set (reg:HI 24) (mod:HI (reg:HI 24) (reg:HI 22)))
-              (clobber (reg:HI 26))
-              (clobber (reg:QI 21))])
-   (set (match_dup 0) (reg:HI 22))
-   (set (match_dup 3) (reg:HI 24))])
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; 16-bit divmod
 
-(define_insn_and_split "*divmodhi4_call_split"
-  [(set (reg:HI 22) (div:HI (reg:HI 24) (reg:HI 22)))
-   (set (reg:HI 24) (mod:HI (reg:HI 24) (reg:HI 22)))
-   (clobber (reg:HI 26))
-   (clobber (reg:QI 21))]
+(define_insn_and_split "divmodhi4"
+  [(set (match_operand:HI 0 "register_operand"        "={r22}")
+        (div:HI (match_operand:HI 1 "register_operand" "{r24}")
+                (match_operand:HI 2 "register_operand" "{r22}")))
+   (set (match_operand:HI 3 "register_operand"        "={r24}")
+        (mod:HI (match_dup 1)
+                (match_dup 2)))
+   (clobber (match_scratch:HI 4                       "={r26}"))
+   (clobber (match_scratch:QI 5                       "={r21}"))]
   ""
   "#"
   "&& reload_completed"
@@ -3889,32 +3816,14 @@
   [(set_attr "type" "xcall")])
 
 (define_insn_and_split "udivmodhi4"
-  [(set (match_operand:HI 0 "pseudo_register_operand")
-        (udiv:HI (match_operand:HI 1 "pseudo_register_operand")
-                 (match_operand:HI 2 "pseudo_register_operand")))
-   (set (match_operand:HI 3 "pseudo_register_operand")
-        (umod:HI (match_dup 1) (match_dup 2)))
-   (clobber (reg:QI 21))
-   (clobber (reg:HI 22))
-   (clobber (reg:HI 24))
-   (clobber (reg:HI 26))]
-  ""
-  { gcc_unreachable(); }
-  ""
-  [(set (reg:HI 24) (match_dup 1))
-   (set (reg:HI 22) (match_dup 2))
-   (parallel [(set (reg:HI 22) (udiv:HI (reg:HI 24) (reg:HI 22)))
-              (set (reg:HI 24) (umod:HI (reg:HI 24) (reg:HI 22)))
-              (clobber (reg:HI 26))
-              (clobber (reg:QI 21))])
-   (set (match_dup 0) (reg:HI 22))
-   (set (match_dup 3) (reg:HI 24))])
-
-(define_insn_and_split "*udivmodhi4_call_split"
-  [(set (reg:HI 22) (udiv:HI (reg:HI 24) (reg:HI 22)))
-   (set (reg:HI 24) (umod:HI (reg:HI 24) (reg:HI 22)))
-   (clobber (reg:HI 26))
-   (clobber (reg:QI 21))]
+  [(set (match_operand:HI 0 "register_operand"         "={r22}")
+        (udiv:HI (match_operand:HI 1 "register_operand" "{r24}")
+                 (match_operand:HI 2 "register_operand" "{r22}")))
+   (set (match_operand:HI 3 "register_operand"         "={r24}")
+        (umod:HI (match_dup 1)
+                 (match_dup 2)))
+   (clobber (match_scratch:HI 4                        "={r26}"))
+   (clobber (match_scratch:QI 5                        "={r21}"))]
   ""
   "#"
   "&& reload_completed"
@@ -3926,8 +3835,7 @@
    (set (reg:HI 24) (umod:HI (reg:HI 24) (reg:HI 22)))
    (clobber (reg:HI 26))
    (clobber (reg:QI 21))
-   (clobber (reg:CC REG_CC))
-   ]
+   (clobber (reg:CC REG_CC))]
   "reload_completed"
   "%~call __udivmodhi4"
   [(set_attr "type" "xcall")])
@@ -4167,33 +4075,15 @@
 ;; implementation works the other way round.
 
 (define_insn_and_split "divmodpsi4"
-  [(set (match_operand:PSI 0 "pseudo_register_operand")
-        (div:PSI (match_operand:PSI 1 "pseudo_register_operand")
-                 (match_operand:PSI 2 "pseudo_register_operand")))
-   (set (match_operand:PSI 3 "pseudo_register_operand")
+  [(set (match_operand:PSI 0 "register_operand"         "={r22}")
+        (div:PSI (match_operand:PSI 1 "register_operand" "{r22}")
+                 (match_operand:PSI 2 "register_operand" "{r18}")))
+   (set (match_operand:PSI 3 "register_operand"         "={r18}")
         (mod:PSI (match_dup 1)
                  (match_dup 2)))
-   (clobber (reg:DI 18))
-   (clobber (reg:QI 26))]
-  ""
-  { gcc_unreachable(); }
-  ""
-  [(set (reg:PSI 22) (match_dup 1))
-   (set (reg:PSI 18) (match_dup 2))
-   (parallel [(set (reg:PSI 22) (div:PSI (reg:PSI 22) (reg:PSI 18)))
-              (set (reg:PSI 18) (mod:PSI (reg:PSI 22) (reg:PSI 18)))
-              (clobber (reg:QI 21))
-              (clobber (reg:QI 25))
-              (clobber (reg:QI 26))])
-   (set (match_dup 0) (reg:PSI 22))
-   (set (match_dup 3) (reg:PSI 18))])
-
-(define_insn_and_split "*divmodpsi4_call_split"
-  [(set (reg:PSI 22) (div:PSI (reg:PSI 22) (reg:PSI 18)))
-   (set (reg:PSI 18) (mod:PSI (reg:PSI 22) (reg:PSI 18)))
-   (clobber (reg:QI 21))
-   (clobber (reg:QI 25))
-   (clobber (reg:QI 26))]
+   (clobber (match_scratch:QI 4                         "={r21}"))
+   (clobber (match_scratch:QI 5                         "={r25}"))
+   (clobber (match_scratch:QI 6                         "={r26}"))]
   ""
   "#"
   "&& reload_completed"
@@ -4212,33 +4102,15 @@
   [(set_attr "type" "xcall")])
 
 (define_insn_and_split "udivmodpsi4"
-  [(set (match_operand:PSI 0 "pseudo_register_operand")
-        (udiv:PSI (match_operand:PSI 1 "pseudo_register_operand")
-                  (match_operand:PSI 2 "pseudo_register_operand")))
-   (set (match_operand:PSI 3 "pseudo_register_operand")
+  [(set (match_operand:PSI 0 "register_operand"          "={r22}")
+        (udiv:PSI (match_operand:PSI 1 "register_operand" "{r22}")
+                  (match_operand:PSI 2 "register_operand" "{r18}")))
+   (set (match_operand:PSI 3 "register_operand"          "={r18}")
         (umod:PSI (match_dup 1)
                   (match_dup 2)))
-   (clobber (reg:DI 18))
-   (clobber (reg:QI 26))]
-  ""
-  { gcc_unreachable(); }
-  ""
-  [(set (reg:PSI 22) (match_dup 1))
-   (set (reg:PSI 18) (match_dup 2))
-   (parallel [(set (reg:PSI 22) (udiv:PSI (reg:PSI 22) (reg:PSI 18)))
-              (set (reg:PSI 18) (umod:PSI (reg:PSI 22) (reg:PSI 18)))
-              (clobber (reg:QI 21))
-              (clobber (reg:QI 25))
-              (clobber (reg:QI 26))])
-   (set (match_dup 0) (reg:PSI 22))
-   (set (match_dup 3) (reg:PSI 18))])
-
-(define_insn_and_split "*udivmodpsi4_call_split"
-  [(set (reg:PSI 22) (udiv:PSI (reg:PSI 22) (reg:PSI 18)))
-   (set (reg:PSI 18) (umod:PSI (reg:PSI 22) (reg:PSI 18)))
-   (clobber (reg:QI 21))
-   (clobber (reg:QI 25))
-   (clobber (reg:QI 26))]
+   (clobber (match_scratch:QI 4                          "={r21}"))
+   (clobber (match_scratch:QI 5                          "={r25}"))
+   (clobber (match_scratch:QI 6                          "={r26}"))]
   ""
   "#"
   "&& reload_completed"
@@ -4259,33 +4131,14 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (define_insn_and_split "divmodsi4"
-  [(set (match_operand:SI 0 "pseudo_register_operand")
-        (div:SI (match_operand:SI 1 "pseudo_register_operand")
-                (match_operand:SI 2 "pseudo_register_operand")))
-   (set (match_operand:SI 3 "pseudo_register_operand")
+  [(set (match_operand:SI 0 "register_operand"        "={r18}")
+        (div:SI (match_operand:SI 1 "register_operand" "{r22}")
+                (match_operand:SI 2 "register_operand" "{r18}")))
+   (set (match_operand:SI 3 "register_operand"        "={r22}")
         (mod:SI (match_dup 1)
                 (match_dup 2)))
-   (clobber (reg:SI 18))
-   (clobber (reg:SI 22))
-   (clobber (reg:HI 26))
-   (clobber (reg:HI 30))]
-  ""
-  { gcc_unreachable(); }
-  ""
-  [(set (reg:SI 22) (match_dup 1))
-   (set (reg:SI 18) (match_dup 2))
-   (parallel [(set (reg:SI 18) (div:SI (reg:SI 22) (reg:SI 18)))
-              (set (reg:SI 22) (mod:SI (reg:SI 22) (reg:SI 18)))
-              (clobber (reg:HI 26))
-              (clobber (reg:HI 30))])
-   (set (match_dup 0) (reg:SI 18))
-   (set (match_dup 3) (reg:SI 22))])
-
-(define_insn_and_split "*divmodsi4_call_split"
-  [(set (reg:SI 18) (div:SI (reg:SI 22) (reg:SI 18)))
-   (set (reg:SI 22) (mod:SI (reg:SI 22) (reg:SI 18)))
-   (clobber (reg:HI 26))
-   (clobber (reg:HI 30))]
+   (clobber (match_scratch:HI 4                       "=x"))
+   (clobber (match_scratch:HI 5                       "=z"))]
   ""
   "#"
   "&& reload_completed"
@@ -4303,33 +4156,14 @@
   [(set_attr "type" "xcall")])
 
 (define_insn_and_split "udivmodsi4"
-  [(set (match_operand:SI 0 "pseudo_register_operand")
-        (udiv:SI (match_operand:SI 1 "pseudo_register_operand")
-                 (match_operand:SI 2 "pseudo_register_operand")))
-   (set (match_operand:SI 3 "pseudo_register_operand")
+  [(set (match_operand:SI 0 "register_operand"         "={r18}")
+        (udiv:SI (match_operand:SI 1 "register_operand" "{r22}")
+                 (match_operand:SI 2 "register_operand" "{r18}")))
+   (set (match_operand:SI 3 "register_operand"         "={r22}")
         (umod:SI (match_dup 1)
                  (match_dup 2)))
-   (clobber (reg:SI 18))
-   (clobber (reg:SI 22))
-   (clobber (reg:HI 26))
-   (clobber (reg:HI 30))]
-  ""
-  { gcc_unreachable(); }
-  ""
-  [(set (reg:SI 22) (match_dup 1))
-   (set (reg:SI 18) (match_dup 2))
-   (parallel [(set (reg:SI 18) (udiv:SI (reg:SI 22) (reg:SI 18)))
-              (set (reg:SI 22) (umod:SI (reg:SI 22) (reg:SI 18)))
-              (clobber (reg:HI 26))
-              (clobber (reg:HI 30))])
-   (set (match_dup 0) (reg:SI 18))
-   (set (match_dup 3) (reg:SI 22))])
-
-(define_insn_and_split "*udivmodsi4_call_split"
-  [(set (reg:SI 18) (udiv:SI (reg:SI 22) (reg:SI 18)))
-   (set (reg:SI 22) (umod:SI (reg:SI 22) (reg:SI 18)))
-   (clobber (reg:HI 26))
-   (clobber (reg:HI 30))]
+   (clobber (match_scratch:HI 4                        "=x"))
+   (clobber (match_scratch:HI 5                        "=z"))]
   ""
   "#"
   "&& reload_completed"
@@ -6941,7 +6775,7 @@
 ;; without a comparison does not require a scratch.  With the peep2 approach
 ;; below, we can get a scratch from the peep2 framework without increasing
 ;; the register pressure, whereas cmpelim doesn't offer such a feature.
-;;    When no scratch is available, then we just don't perform the optimizaton,
+;;    When no scratch is available, then we just don't perform the optimization,
 ;; i.e. the comparison against 0 won't be optimized away, which is preferred
 ;; over increasing the register pressure -- in many cases without reason --
 ;; which might result in additional spills.
@@ -8256,7 +8090,7 @@
 ;;     AND   Rm, Rn
 ;;     BRNE  .La
 ;;
-;; shall not be superseeded.  With a respective combine pattern
+;; shall not be superseded.  With a respective combine pattern
 ;; the latter sequence would be
 ;;
 ;;     AND   Rm, Rn
@@ -8799,7 +8633,7 @@
     DONE;
   })
 
-;; Actually, it's too late now to work out address spaces known at compiletime.
+;; Actually, it's too late now to work out address spaces known at compile time.
 ;; Best place would be to fold ADDR_SPACE_CONVERT_EXPR in avr_fold_builtin.
 ;; However, avr_addr_space_convert can add some built-in knowledge for PSTR
 ;; so that ADDR_SPACE_CONVERT_EXPR in the built-in must not be resolved.
@@ -9036,55 +8870,117 @@
    (set (reg:QI 25)
         (const_int 0))])
 
-;; Count Leading Zeros
 
-(define_expand "clzhi2"
-  [(set (reg:HI 24)
-        (match_operand:HI 1 "register_operand" ""))
-   (parallel [(set (reg:HI 24)
-                   (clz:HI (reg:HI 24)))
-              (clobber (reg:QI 26))])
-   (set (match_operand:HI 0 "register_operand" "")
-        (reg:HI 24))])
+;; Bit Reverse
 
-(define_expand "clzsi2"
-  [(set (reg:SI 22)
-        (match_operand:SI 1 "register_operand" ""))
-   (parallel [(set (reg:HI 24)
-                   (truncate:HI (clz:SI (reg:SI 22))))
-              (clobber (reg:QI 26))])
-   (set (match_dup 2)
-        (reg:HI 24))
-   (set (match_operand:SI 0 "register_operand" "")
-        (zero_extend:SI (match_dup 2)))]
-  ""
-  {
-    operands[2] = gen_reg_rtx (HImode);
-  })
-
-(define_insn_and_split "*clzhi2.libgcc_split"
-  [(set (reg:HI 24)
-        (clz:HI (reg:HI 24)))
-   (clobber (reg:QI 26))]
+(define_insn_and_split "bitreverseqi2"
+  [(set (match_operand:QI 0 "register_operand"               "=r")
+        (bitreverse:QI (match_operand:QI 1 "register_operand" "r")))]
   ""
   "#"
   "&& reload_completed"
   [(scratch)]
   { DONE_ADD_CCC })
 
-(define_insn "*clzhi2.libgcc"
+(define_insn "*bitreverseqi2"
+  [(set (match_operand:QI 0 "register_operand"               "=r")
+        (bitreverse:QI (match_operand:QI 1 "register_operand" "r")))
+   (clobber (reg:CC REG_CC))]
+  "reload_completed"
+  {
+    return REGNO (operands[0]) == REGNO (operands[1])
+      ? "mov __tmp_reg__,%0"            CR_TAB
+        "lsl %0"                        CR_TAB
+        "adc %0,__zero_reg__"           CR_TAB
+        "bst __tmp_reg__,0 $ bld %0,7"  CR_TAB
+        "bst __tmp_reg__,1 $ bld %0,6"  CR_TAB
+        "bst __tmp_reg__,2 $ bld %0,5"  CR_TAB
+        "bst __tmp_reg__,4 $ bld %0,3"  CR_TAB
+        "bst __tmp_reg__,5 $ bld %0,2"  CR_TAB
+        "bst __tmp_reg__,6 $ bld %0,1"
+      : "mov %0,%1"            CR_TAB
+        "lsl %0"               CR_TAB
+        "adc %0,__zero_reg__"  CR_TAB
+        "bst %1,0 $ bld %0,7"  CR_TAB
+        "bst %1,1 $ bld %0,6"  CR_TAB
+        "bst %1,2 $ bld %0,5"  CR_TAB
+        "bst %1,4 $ bld %0,3"  CR_TAB
+        "bst %1,5 $ bld %0,2"  CR_TAB
+        "bst %1,6 $ bld %0,1";
+  }
+  [(set_attr "length" "15")])
+
+(define_insn_and_split "bitreversehi2"
+  [(set (match_operand:HI 0 "register_operand"               "={r24}")
+        (bitreverse:HI (match_operand:HI 1 "register_operand" "{r24}")))]
+  ""
+  "#"
+  "&& reload_completed"
+  [(scratch)]
+  { DONE_ADD_CCC })
+
+(define_insn "*bitreversehi2.libgcc"
   [(set (reg:HI 24)
-        (clz:HI (reg:HI 24)))
+        (bitreverse:HI (reg:HI 24)))
+   (clobber (reg:CC REG_CC))]
+  "reload_completed"
+  "%~call __bitreverse16"
+  [(set_attr "type" "xcall")])
+
+(define_insn_and_split "bitreversesi2"
+  [(set (match_operand:SI 0 "register_operand"               "={r22}")
+        (bitreverse:SI (match_operand:SI 1 "register_operand" "{r22}")))]
+  ""
+  "#"
+  "&& reload_completed"
+  [(scratch)]
+  { DONE_ADD_CCC })
+
+(define_insn "*bitreversesi2.libgcc"
+  [(set (reg:SI 22)
+        (bitreverse:SI (reg:SI 22)))
+   (clobber (reg:CC REG_CC))]
+  "reload_completed"
+  "%~call __bitreverse32"
+  [(set_attr "type" "xcall")])
+
+
+;; Count Leading Zeros
+;; Count Trailing Zeros
+;; Find First Set
+
+(define_code_iterator ctz_ffs  [ctz ffs])
+(define_code_iterator cxz_ffs  [clz ctz ffs])
+
+;; "clzhi2"
+;; "ctzhi2"
+;; "ffshi2"
+(define_insn_and_split "<code>hi2"
+  [(set (match_operand:HI 0 "register_operand"            "={r24}")
+        (cxz_ffs:HI (match_operand:HI 1 "register_operand" "{r24}")))
+   (clobber (match_scratch:QI 2                           "={r26}"))]
+  ""
+  "#"
+  "&& reload_completed"
+  [(scratch)]
+  { DONE_ADD_CCC })
+
+;; "*clzhi2.libgcc"
+;; "*ctzhi2.libgcc"
+;; "*ffshi2.libgcc"
+(define_insn "*<code>hi2.libgcc"
+  [(set (reg:HI 24)
+        (cxz_ffs:HI (reg:HI 24)))
    (clobber (reg:QI 26))
    (clobber (reg:CC REG_CC))]
   "reload_completed"
-  "%~call __clzhi2"
+  "%~call __<code>hi2"
   [(set_attr "type" "xcall")])
 
-(define_insn_and_split "*clzsihi2.libgcc_split"
-  [(set (reg:HI 24)
-        (truncate:HI (clz:SI (reg:SI 22))))
-   (clobber (reg:QI 26))]
+(define_insn_and_split "clzsi2"
+  [(set (match_operand:HI 0 "register_operand"        "={r24}")
+        (clz:HI (match_operand:SI 1 "register_operand" "{r22}")))
+   (clobber (match_scratch:QI 2                       "={r26}"))]
   ""
   "#"
   "&& reload_completed"
@@ -9093,146 +8989,38 @@
 
 (define_insn "*clzsihi2.libgcc"
   [(set (reg:HI 24)
-        (truncate:HI (clz:SI (reg:SI 22))))
+        (clz:HI (reg:SI 22)))
    (clobber (reg:QI 26))
    (clobber (reg:CC REG_CC))]
   "reload_completed"
   "%~call __clzsi2"
   [(set_attr "type" "xcall")])
 
-;; Count Trailing Zeros
-
-(define_expand "ctzhi2"
-  [(set (reg:HI 24)
-        (match_operand:HI 1 "register_operand" ""))
-   (parallel [(set (reg:HI 24)
-                   (ctz:HI (reg:HI 24)))
-              (clobber (reg:QI 26))])
-   (set (match_operand:HI 0 "register_operand" "")
-        (reg:HI 24))])
-
-(define_expand "ctzsi2"
-  [(set (reg:SI 22)
-        (match_operand:SI 1 "register_operand" ""))
-   (parallel [(set (reg:HI 24)
-                   (truncate:HI (ctz:SI (reg:SI 22))))
-              (clobber (reg:QI 22))
-              (clobber (reg:QI 26))])
-   (set (match_dup 2)
-        (reg:HI 24))
-   (set (match_operand:SI 0 "register_operand" "")
-        (zero_extend:SI (match_dup 2)))]
-  ""
-  {
-    operands[2] = gen_reg_rtx (HImode);
-  })
-
-(define_insn_and_split "*ctzhi2.libgcc_split"
-  [(set (reg:HI 24)
-        (ctz:HI (reg:HI 24)))
-   (clobber (reg:QI 26))]
+;; "ctzsi2"
+;; "ffssi2"
+(define_insn_and_split "<code>si2"
+  [(set (match_operand:HI 0 "register_operand"            "={r24}")
+        (ctz_ffs:HI (match_operand:SI 1 "register_operand" "{r22}")))
+   (clobber (match_scratch:QI 2                           "={r22}"))
+   (clobber (match_scratch:QI 3                           "={r26}"))]
   ""
   "#"
   "&& reload_completed"
   [(scratch)]
   { DONE_ADD_CCC })
 
-(define_insn "*ctzhi2.libgcc"
+;; "*ctzsihi2.libgcc"
+;; "*ffssihi2.libgcc"
+(define_insn "*<code>hi2.libgcc"
   [(set (reg:HI 24)
-        (ctz:HI (reg:HI 24)))
-   (clobber (reg:QI 26))
-   (clobber (reg:CC REG_CC))]
-  "reload_completed"
-  "%~call __ctzhi2"
-  [(set_attr "type" "xcall")])
-
-(define_insn_and_split "*ctzsihi2.libgcc_split"
-  [(set (reg:HI 24)
-        (truncate:HI (ctz:SI (reg:SI 22))))
-   (clobber (reg:QI 22))
-   (clobber (reg:QI 26))]
-  ""
-  "#"
-  "&& reload_completed"
-  [(scratch)]
-  { DONE_ADD_CCC })
-
-(define_insn "*ctzsihi2.libgcc"
-  [(set (reg:HI 24)
-        (truncate:HI (ctz:SI (reg:SI 22))))
+        (ctz_ffs:HI (reg:SI 22)))
    (clobber (reg:QI 22))
    (clobber (reg:QI 26))
    (clobber (reg:CC REG_CC))]
   "reload_completed"
-  "%~call __ctzsi2"
+  "%~call __<code>si2"
   [(set_attr "type" "xcall")])
 
-;; Find First Set
-
-(define_expand "ffshi2"
-  [(set (reg:HI 24)
-        (match_operand:HI 1 "register_operand" ""))
-   (parallel [(set (reg:HI 24)
-                   (ffs:HI (reg:HI 24)))
-              (clobber (reg:QI 26))])
-   (set (match_operand:HI 0 "register_operand" "")
-        (reg:HI 24))])
-
-(define_expand "ffssi2"
-  [(set (reg:SI 22)
-        (match_operand:SI 1 "register_operand" ""))
-   (parallel [(set (reg:HI 24)
-                   (truncate:HI (ffs:SI (reg:SI 22))))
-              (clobber (reg:QI 22))
-              (clobber (reg:QI 26))])
-   (set (match_dup 2)
-        (reg:HI 24))
-   (set (match_operand:SI 0 "register_operand" "")
-        (zero_extend:SI (match_dup 2)))]
-  ""
-  {
-    operands[2] = gen_reg_rtx (HImode);
-  })
-
-(define_insn_and_split "*ffshi2.libgcc_split"
-  [(set (reg:HI 24)
-        (ffs:HI (reg:HI 24)))
-   (clobber (reg:QI 26))]
-  ""
-  "#"
-  "&& reload_completed"
-  [(scratch)]
-  { DONE_ADD_CCC })
-
-(define_insn "*ffshi2.libgcc"
-  [(set (reg:HI 24)
-        (ffs:HI (reg:HI 24)))
-   (clobber (reg:QI 26))
-   (clobber (reg:CC REG_CC))]
-  "reload_completed"
-  "%~call __ffshi2"
-  [(set_attr "type" "xcall")])
-
-(define_insn_and_split "*ffssihi2.libgcc_split"
-  [(set (reg:HI 24)
-        (truncate:HI (ffs:SI (reg:SI 22))))
-   (clobber (reg:QI 22))
-   (clobber (reg:QI 26))]
-  ""
-  "#"
-  "&& reload_completed"
-  [(scratch)]
-  { DONE_ADD_CCC })
-
-(define_insn "*ffssihi2.libgcc"
-  [(set (reg:HI 24)
-        (truncate:HI (ffs:SI (reg:SI 22))))
-   (clobber (reg:QI 22))
-   (clobber (reg:QI 26))
-   (clobber (reg:CC REG_CC))]
-  "reload_completed"
-  "%~call __ffssi2"
-  [(set_attr "type" "xcall")])
 
 ;; Copysign
 
@@ -9253,17 +9041,9 @@
 
 ;; Swap Bytes (change byte-endianness)
 
-(define_expand "bswapsi2"
-  [(set (reg:SI 22)
-        (match_operand:SI 1 "register_operand" ""))
-   (set (reg:SI 22)
-        (bswap:SI (reg:SI 22)))
-   (set (match_operand:SI 0 "register_operand" "")
-        (reg:SI 22))])
-
-(define_insn_and_split "*bswapsi2.libgcc_split"
-  [(set (reg:SI 22)
-        (bswap:SI (reg:SI 22)))]
+(define_insn_and_split "bswapsi2"
+  [(set (match_operand:SI 0 "register_operand"          "={r22}")
+        (bswap:SI (match_operand:SI 1 "register_operand" "{r22}")))]
   ""
   "#"
   "&& reload_completed"
@@ -9346,203 +9126,54 @@
   [(set_attr "length" "1")])
 
 ;; FMUL
-(define_expand "fmul"
-  [(set (reg:QI 24)
-        (match_operand:QI 1 "register_operand" ""))
-   (set (reg:QI 25)
-        (match_operand:QI 2 "register_operand" ""))
-   (parallel [(set (reg:HI 22)
-                   (unspec:HI [(reg:QI 24)
-                               (reg:QI 25)] UNSPEC_FMUL))
-              (clobber (reg:HI 24))])
-   (set (match_operand:HI 0 "register_operand" "")
-        (reg:HI 22))]
-  ""
-  {
-    if (AVR_HAVE_MUL)
-      {
-        emit_insn (gen_fmul_insn (operand0, operand1, operand2));
-        DONE;
-      }
-    avr_fix_inputs (operands, 1 << 2, regmask (QImode, 24));
-  })
-
-(define_insn_and_split "fmul_insn"
-  [(set (match_operand:HI 0 "register_operand" "=r")
-        (unspec:HI [(match_operand:QI 1 "register_operand" "a")
-                    (match_operand:QI 2 "register_operand" "a")]
-                   UNSPEC_FMUL))]
-  "AVR_HAVE_MUL"
-  "#"
-  "&& reload_completed"
-  [(scratch)]
-  { DONE_ADD_CCC })
-
-(define_insn "*fmul_insn"
-  [(set (match_operand:HI 0 "register_operand" "=r")
-        (unspec:HI [(match_operand:QI 1 "register_operand" "a")
-                    (match_operand:QI 2 "register_operand" "a")]
-                   UNSPEC_FMUL))
-   (clobber (reg:CC REG_CC))]
-  "AVR_HAVE_MUL && reload_completed"
-  "fmul %1,%2
-	movw %0,r0
-	clr __zero_reg__"
-  [(set_attr "length" "3")])
-
-(define_insn_and_split "*fmul.call_split"
-  [(set (reg:HI 22)
-        (unspec:HI [(reg:QI 24)
-                    (reg:QI 25)] UNSPEC_FMUL))
-   (clobber (reg:HI 24))]
-  "!AVR_HAVE_MUL"
-  "#"
-  "&& reload_completed"
-  [(scratch)]
-  { DONE_ADD_CCC })
-
-(define_insn "*fmul.call"
-  [(set (reg:HI 22)
-        (unspec:HI [(reg:QI 24)
-                    (reg:QI 25)] UNSPEC_FMUL))
-   (clobber (reg:HI 24))
-   (clobber (reg:CC REG_CC))]
-  "!AVR_HAVE_MUL && reload_completed"
-  "%~call __fmul"
-  [(set_attr "type" "xcall")])
-
 ;; FMULS
-(define_expand "fmuls"
-  [(set (reg:QI 24)
-        (match_operand:QI 1 "register_operand" ""))
-   (set (reg:QI 25)
-        (match_operand:QI 2 "register_operand" ""))
-   (parallel [(set (reg:HI 22)
-                   (unspec:HI [(reg:QI 24)
-                               (reg:QI 25)] UNSPEC_FMULS))
-              (clobber (reg:HI 24))])
-   (set (match_operand:HI 0 "register_operand" "")
-        (reg:HI 22))]
+;; FMULSU
+(define_int_iterator FMUL [UNSPEC_FMUL  UNSPEC_FMULS  UNSPEC_FMULSU])
+(define_int_attr fmul   [(UNSPEC_FMUL "fmul")  (UNSPEC_FMULS "fmuls") (UNSPEC_FMULSU "fmulsu")])
+(define_int_attr fmul_X [(UNSPEC_FMUL "%")     (UNSPEC_FMULS "%")     (UNSPEC_FMULSU "")])
+(define_int_attr fmul_1 [(UNSPEC_FMUL "{r25}") (UNSPEC_FMULS "{r25}") (UNSPEC_FMULSU "{r24}")])
+(define_int_attr fmul_2 [(UNSPEC_FMUL "{r24}") (UNSPEC_FMULS "{r24}") (UNSPEC_FMULSU "{r25}")])
+
+;; "fmul"  "fmuls"  "fmulsu"
+(define_insn_and_split "<fmul>"
+  [(set (match_operand:HI 0 "register_operand"                    "={r22},{r22}   ,r")
+        (unspec:HI [(match_operand:QI 1 "register_operand" "<fmul_X>{r24},<fmul_1>,a")
+                    (match_operand:QI 2 "register_operand"         "{r25},<fmul_2>,a")]
+                   FMUL))
+   (clobber (match_scratch:HI 3                                   "={r24},{r24}   ,X"))]
   ""
-  {
-    if (AVR_HAVE_MUL)
-      {
-        emit_insn (gen_fmuls_insn (operand0, operand1, operand2));
-        DONE;
-      }
-    avr_fix_inputs (operands, 1 << 2, regmask (QImode, 24));
-  })
-
-(define_insn_and_split "fmuls_insn"
-  [(set (match_operand:HI 0 "register_operand" "=r")
-        (unspec:HI [(match_operand:QI 1 "register_operand" "a")
-                    (match_operand:QI 2 "register_operand" "a")]
-                   UNSPEC_FMULS))]
-  "AVR_HAVE_MUL"
   "#"
   "&& reload_completed"
   [(scratch)]
-  { DONE_ADD_CCC })
+  { DONE_ADD_CCC }
+  [(set_attr "isa" "no_mul,no_mul,mul")])
 
-(define_insn "*fmuls_insn"
-  [(set (match_operand:HI 0 "register_operand" "=r")
-        (unspec:HI [(match_operand:QI 1 "register_operand" "a")
-                    (match_operand:QI 2 "register_operand" "a")]
-                   UNSPEC_FMULS))
-   (clobber (reg:CC REG_CC))]
-  "AVR_HAVE_MUL && reload_completed"
-  "fmuls %1,%2
-	movw %0,r0
-	clr __zero_reg__"
-  [(set_attr "length" "3")])
-
-(define_insn_and_split "*fmuls.call_split"
+;; "*fmul.call"  "*fmuls.call"  "*fmulsu.call"
+(define_insn "*<fmul>.call"
   [(set (reg:HI 22)
-        (unspec:HI [(reg:QI 24)
-                    (reg:QI 25)] UNSPEC_FMULS))
-   (clobber (reg:HI 24))]
-  "!AVR_HAVE_MUL"
-  "#"
-  "&& reload_completed"
-  [(scratch)]
-  { DONE_ADD_CCC })
-
-(define_insn "*fmuls.call"
-  [(set (reg:HI 22)
-        (unspec:HI [(reg:QI 24)
-                    (reg:QI 25)] UNSPEC_FMULS))
+        (unspec:HI [(match_operand:QI 0 "register_operand" "{r24},<fmul_1>")
+                    (match_operand:QI 1 "register_operand" "{r25},<fmul_2>")]
+                   FMUL))
    (clobber (reg:HI 24))
    (clobber (reg:CC REG_CC))]
   "!AVR_HAVE_MUL && reload_completed"
-  "%~call __fmuls"
+  "%~call __<fmul>"
   [(set_attr "type" "xcall")])
 
-;; FMULSU
-(define_expand "fmulsu"
-  [(set (reg:QI 24)
-        (match_operand:QI 1 "register_operand" ""))
-   (set (reg:QI 25)
-        (match_operand:QI 2 "register_operand" ""))
-   (parallel [(set (reg:HI 22)
-                   (unspec:HI [(reg:QI 24)
-                               (reg:QI 25)] UNSPEC_FMULSU))
-              (clobber (reg:HI 24))])
-   (set (match_operand:HI 0 "register_operand" "")
-        (reg:HI 22))]
-  ""
-  {
-    if (AVR_HAVE_MUL)
-      {
-        emit_insn (gen_fmulsu_insn (operand0, operand1, operand2));
-        DONE;
-      }
-    avr_fix_inputs (operands, 1 << 2, regmask (QImode, 24));
-  })
-
-(define_insn_and_split "fmulsu_insn"
-  [(set (match_operand:HI 0 "register_operand" "=r")
-        (unspec:HI [(match_operand:QI 1 "register_operand" "a")
-                    (match_operand:QI 2 "register_operand" "a")]
-                   UNSPEC_FMULSU))]
-  "AVR_HAVE_MUL"
-  "#"
-  "&& reload_completed"
-  [(scratch)]
-  { DONE_ADD_CCC })
-
-(define_insn "*fmulsu_insn"
-  [(set (match_operand:HI 0 "register_operand" "=r")
-        (unspec:HI [(match_operand:QI 1 "register_operand" "a")
-                    (match_operand:QI 2 "register_operand" "a")]
-                   UNSPEC_FMULSU))
+;; "*fmul_insn"  "*fmuls_insn"  "*fmulsu_insn"
+(define_insn "*<fmul>_insn"
+  [(set (match_operand:HI 0 "register_operand"                    "=r")
+        (unspec:HI [(match_operand:QI 1 "register_operand" "<fmul_X>a")
+                    (match_operand:QI 2 "register_operand"         "a")]
+                   FMUL))
+   (clobber (scratch:HI))
    (clobber (reg:CC REG_CC))]
   "AVR_HAVE_MUL && reload_completed"
-  "fmulsu %1,%2
+  "<fmul> %1,%2
 	movw %0,r0
 	clr __zero_reg__"
   [(set_attr "length" "3")])
 
-(define_insn_and_split "*fmulsu.call_split"
-  [(set (reg:HI 22)
-        (unspec:HI [(reg:QI 24)
-                    (reg:QI 25)] UNSPEC_FMULSU))
-   (clobber (reg:HI 24))]
-  "!AVR_HAVE_MUL"
-  "#"
-  "&& reload_completed"
-  [(scratch)]
-  { DONE_ADD_CCC })
-
-(define_insn "*fmulsu.call"
-  [(set (reg:HI 22)
-        (unspec:HI [(reg:QI 24)
-                    (reg:QI 25)] UNSPEC_FMULSU))
-   (clobber (reg:HI 24))
-   (clobber (reg:CC REG_CC))]
-  "!AVR_HAVE_MUL && reload_completed"
-  "%~call __fmulsu"
-  [(set_attr "type" "xcall")
-   ])
 
 
 ;; Some combiner patterns dealing with bits.

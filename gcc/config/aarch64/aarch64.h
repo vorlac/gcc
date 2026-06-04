@@ -313,6 +313,9 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
 /* SVE2p1 instructions, enabled through +sve2p1.  */
 #define TARGET_SVE2p1 AARCH64_HAVE_ISA (SVE2p1)
 
+/* SVE2p2 instructions, enabled through +sve2p2.  */
+#define TARGET_SVE2p2 AARCH64_HAVE_ISA (SVE2p2)
+
 /* SME instructions, enabled through +sme.  Note that this does not
    imply anything about the state of PSTATE.SM; instructions that require
    SME and streaming mode should use TARGET_STREAMING instead.  */
@@ -343,10 +346,15 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
 /* SME2 instructions, enabled through +sme2.  */
 #define TARGET_SME2 AARCH64_HAVE_ISA (SME2)
 
+/* SME2p2 instructions, enabled through +sme2p2.  */
+#define TARGET_SME2p2 AARCH64_HAVE_ISA (SME2p2)
+
 /* Same with streaming mode enabled.  */
 #define TARGET_STREAMING_SME2 (TARGET_STREAMING && TARGET_SME2)
 
 #define TARGET_STREAMING_SME2p1 (TARGET_STREAMING && AARCH64_HAVE_ISA (SME2p1))
+
+#define TARGET_STREAMING_SME2p2 (TARGET_STREAMING && AARCH64_HAVE_ISA (SME2p2))
 
 #define TARGET_SME_B16B16 AARCH64_HAVE_ISA (SME_B16B16)
 
@@ -510,6 +518,10 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
 
 /* Combinatorial tests.  */
 
+#define TARGET_SVE_OR_SME2p2 \
+  ((TARGET_SVE || TARGET_STREAMING) \
+   && (TARGET_SME2p2 || TARGET_NON_STREAMING))
+
 #define TARGET_SVE2_OR_SME2 \
   ((TARGET_SVE2 || TARGET_STREAMING) \
    && (TARGET_SME2 || TARGET_NON_STREAMING))
@@ -521,6 +533,10 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
 #define TARGET_SVE2p1_OR_SME2 \
   ((TARGET_SVE2p1 || TARGET_STREAMING) \
    && (TARGET_SME2 || TARGET_NON_STREAMING))
+
+#define TARGET_SVE2p2_OR_SME2p2 \
+  ((TARGET_SVE2p2 || TARGET_STREAMING) \
+   && (TARGET_SME2p2 || TARGET_NON_STREAMING))
 
 #define TARGET_SSVE_B16B16 \
   (AARCH64_HAVE_ISA (SVE_B16B16) && TARGET_SVE2_OR_SME2)
@@ -1017,7 +1033,7 @@ extern enum aarch64_cpu aarch64_tune;
 
 #define DEFAULT_PCC_STRUCT_RETURN 0
 
-/* The set of available Procedure Call Stardards.  */
+/* The set of available Procedure Call Standards.  */
 
 enum arm_pcs
 {
@@ -1078,12 +1094,12 @@ struct GTY (()) aarch64_frame
   poly_int64 bytes_below_hard_fp;
 
   /* The number of bytes between the top of the locals area and the top
-     of the frame (the incomming SP).  This value is always a multiple of
+     of the frame (the incoming SP).  This value is always a multiple of
      STACK_BOUNDARY.  */
   poly_int64 bytes_above_locals;
 
   /* The number of bytes between the hard_frame_pointer and the top of
-     the frame (the incomming SP).  This value is always a multiple of
+     the frame (the incoming SP).  This value is always a multiple of
      STACK_BOUNDARY.  */
   poly_int64 bytes_above_hard_fp;
 
@@ -1478,7 +1494,7 @@ typedef struct
 
 /* This definition should be relocated to aarch64-elf-raw.h.  This macro
    should be undefined in aarch64-linux.h and a clear_cache pattern
-   implmented to emit either the call to __aarch64_sync_cache_range()
+   implemented to emit either the call to __aarch64_sync_cache_range()
    directly or preferably the appropriate sycall or cache clear
    instructions inline.  */
 #define CLEAR_INSN_CACHE(beg, end)				\
@@ -1499,16 +1515,6 @@ typedef struct
 #define TARGET_TLS_DESC (aarch64_tls_dialect == TLS_DESCRIPTORS)
 
 extern enum aarch64_code_model aarch64_cmodel;
-
-/* When using the tiny addressing model conditional and unconditional branches
-   can span the whole of the available address space (1MB).  */
-#define HAS_LONG_COND_BRANCH				\
-  (aarch64_cmodel == AARCH64_CMODEL_TINY		\
-   || aarch64_cmodel == AARCH64_CMODEL_TINY_PIC)
-
-#define HAS_LONG_UNCOND_BRANCH				\
-  (aarch64_cmodel == AARCH64_CMODEL_TINY		\
-   || aarch64_cmodel == AARCH64_CMODEL_TINY_PIC)
 
 #define TARGET_HAS_FMV_TARGET_ATTRIBUTE 0
 
@@ -1633,7 +1639,7 @@ extern poly_uint16 aarch64_sve_vg;
    vectors in a structure mode (4).
 
    This limit must not be used for variable-size vectors, since
-   VL-agnostic code must work with arbitary vector lengths.  */
+   VL-agnostic code must work with arbitrary vector lengths.  */
 #define MAX_COMPILE_TIME_VEC_BYTES (256 * 4)
 #endif
 

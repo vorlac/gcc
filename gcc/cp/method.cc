@@ -560,7 +560,7 @@ inherited_ctor_binfo (tree fndecl)
 
 
 /* True if we should omit all user-declared parameters from a base
-   construtor built from complete constructor FN.
+   constructor built from complete constructor FN.
    That's when the ctor is inherited from a virtual base.  */
 
 bool
@@ -2692,6 +2692,7 @@ walk_field_subobs (tree fields, special_function_kind sfk, tree fnname,
   enum { unknown, no, yes }
   only_dmi_mem = (sfk == sfk_constructor && TREE_CODE (ctx) == UNION_TYPE
 		  ? unknown : no);
+  int has_user_provided_ctor = -1;
 
  again:
   for (tree field = fields; field; field = DECL_CHAIN (field))
@@ -2771,6 +2772,7 @@ walk_field_subobs (tree fields, special_function_kind sfk, tree fnname,
 
 	  bad = false;
 	  if (CP_TYPE_CONST_P (mem_type)
+	      && TREE_CODE (ctx) != UNION_TYPE
 	      && default_init_uninitialized_part (mem_type))
 	    {
 	      if (diag)
@@ -2846,6 +2848,58 @@ walk_field_subobs (tree fields, special_function_kind sfk, tree fnname,
 	}
       else
 	argtype = NULL_TREE;
+
+      if (cxx_dialect >= cxx26 && TREE_CODE (ctx) == UNION_TYPE)
+	{
+	  /* C++26 [class.default.ctor]/2:
+	     A defaulted default constructor for class X is defined as deleted
+	     if
+	     ...
+	     - any non-variant potentially constructed subobject, except for
+	       a non-static data member with a brace-or-equal-initializer, has
+	       class type M (or possibly multidimensional array thereof) and
+	       overload resolution as applied to find M's corresponding
+	       constructor does not result in a usable candidate,
+	     So, for C++26 this ignores default constructors of variant
+	     members.  */
+	  if (sfk == sfk_constructor || sfk == sfk_inheriting_constructor)
+	    continue;
+
+	  /* C++26 [class.default.ctor]/2:
+	     ...
+	     - any potentially constructed subobject S has class type M (or
+	       possibly multidimensional array thereof), M has a destructor
+	       that is deleted or inaccessible from the defaulted default
+	       constructor, and either S is non-variant or S has a default
+	       member initializer.
+	     This is the dtor_from_ctor case, so ignore destructors of
+	     variant members unless they have a DMI.
+	     C++26 with CWG3189 [class.dtor]/4:
+	     A defaulted destructor for a class X is defined as deleted if
+	     ...
+	     - X is has a non-union class and any non-variant potentially
+	       constructed subobject has S of class type M (or possibly
+	       multidimensional array thereof) where either
+	       - S is not a variant member and M has a destructor that is
+		 deleted or is inaccessible from the defaulted destructor, or
+	       - S is a variant member, M has a destructor that is deleted,
+		 inaccessible from the defaulted destructor, or non-trivial,
+		 and either
+		 - V S has a default member initializer or
+		 - X has a user-provided constructor.
+	     This is the !dtor_from_ctor case, so ignore destructors of
+	     variant members unless they have a DMI or X has user-provided
+	     constructor.  */
+	  if (sfk == sfk_destructor)
+	    {
+	      if (!dtor_from_ctor && has_user_provided_ctor == -1)
+		has_user_provided_ctor
+		  = type_has_user_provided_constructor (current_class_type);
+	      if (DECL_INITIAL (field) == NULL_TREE
+		  && (dtor_from_ctor || !has_user_provided_ctor))
+		continue;
+	    }
+	}
 
       rval = locate_fn_flags (mem_type, fnname, argtype, flags, complain);
 
@@ -3113,7 +3167,7 @@ synthesized_method_walk (tree ctype, special_function_kind sfk, bool const_p,
   else if (ABSTRACT_CLASS_TYPE_P (ctype) && cxx_dialect >= cxx14
 	   /* DR 1658 specifies that vbases of abstract classes are
 	      ignored for both ctors and dtors.  Except DR 2336
-	      overrides that skipping when determing the eh-spec of a
+	      overrides that skipping when determining the eh-spec of a
 	      virtual destructor.  */
 	   && sfk != sfk_virtual_destructor)
     /* Vbase cdtors are not relevant.  */;

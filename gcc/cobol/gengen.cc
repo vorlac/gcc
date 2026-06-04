@@ -265,6 +265,34 @@ gg_append_var_decl(tree var_decl)
     }
   }
 
+#define LOOK_FOR_MISSING_LABELS_not
+#ifdef LOOK_FOR_MISSING_LABELS
+static std::set<tree> missing_labels;
+static std::map<tree, int> missing_gotos;
+void
+dump_missing_labels()
+  {
+  for(auto g : missing_gotos)
+    {
+    auto l = missing_labels.find(g.first);
+    if( l == missing_labels.end() )
+      {
+      const char *name_text = label_decl_text_from_expr(g.first);
+      error_msg_direct( "%<GOTO_EXPR%> %qs (%p) "
+                        "at line %d has no matching label",
+                        name_text,
+                        reinterpret_cast<void *>(g.first),
+                        g.second);
+      }
+    }
+  }
+#else
+void
+dump_missing_labels()
+  {
+  }
+#endif
+
 void
 gg_append_statement(tree stmt)
   {
@@ -295,10 +323,46 @@ gg_append_statement(tree stmt)
   // ./libcpp/include/line-map.h
   // ./libcpp/location-example.txt
 
-#if 0
+#ifdef LOOK_FOR_MISSING_LABELS
+  const char *name_text = label_decl_text_from_expr(stmt);
   if( TREE_CODE(stmt) == GOTO_EXPR )
     {
-    fprintf(stderr, "Laying down a GOTO\n");
+    // When dump_missing_labels reports a name, you can edit it in here and
+    // recompile, and then set a trap here to backtrace to whoever is creating
+    // the orphan goto in the first place.
+
+    if( strcmp(name_text, "") == 0 )
+      {
+      fprintf(stderr, "HULL_BREACH! Label %s!\n", name_text);
+      }
+
+    tree dest = GOTO_DESTINATION (stmt);
+
+    tree label_decl = NULL_TREE;
+    if (TREE_CODE (dest) == LABEL_DECL)
+      {
+      label_decl = dest; /* direct goto label */
+      }
+    else
+      {
+        /* computed goto or other expression-valued destination */
+      }
+    //fprintf(stderr,
+    //        "Laying down a GOTO_EXPR  %s %p at line %d\n",
+    //        name_text,
+    //        reinterpret_cast<void *>(label_decl),
+    //        cobol_location().first_line);
+    missing_gotos[label_decl] = cobol_location().first_line;
+    }
+  if( TREE_CODE(stmt) == LABEL_EXPR )
+    {
+    tree label_decl = LABEL_EXPR_LABEL(stmt);   /* This is a LABEL_DECL. */
+    //fprintf(stderr,
+    //        "Laying down a LABEL_EXPR %s %p at line %d\n",
+    //        name_text,
+    //        reinterpret_cast<void *>(label_decl),
+    //        cobol_location().first_line);
+    missing_labels.insert(label_decl);
     }
 #endif
 
@@ -370,23 +434,34 @@ gg_show_type(tree type)
     cbl_internal_error("The given type is NULL, and that is just not fair");
     }
 
+  int code = TREE_CODE(type);
+
   if( DECL_P(type) )
     {
     type = TREE_TYPE(type);
     }
-  if( !TYPE_P(type) )
+  if( !TYPE_P(type) && code != ARRAY_REF)
     {
-    cbl_internal_error("The given type is not a declaration or a TYPE");
+    cbl_internal_error("%s", "The given type is not a declaration or a TYPE or an ARRAY_REF");
     }
 
   static char ach[1100];
   static char ach2[1024];
   static char ach3[1024];
-  switch( TREE_CODE(type) )
+  switch( code )
     {
     case POINTER_TYPE:
       strcpy(ach2, gg_show_type(TREE_TYPE(type)));
       sprintf(ach, "POINTER to %s", ach2);
+      break;
+
+    case ARRAY_TYPE:
+      strcpy(ach2, gg_show_type(TREE_TYPE(type)));
+      sprintf(ach, "ARRAY");
+      break;
+
+    case ARRAY_REF:
+      sprintf(ach, "ARRAY_REF");
       break;
 
     case VOID_TYPE:
@@ -431,6 +506,11 @@ gg_show_type(tree type)
   if( DECL_P(original_type) && TREE_READONLY(original_type) )
     {
     strcat(ach, " readonly");
+    }
+
+  if( DECL_P(original_type) && TYPE_VOLATILE(original_type) )
+    {
+    strcat(ach, " volatile");
     }
 
   return ach;
@@ -688,7 +768,7 @@ gg_struct_field_ref(const tree base, const char *field)
   return retval;
   }
 
-static tree
+tree
 gg_create_assembler_name(const char *cobol_name)
   {
   char *psz = cobol_name_mangler(cobol_name);
@@ -852,7 +932,7 @@ gg_define_from_declaration(tree var_decl)
     // it's time to actually define the storage with a decl_expression:
     tree stmt = build1_loc (gg_token_location(),
                             DECL_EXPR,
-                            TREE_TYPE(var_decl),
+                            void_type_node,
                             var_decl);
     gg_append_statement(stmt);
     }
@@ -908,6 +988,34 @@ gg_define_variable(tree type_decl, const char *name, gg_variable_scope_t vs_scop
     {
     gg_define_from_declaration(var_decl);
     }
+  return var_decl;
+  }
+
+tree
+gg_define_volatile_variable(tree type_decl,
+                            const char *name,
+                            gg_variable_scope_t vs_scope)
+  {
+  bool already_defined = false;
+
+  tree volatile_type = build_qualified_type(type_decl, TYPE_QUAL_VOLATILE);
+
+  tree var_decl = gg_declare_variable(volatile_type,
+                                      name,
+                                      NULL_TREE,
+                                      vs_scope,
+                                      &already_defined);
+
+  /* Helpful, especially while debugging the front end.  The volatile-qualified
+     type is the important part; these flags should agree with it. */
+  TREE_THIS_VOLATILE(var_decl) = 1;
+  TREE_SIDE_EFFECTS(var_decl) = 1;
+
+  if (!already_defined)
+    {
+    gg_define_from_declaration(var_decl);
+    }
+
   return var_decl;
   }
 
@@ -1317,6 +1425,23 @@ gg_pointer_to_array(tree expr)
   }
 
 tree
+gg_get_address(const tree var_decl)
+  {
+  /* This takes care of the problem of finding the address of a scalar, or of
+     an ARRAY_TYPE.  I recommend using it carefully; there is something to be
+     said for knowing whether you are working with an array, or a scalar. */
+  tree type = TREE_TYPE (var_decl);
+  if( TREE_CODE (type) == ARRAY_TYPE )
+    {
+    return gg_pointer_to_array(var_decl);
+    }
+
+  TREE_ADDRESSABLE(var_decl) = 1;
+  TREE_USED(var_decl) = 1;
+  return build_fold_addr_expr(var_decl);
+  }
+
+tree
 gg_get_indirect_reference(tree pointer, tree offset)
   {
   // The C equivalent: auto pointer[offset];
@@ -1400,12 +1525,13 @@ gg_array_value(tree pointer, tree offset)
     }
   else
     {
-    return build4(ARRAY_REF,
+    tree retval =  build4(ARRAY_REF,
                   element_type,
                   pointer,
-                  offset,
+                  fold_convert(SIZE_T, offset),
                   NULL_TREE,
                   NULL_TREE);
+    return retval;
     }
   }
 
@@ -1595,6 +1721,62 @@ gg_bitwise_and(tree A, tree B)
   }
 
 tree
+gg_bswap (tree var)
+  {
+  location_t loc = UNKNOWN_LOCATION;
+  tree type = TREE_TYPE (var);
+  tree size = TYPE_SIZE_UNIT (type);
+
+  gcc_assert (tree_fits_uhwi_p (size));
+
+  unsigned HOST_WIDE_INT size_in_bytes = tree_to_uhwi (size);
+
+  enum built_in_function fncode;
+  tree unsigned_type;
+
+  switch (size_in_bytes)
+    {
+    case 1:
+      return var;
+
+    case 2:
+      fncode = BUILT_IN_BSWAP16;
+      unsigned_type = uint16_type_node;
+      break;
+
+    case 4:
+      {
+      fncode = BUILT_IN_BSWAP32;
+      unsigned_type = uint32_type_node;
+      break;
+      }
+
+    case 8:
+      fncode = BUILT_IN_BSWAP64;
+      unsigned_type = uint64_type_node;
+      break;
+
+    case 16:
+      fncode = BUILT_IN_BSWAP128;
+      unsigned_type = unsigned_intTI_type_node;  /* or your UINT128 type */
+      break;
+
+    default:
+      gcc_unreachable ();
+    }
+
+  tree arg = fold_convert_loc (loc, unsigned_type, var);
+
+  tree swapped =
+    build_call_expr_loc (loc,
+                         builtin_decl_explicit (fncode),
+                         1,
+                         arg);
+
+  return fold_convert_loc (loc, type, swapped);
+  }
+
+tree
 gg_build_relational_expression(tree operand_a,
                                enum relop_t op,
                                tree operand_b)
@@ -1678,6 +1860,9 @@ gg_build_logical_expression(tree operand_a,
   return logical_expression;
   }
 
+static int label_identifier = 1;
+#define LABEL_ROOT "_label%d"
+
 void
 gg_create_goto_pair(tree *goto_expr,
                     tree *label_expr,
@@ -1687,9 +1872,19 @@ gg_create_goto_pair(tree *goto_expr,
   // We are going to create a pair of expressions for our
   // caller.  They are a matched set of goto/label expressions,
   // to be included in a statement list
+  char *psz;
+  if(name && *name)
+    {
+    psz = xstrdup(name);
+    }
+  else
+    {
+    psz = xasprintf(LABEL_ROOT, label_identifier++);
+    }
+
   tree label_decl = build_decl(   UNKNOWN_LOCATION,
                                   LABEL_DECL,
-                                  gg_create_assembler_name(name),
+                                  gg_create_assembler_name(psz),
                                   void_type_node);
   DECL_CONTEXT(label_decl) = current_function->function_decl;
   TREE_USED(label_decl) = 1;
@@ -1701,6 +1896,7 @@ gg_create_goto_pair(tree *goto_expr,
   *goto_expr  = build1(GOTO_EXPR, void_type_node, label_decl);
   *label_expr = build1(LABEL_EXPR, void_type_node, label_decl);
   *label_addr = gg_get_address_of(label_decl);
+  free(psz);
   }
 
 void
@@ -1709,9 +1905,11 @@ gg_create_goto_pair(tree *goto_expr, tree *label_expr, tree *label_addr)
   // We are going to create a pair of expressions for our
   // caller.  They are a matched set of goto/label expressions,
   // to be included in a statement list
+  char *psz;
+  psz = xasprintf(LABEL_ROOT, label_identifier++);
   tree label_decl = build_decl(   UNKNOWN_LOCATION,
                                   LABEL_DECL,
-                                  NULL_TREE,
+                                  gg_create_assembler_name(psz),
                                   void_type_node);
   DECL_CONTEXT(label_decl) = current_function->function_decl;
   TREE_USED(label_decl) = 1;
@@ -1719,6 +1917,7 @@ gg_create_goto_pair(tree *goto_expr, tree *label_expr, tree *label_addr)
   *goto_expr  = build1(GOTO_EXPR, void_type_node, label_decl);
   *label_expr = build1(LABEL_EXPR, void_type_node, label_decl);
   *label_addr = gg_get_address_of(label_decl);
+  free(psz);
   }
 
 void
@@ -1730,9 +1929,11 @@ gg_create_goto_pair(tree *goto_expr,
   // We are going to create a pair of expressions for our
   // caller.  They are a matched set of goto/label expressions,
   // to be included in a statement list
+  char *psz;
+  psz = xasprintf(LABEL_ROOT, label_identifier++);
   *label_decl = build_decl( UNKNOWN_LOCATION,
                             LABEL_DECL,
-                            NULL_TREE,
+                            gg_create_assembler_name(psz),
                             void_type_node);
   DECL_CONTEXT(*label_decl) = current_function->function_decl;
   TREE_USED(*label_decl) = 1;
@@ -1740,6 +1941,7 @@ gg_create_goto_pair(tree *goto_expr,
   *goto_expr  = build1(GOTO_EXPR, void_type_node, *label_decl);
   *label_expr = build1(LABEL_EXPR, void_type_node, *label_decl);
   *label_addr = gg_get_address_of(*label_decl);
+  free(psz);
   }
 
 void
@@ -1748,15 +1950,18 @@ gg_create_goto_pair(tree *goto_expr, tree *label_expr)
   // We are going to create a pair of expressions for our
   // caller.  They are a matched set of goto/label expressions,
   // to be included in a statement list
+  char *psz;
+  psz = xasprintf(LABEL_ROOT, label_identifier++);
   tree label_decl = build_decl(   UNKNOWN_LOCATION,
                                   LABEL_DECL,
-                                  NULL_TREE,
+                                  gg_create_assembler_name(psz),
                                   void_type_node);
   DECL_CONTEXT(label_decl) = current_function->function_decl;
   TREE_USED(label_decl) = 1;
 
   *goto_expr = build1(GOTO_EXPR, void_type_node, label_decl);
   *label_expr = build1(LABEL_EXPR, void_type_node, label_decl);
+  free(psz);
   }
 
 void
@@ -1765,15 +1970,25 @@ gg_create_goto_pair(tree *goto_expr, tree *label_expr, const char *name)
   // We are going to create a pair of named expressions for our
   // caller.  They are a matched set of goto/label expressions,
   // to be included in a statement list
+  char *psz;
+  if(name && *name)
+    {
+    psz = xstrdup(name);
+    }
+  else
+    {
+    psz = xasprintf(LABEL_ROOT, label_identifier++);
+    }
   tree label_decl = build_decl(   UNKNOWN_LOCATION,
                                   LABEL_DECL,
-                                  gg_create_assembler_name(name),
+                                  gg_create_assembler_name(psz),
                                   void_type_node);
   DECL_CONTEXT(label_decl) = current_function->function_decl;
   TREE_USED(label_decl) = 1;
 
   *goto_expr = build1(GOTO_EXPR, void_type_node, label_decl);
   *label_expr = build1(LABEL_EXPR, void_type_node, label_decl);
+  free(psz);
   }
 
 void
@@ -2328,7 +2543,7 @@ chain_parameter_to_function(tree function_decl, const tree param_type,  const ch
 
     Cases 3. and 4. turn out to require the same flags.  Here are the combinations of
     flags that are required for each flavor of function_decl.  This was empirically
-    determind by compiling a C++ program with sample code for each type.
+    determined by compiling a C++ program with sample code for each type.
 
                             | addressable | used | nothrow | static | external | public | no_instrument
 main                        |             |      |         |   X    |          |   X    |    X
@@ -2743,16 +2958,19 @@ gg_finalize_function()
   gg_trans_unit.function_stack.pop_back();
   }
 
+void scm_dump_generic_nodes(const char *filename, tree root);
+
 void
 gg_leaving_the_source_code_file()
   {
-  for(  std::vector<tree>::const_iterator it=finalized_function_decls.begin();
-        it != finalized_function_decls.end();
-        it++ )
+  typedef std::vector<tree>::value_type func_type;
+  for( const func_type& func : finalized_function_decls )
     {
     //This makes the function visible on the source code module level.
-    cgraph_node::finalize_function(*it, true);
+    cgraph_node::finalize_function(func, true);
     }
+
+  dump_missing_labels();
   }
 
 void
@@ -3126,6 +3344,19 @@ gg_free(tree pointer)
   gg_append_statement(the_call);
   }
 
+tree
+gg_memcmp(const tree s1, const tree s2, tree n)
+  {
+  tree the_call =
+      build_call_expr_loc(gg_token_location(),
+                          builtin_decl_explicit (BUILT_IN_MEMCMP),
+                          3,
+                          s1,
+                          s2,
+                          n);
+  return the_call;
+  }
+
 void
 gg_record_statement_list_start()
   {
@@ -3302,4 +3533,62 @@ gg_token_location()
     retval = current_token_location();
     }
   return retval;
+  }
+
+const char *
+label_decl_text_from_expr(tree expr)
+  {
+  // This extracts the LABEL_DECL text from GOTO_EXPR and LABEL_EXPR
+  tree label_decl = NULL_TREE;
+
+  if(expr == NULL_TREE)
+    {
+    return "missing";
+    }
+
+  switch(TREE_CODE (expr))
+    {
+    case LABEL_DECL:
+      label_decl = expr;
+      break;
+
+    case LABEL_EXPR:
+      label_decl = LABEL_EXPR_LABEL(expr);
+      break;
+
+    case GOTO_EXPR:
+      {
+      tree dest = GOTO_DESTINATION(expr);
+
+      if (dest != NULL_TREE && TREE_CODE (dest) == LABEL_DECL)
+        {
+        label_decl = dest;
+        }
+      else if (dest != NULL_TREE
+               && TREE_CODE(dest) == ADDR_EXPR
+               && TREE_OPERAND(dest, 0) != NULL_TREE
+               && TREE_CODE(TREE_OPERAND(dest, 0)) == LABEL_DECL)
+        {
+        label_decl = TREE_OPERAND(dest, 0);
+        }
+      break;
+      }
+
+    default:
+      return "missing";
+    }
+
+  if( label_decl == NULL_TREE || TREE_CODE (label_decl) != LABEL_DECL )
+    {
+    return "missing";
+    }
+
+  tree name = DECL_NAME (label_decl);
+  if( name == NULL_TREE || TREE_CODE (name) != IDENTIFIER_NODE )
+    {
+    return "missing";
+    }
+
+  const char *text = IDENTIFIER_POINTER(name);
+  return text ? text : "missing";
   }

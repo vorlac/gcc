@@ -249,9 +249,6 @@ bool avr_need_clear_bss_p = false;
 bool avr_need_copy_data_p = false;
 bool avr_has_rodata_p = false;
 
-/* To track if we satisfy __call_main from AVR-LibC.  */
-bool avr_no_call_main_p = false;
-
 /* Counts how often pass avr-fuse-add has been executed.  Is is kept in
    sync with cfun->machine->n_avr_fuse_add_executed and serves as an
    insn condition for shift insn splitters.  */
@@ -599,7 +596,7 @@ avr_option_override (void)
   if (!avr_set_core_architecture ())
     return;
 
-  /* Sould be set by avr-common.cc */
+  /* Should be set by avr-common.cc */
   gcc_assert (avropt_long_double >= avropt_double && avropt_double >= 32);
 
   /* RAM addresses of some SFRs common to all devices in respective arch. */
@@ -984,7 +981,7 @@ avr_can_inline_p (tree /* caller */, tree /* callee */)
 
 
 /* Implement `TARGET_SET_CURRENT_FUNCTION'.  */
-/* Sanity cheching for above function attributes.  */
+/* Sanity checking for above function attributes.  */
 
 static void
 avr_set_current_function (tree decl)
@@ -2175,7 +2172,7 @@ avr_expand_epilogue (bool sibcall_p)
   if (isr_p)
     {
       /* Restore RAMPZ/Y/X/D using tmp_reg as scratch.
-	 The conditions to restore them must be tha same as in prologue.  */
+	 The conditions to restore them must be the same as in prologue.  */
 
       if (AVR_HAVE_RAMPZ
 	  && TEST_HARD_REG_BIT (set, REG_Z)
@@ -3113,7 +3110,7 @@ avr_init_cumulative_args (CUMULATIVE_ARGS *cum, tree fntype, rtx libname,
   if (!libname && stdarg_p (fntype))
     cum->nregs = 0;
 
-  /* Assume the calle may be tail called */
+  /* Assume the callee may be tail called */
 
   cfun->machine->sibcall_fails = false;
 }
@@ -3498,7 +3495,7 @@ reg_unused_after (rtx_insn *insn, rtx reg)
 
 /* Return true when REGNO is set by INSN but not used by the following code.
    The difference to reg_unused_after() is that reg_unused_after() returns
-   true for the entire result even when the result *IS* being used atfer.  */
+   true for the entire result even when the result *IS* being used after.  */
 
 static bool
 avr_result_regno_unused_p (rtx_insn *insn, unsigned regno)
@@ -3698,7 +3695,7 @@ avr_out_lpm_no_lpmx (rtx_insn *insn, rtx *xop, int *plen)
 }
 
 
-/* If PLEN == NULL: Ouput instructions to load a value from a memory location
+/* If PLEN == NULL: Output instructions to load a value from a memory location
    OP[1] in AS1 to register OP[0].
    If PLEN != 0 set *PLEN to the length in words of the instruction sequence.
    Return "".  */
@@ -6587,7 +6584,7 @@ avr_out_compare (rtx_insn *insn, rtx *xop, int *plen)
   const rtx_code cond = compare_condition (insn);
   const bool eqne_p = cond == EQ || cond == NE;
 
-  /* Comparisons == +/-1 and != +/-1 can be done similar to camparing
+  /* Comparisons == +/-1 and != +/-1 can be done similar to comparing
      against 0 by ORing the bytes.  This is one instruction shorter.
      Notice that 64-bit comparisons are always against reg:ALL8 18 (ACC_A)
      and therefore don't use this.  */
@@ -8673,7 +8670,7 @@ avr_out_plus_ext (rtx_insn *insn, rtx *yop, int *plen)
     ? "sbci %0,0"            CR_TAB  "sbrc %1,7"  CR_TAB  "inc %0"
     : "sbc %0,__zero_reg__"  CR_TAB  "sbrc %1,7"  CR_TAB  "inc %0";
 
-  // A register that containts 8 copies of $1.msb.
+  // A register that contains 8 copies of $1.msb.
   rtx ext_reg = ext == ZERO_EXTEND ? zero_reg_rtx : NULL_RTX;
 
   if (plen)
@@ -10694,7 +10691,7 @@ avr_out_fract (rtx_insn *insn, rtx operands[], bool intsigned, int *plen)
 	    {
 	      /* We are going to override the MSB.  If we shift right,
 		 store the MSB in the Carry flag.  This is only needed if
-		 we don't sign-extend becaue with sign-extension the MSB
+		 we don't sign-extend because with sign-extension the MSB
 		 (the sign) will be produced by the sign extension.  */
 
 	      avr_asm_len ("lsr %0", &all_regs_rtx[src_msb], plen, 1);
@@ -11134,8 +11131,257 @@ avr_rotate_bytes (rtx operands[])
 }
 
 
+/* Read a non-negative decimal number from a string starting at START.
+   Set *END to one position past the last digit of the number.  */
+
+static int
+avr_read_number (const char *start, const char **end)
+{
+  int num = 0;
+  for (*end = start; **end >= '0' && **end <= '9'; ++(*end))
+    num = 10 * num + **end - '0';
+
+  return num;
+}
+
+
+/* Return the sum over all [[len=<words>]] annotations in inline asm INSN.
+   TPL is the asm template, N_XOP the number of operands, or -1 when the
+   asm has no operands (not even zero operands).  XOP[] are these operands.
+   LOC is the location of the asm, and DEFAULT_LEN is the code length
+   in words as determined by the middle-end from the number of logical and
+   physical line breaks in TPL.
+
+   When an invalid %-reference or an unrecognized [[len=... is found,
+   then return -1.  Otherwise, return the sum over all [[len=<words>]]
+   annotations, where:
+
+   <words> = nl
+	The number of lines in the code template.
+	This is half the default size.
+
+   <words> = [0-9]+
+	Specifies a non-negative decimal integer.
+
+   <words> = %[0-9]+
+   <words> = %[<name>]   # Already resolved to %[0-9]+ by the middle-end.
+	Refers to the respective asm operand, which must be CONST_INT.
+
+   <words> = lds
+   <words> = sts
+	Specifies the length of a LDS or STS instruction, i.e.
+	1 word if AVR_TINY, and 2 words otherwise.
+
+   <words> = %~
+   <words> = %~call
+   <words> = %~jmp
+	Specifies the length of a %~call resp. %~jmp instruction, i.e.
+	2 words if AVR_HAVE_JMP_CALL, and 1 word otherwise.
+
+   In order to observe the assigned lengths, see -fdump-rtl-shorten or the
+   asm output with -mlog=insn_addresses.  */
+
+static int
+avr_length_of_asm (rtx_insn *insn, int default_len, const char *tpl,
+		   int n_xop, rtx *xop, location_t loc)
+{
+  const char *const len_begin = "[[len=";
+  const char *const len_end = "]]";
+  const char *pos = strstr (tpl, len_begin);
+  int len = 0;
+
+  if (! pos)
+    return -1;
+
+  avr_dump ("\n;;; Calculating length of asm insn (default=%d, warn=%d):\n"
+	    "%r\n", default_len, avropt_warn_asmlen_notes, insn);
+
+  for (; pos; pos = strstr (pos, len_begin))
+    {
+      const char *const pos_begin = pos;
+      const char *const pos_end = strstr (pos, len_end);
+
+      pos += strlen (len_begin);
+      const bool percent_p = pos[0] == '%' && pos[1] != '~';
+      int inc = -1;
+
+      if (startswith (pos, "%~")
+	  // %-resolution only applies to asm with operands.
+	  && n_xop >= 0)
+	{
+	  // "%~" specifies the length of %~jmp / %~call.
+	  inc = AVR_HAVE_JMP_CALL ? 2 : 1;
+	  pos += 2;
+
+	  // Allow an optional suffix of "jmp" or "call".
+	  if (startswith (pos, "jmp"))
+	    pos += 3;
+	  else if (startswith (pos, "call"))
+	    pos += 4;
+	}
+      else if (startswith (pos, "nl"))
+	{
+	  // "nl" denotes the number of lines in the code template,
+	  // which is half of the default length.
+	  inc = asm_str_count (tpl);
+	  pos += 2;
+	}
+      else if (startswith (pos, "lds")
+	       || startswith (pos, "sts"))
+	{
+	  // "lds" specifies the length of LDS or STS.
+	  inc = AVR_TINY ? 1 : 2;
+	  pos += 3;
+	}
+      else if (! percent_p
+	       // %-resolution only applies to asm with operands.
+	       || n_xop >= 0)
+	{
+	  // A plain decimal number <num>, or %<num> to refer to the
+	  // <num>-th asm operand.  Notice that the middle-end has already
+	  // resolved named operand references like %[name] to the respective
+	  // operand number (provided such a named operand exists).
+	  pos += percent_p;
+	  const char *end;
+	  const int num = avr_read_number (pos, &end);
+	  inc = end > pos ? num : -1;
+	  pos = end;
+	}
+
+      /* Prepare a code quote so we have it handy in maybe diagnostics.  */
+
+      // Only show the gist of an unrecognized annotation.
+      // Recognized notes are short, so show only the relevant
+      // part and display the rest as ...'s.
+      const char *dots = "...";
+      const size_t l_pos_begin = strlen (pos_begin);
+      const size_t l_pos = pos_end ? pos_end - pos_begin : l_pos_begin;
+      const size_t l_show = pos - pos_begin + 5;
+      char *msg = XALLOCAVEC (char, 1 + strlen (tpl) + strlen (dots));
+      strcpy (msg, pos_begin);
+      if (l_pos > l_show + 2 * strlen (dots))
+	{
+	  msg[l_show] = '\0';
+	  strcat (msg, dots);
+	  if (pos_end)
+	    strncat (msg, pos_end - 4, 4);
+	}
+      else if (pos_end)
+	msg[l_pos] = '\0';
+      if (pos_end)
+	strcat (msg, len_end);
+
+      /* Now use inc or diagnose a problem.  */
+
+      if (inc >= 0 && pos == pos_end)
+	{
+	  pos += strlen (len_end);
+
+	  avr_dump (";;; len = %s + %s%d",
+		    len ? "len" : "0", percent_p ? "%" : "", inc);
+	  if (percent_p)
+	    {
+	      // Map inc to the value of the inc-th asm operand,
+	      // which must be CONST_INT.
+
+	      if (inc >= n_xop)
+		{
+		  // For asm with >= 0 operands, the middle-end will issue
+		  // an error message.
+		  avr_dump ("\n;;; Ignored: op %d does not exist\n\n", inc);
+		  return -1;
+		}
+	      if (! CONST_INT_P (xop[inc]))
+		{
+		  avr_dump ("\n;;; Ignored: op %d is not CONST_INT\n\n", inc);
+		  warning_at (loc, OPT_Wasm_len_notes, "%<asm%> len annotation"
+			      " ignored: operand %d is not a compile-time"
+			      " integer constant: %qs", inc, msg);
+		  return -1;
+		}
+	      inc = UINTVAL (xop[inc]) > 1000000 ? 1000000 : INTVAL (xop[inc]);
+	      avr_dump (" = %s + %d", len ? "len" : "0", inc);
+	    } // %
+
+	  len += inc;
+	  avr_dump (" = %d\n", len);
+	}
+      else // inc < 0 || pos != pos_end
+	{
+	  // FIXME: Diagnosing is void in LTO mode, except when compiled
+	  // with `-ffat-lto-objects' (in which case cc1[plus] is diagnosing,
+	  // not lto1).
+	  if (pos_end)
+	    {
+	      avr_dump (";;; Ignored: %s\n\n", msg);
+	      warning_at (loc, OPT_Wasm_len_notes, "%<asm%> len annotation"
+			  " ignored: %qs", msg);
+	    }
+	  else
+	    {
+	      avr_dump (";;; Ignored (no %s): %s\n\n", len_end, msg);
+	      warning_at (loc, OPT_Wasm_len_notes, "%<asm%> len annotation"
+			  " ignored: misses closing %qs: %qs", len_end, msg);
+	    }
+	  return -1;
+	}
+    }
+  avr_dump ("\n");
+
+  return len;
+}
+
+
+/* A helper for the function below.  Recognize [[len=<words>]] annotations
+   in the inline asm template of INSN, so the user can specify the length
+   of an asm.  This can solve two problems:
+
+   - Cases where the expanded asm is longer than determined from the number
+     of physical and logical line breaks.  Such cases can lead to errors
+     when a jump that uses a too optimistic jump offset is crossing an asm.
+
+   - Better code generation for jumps that are crossing an asm.  The default
+     length of an asm is (1 + NL) * 2 words, where NL denotes the sum of
+     physical and logical line breaks.  However, almost all AVR instructions
+     occupy only one 16-bit word.
+
+   LEN is the length in units of 16-bit words as determined by the middle-end.
+   When no annotation has been found or a diagnostic occurred, return -1.  */
+
+static int
+avr_maybe_length_of_asm (rtx_insn *insn, int len)
+{
+  if (avropt_asmlen_notes
+      && NONDEBUG_INSN_P (insn))
+    {
+      rtx body = PATTERN (insn);
+
+      if (asm_noperands (body) >= 0)
+	{
+	  // An `asm' construct with operands.
+
+	  location_t loc;
+	  int n_ops = asm_noperands (body);
+	  rtx *ops = XALLOCAVEC (rtx, n_ops);
+	  const char *tpl = decode_asm_operands (body, ops, NULL, NULL, NULL,
+						 &loc);
+	  return avr_length_of_asm (insn, len, tpl, n_ops, ops, loc);
+	}
+      else if (GET_CODE (body) == ASM_INPUT)
+	{
+	  // An `asm' construct without operands.
+
+	  return avr_length_of_asm (insn, len, XSTR (body, 0), -1, nullptr,
+				    ASM_INPUT_SOURCE_LOCATION (body));
+	}
+    }
+
+  return -1;
+}
+
+
 /* Worker function for `ADJUST_INSN_LENGTH'.  */
-/* Modifies the length assigned to instruction INSN
+/* Modifies the length assigned to instruction INSN.
    LEN is the initially computed length of the insn.  */
 
 int
@@ -11154,9 +11400,14 @@ avr_adjust_insn_length (rtx_insn *insn, int len)
      It is easier to state this in an insn attribute "adjust_len" than
      to clutter up code here...  */
 
-  if (!NONDEBUG_INSN_P (insn) || recog_memoized (insn) == -1)
+  if (!NONDEBUG_INSN_P (insn))
+    return len;
+
+  if (recog_memoized (insn) == -1)
     {
-      return len;
+      // Let the user specify the length of the asm with [[len=<words>]]'s.
+      const int len_asm = avr_maybe_length_of_asm (insn, len);
+      return len_asm < 0 ? len : len_asm;
     }
 
   /* Read from insn attribute "adjust_len" if/how length is to be adjusted.  */
@@ -11906,7 +12157,9 @@ avr_insert_attributes (tree node, tree *attributes)
 	      *attributes = tree_cons (get_identifier ("section"),
 				       arg, *attributes);
 	    }
-	  avr_no_call_main_p = true;
+	  if (!lookup_attribute ("used", *attributes))
+	    *attributes = tree_cons (get_identifier ("used"),
+				     NULL_TREE, *attributes);
 	}
     } // -mno-call-main
 #endif // AVR-LibC
@@ -12467,15 +12720,6 @@ avr_file_end (void)
 
   if (avr_need_clear_bss_p)
     fputs (".global __do_clear_bss\n", asm_out_file);
-
-  /* Don't let __call_main call main() and exit().
-     Defining this symbol will keep the code from being pulled
-     in from lib<mcu>.a as requested by AVR-LibC's gcrt1.S.
-     We invoke main() by other means: putting it in .init9.  */
-
-  if (avr_no_call_main_p)
-    fputs (".global __call_main\n"
-	   "__call_main = 0\n", asm_out_file);
 }
 
 
@@ -15357,7 +15601,7 @@ avr_nonzero_bits_lsr_operands_p (rtx_code code, rtx *op)
    XOP[2]  # Bytes to copy
 
    Return TRUE  if the expansion is accomplished.
-   Return FALSE if the operand compination is not supported.  */
+   Return FALSE if the operand combination is not supported.  */
 
 bool
 avr_emit_cpymemhi (rtx *xop)

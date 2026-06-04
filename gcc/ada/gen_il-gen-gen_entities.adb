@@ -64,6 +64,7 @@ begin -- Gen_IL.Gen.Gen_Entities
         Sm (Freeze_Node, Node_Id),
         Sm (From_Limited_With, Flag),
         Sm (Ghost_Assertion_Level, Node_Id),
+        Sm (Has_Activation_Chain_Entity, Flag),
         Sm (Has_Aliased_Components, Flag, Impl_Base_Type_Only),
         Sm (Has_Alignment_Clause, Flag),
         Sm (Has_All_Calls_Remote, Flag),
@@ -173,7 +174,6 @@ begin -- Gen_IL.Gen.Gen_Entities
         Sm (Is_Known_Non_Null, Flag),
         Sm (Is_Known_Null, Flag),
         Sm (Is_Known_Valid, Flag),
-        Sm (Is_Limited_Composite, Flag),
         Sm (Is_Limited_Interface, Flag),
         Sm (Is_Limited_Record, Flag),
         Sm (Is_Link_Once, Flag),
@@ -508,6 +508,7 @@ begin -- Gen_IL.Gen.Gen_Entities
         Sm (Is_Fixed_Lower_Bound_Index_Subtype, Flag),
         Sm (Is_Generic_Actual_Type, Flag),
         Sm (Is_Implicit_Full_View, Flag),
+        Sm (Is_Limited_Composite, Flag),
         Sm (Is_Mutably_Tagged_Type, Flag),
         Sm (Is_Non_Static_Subtype, Flag),
         Sm (Is_Private_Composite, Flag),
@@ -551,11 +552,11 @@ begin -- Gen_IL.Gen.Gen_Entities
        (Sm (First_Literal, Node_Id),
         Sm (Has_Enumeration_Rep_Clause, Flag),
         Sm (Has_Pragma_Ordered, Flag, Impl_Base_Type_Only),
-        Sm (Lit_Indexes, Node_Id),
-        Sm (Lit_Strings, Node_Id),
+        Sm (Lit_Hash, Node_Id, Root_Type_Only),
+        Sm (Lit_Indexes, Node_Id, Root_Type_Only),
+        Sm (Lit_Strings, Node_Id, Root_Type_Only),
         Sm (Nonzero_Is_True, Flag, Base_Type_Only,
-            Pre => "Root_Type (N) = Standard_Boolean"),
-        Sm (Lit_Hash, Node_Id, Root_Type_Only)));
+            Pre => "Root_Type (N) = Standard_Boolean")));
 
    Cc (E_Enumeration_Type, Enumeration_Kind,
        --  Enumeration types, created by an enumeration type declaration
@@ -651,7 +652,7 @@ begin -- Gen_IL.Gen.Gen_Entities
         Sm (Is_Local_Anonymous_Access, Flag),
         Sm (Is_Param_Block_Component_Type, Flag, Base_Type_Only),
         Sm (Is_Pure_Unit_Access_Type, Flag),
-        Sm (Master_Id, Node_Id),
+        Sm (Master_Id, Node_Id, Root_Type_Only),
         Sm (No_Pool_Assigned, Flag, Root_Type_Only),
         Sm (No_Strict_Aliasing, Flag, Base_Type_Only),
         Sm (Storage_Size_Variable, Node_Id, Impl_Base_Type_Only)));
@@ -942,7 +943,8 @@ begin -- Gen_IL.Gen.Gen_Entities
         Sm (Extra_Accessibility_Of_Result, Node_Id),
         Sm (Extra_Formals, Node_Id),
         Sm (Extra_Formals_Known, Flag),
-        Sm (Needs_No_Actuals, Flag)));
+        Sm (Needs_No_Actuals, Flag),
+        Sm (Scope_Depth_Value, Unat)));
 
    Ab (Overloadable_Kind, Entity_Kind,
        (Sm (Renamed_Or_Alias, Node_Id),

@@ -181,11 +181,9 @@ aarch64_update_cpp_builtins (cpp_reader *pfile)
   switch (aarch64_cmodel)
     {
       case AARCH64_CMODEL_TINY:
-      case AARCH64_CMODEL_TINY_PIC:
 	builtin_define ("__AARCH64_CMODEL_TINY__");
 	break;
       case AARCH64_CMODEL_SMALL:
-      case AARCH64_CMODEL_SMALL_PIC:
 	builtin_define ("__AARCH64_CMODEL_SMALL__");
 	break;
       case AARCH64_CMODEL_LARGE:
@@ -234,6 +232,7 @@ aarch64_update_cpp_builtins (cpp_reader *pfile)
   aarch64_def_or_undef (TARGET_SVE2_SHA3, "__ARM_FEATURE_SVE2_SHA3", pfile);
   aarch64_def_or_undef (TARGET_SVE2_SM4, "__ARM_FEATURE_SVE2_SM4", pfile);
   aarch64_def_or_undef (TARGET_SVE2p1, "__ARM_FEATURE_SVE2p1", pfile);
+  aarch64_def_or_undef (TARGET_SVE2p2, "__ARM_FEATURE_SVE2p2", pfile);
 
   aarch64_def_or_undef (TARGET_LSE, "__ARM_FEATURE_ATOMICS", pfile);
   aarch64_def_or_undef (TARGET_AES, "__ARM_FEATURE_AES", pfile);
@@ -312,6 +311,7 @@ aarch64_update_cpp_builtins (cpp_reader *pfile)
   aarch64_def_or_undef (TARGET_SME2, "__ARM_FEATURE_SME2", pfile);
   aarch64_def_or_undef (AARCH64_HAVE_ISA (SME2p1),
 			"__ARM_FEATURE_SME2p1", pfile);
+  aarch64_def_or_undef (TARGET_SME2p2, "__ARM_FEATURE_SME2p2", pfile);
   aarch64_def_or_undef (TARGET_FAMINMAX, "__ARM_FEATURE_FAMINMAX", pfile);
   aarch64_def_or_undef (TARGET_PCDPHINT, "__ARM_FEATURE_PCDPHINT", pfile);
 
@@ -358,7 +358,7 @@ aarch64_pragma_target_parse (tree args, tree pop_target)
       if (!aarch64_process_target_attr (args))
 	return false;
 
-      aarch64_override_options_internal (&global_options);
+      aarch64_override_options_internal (&global_options, &global_options_set);
     }
 
   /* args is NULL, restore to the state described in pop_target.  */
@@ -386,7 +386,7 @@ aarch64_pragma_target_parse (tree args, tree pop_target)
 
   cpp_opts->warn_unused_macros = saved_warn_unused_macros;
 
-  /* If we're popping or reseting make sure to update the globals so that
+  /* If we're popping or resetting make sure to update the globals so that
      the optab availability predicates get recomputed.  */
   if (pop_target)
     aarch64_save_restore_target_globals (pop_target);

@@ -129,6 +129,7 @@ bits_freestanding = \
 	${bits_srcdir}/alloc_traits.h \
 	${bits_srcdir}/atomic_base.h \
 	${bits_srcdir}/c++0x_warning.h \
+	${bits_srcdir}/binders.h \
 	${bits_srcdir}/boost_concept_check.h \
 	${bits_srcdir}/concept_check.h \
 	${bits_srcdir}/char_traits.h \
@@ -139,6 +140,11 @@ bits_freestanding = \
 	${bits_srcdir}/functional_hash.h \
 	${bits_srcdir}/intcmp.h \
 	${bits_srcdir}/invoke.h \
+	${bits_srcdir}/iosfwd.h \
+	${bits_srcdir}/iosfwd_file.h \
+	${bits_srcdir}/iosfwd_span.h \
+	${bits_srcdir}/iosfwd_string.h \
+	${bits_srcdir}/iosfwd_sync.h \
 	${bits_srcdir}/iterator_concepts.h \
 	${bits_srcdir}/new_except.h \
 	${bits_srcdir}/new_throw.h \
@@ -201,7 +207,6 @@ bits_headers = \
 	${bits_srcdir}/basic_ios.tcc \
 	${bits_srcdir}/basic_string.h \
 	${bits_srcdir}/basic_string.tcc \
-	${bits_srcdir}/binders.h \
 	${bits_srcdir}/charconv.h \
 	${bits_srcdir}/chrono.h \
 	${bits_srcdir}/chrono_io.h \

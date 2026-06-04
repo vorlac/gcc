@@ -470,7 +470,7 @@ riscv_expand_strcmp_scalar (rtx result, rtx src1, rtx src2,
    The result will be stored in RESULT.
    The strings are referenced by SRC1 and SRC2.
    The argument BYTES_RTX either holds the number of characters to
-   compare, or is NULL_RTX. The argument ALIGN_RTX holds the alignment.
+   compare, or is NULL_RTX.  The argument ALIGN_RTX holds the alignment.
 
    Return true if expansion was successful, or false otherwise.  */
 
@@ -487,7 +487,7 @@ riscv_expand_strcmp (rtx result, rtx src1, rtx src2,
   if (riscv_strcmp_inline_limit == 0)
     return false;
 
-  /* Round down the comparision limit to a multiple of xlen.  */
+  /* Round down the comparison limit to a multiple of xlen.  */
   compare_max = riscv_strcmp_inline_limit & ~(xlen - 1);
 
   /* Decide how many bytes to compare inline.  */
@@ -707,7 +707,7 @@ emit_memcmp_scalar_result_calculation (rtx result, rtx data1, rtx data2)
   do_ior3 (result, result, const1_rtx);
 }
 
-/* Expand memcmp using scalar instructions (incl. Zbb).
+/* Expand memcmp using scalar instructions (including Zbb).
 
    RESULT is the register where the return value will be stored.
    The source pointers are SRC1 and SRC2 (NBYTES bytes to compare).  */
@@ -908,7 +908,7 @@ riscv_block_move_loop (rtx dest, rtx src, unsigned HOST_WIDE_INT length,
   if (leftover)
     riscv_block_move_straight (dest, src, leftover, align);
   else
-    emit_insn(gen_nop ());
+    emit_insn (gen_nop ());
 }
 
 /* Expand a cpymemsi instruction, which copies LENGTH bytes from

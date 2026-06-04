@@ -167,6 +167,7 @@ static int maybe_indent_hierarchy (FILE *, int, int);
 static tree dump_class_hierarchy_r (FILE *, dump_flags_t, tree, tree, int);
 static void dump_class_hierarchy (tree);
 static void dump_class_hierarchy_1 (FILE *, dump_flags_t, tree);
+static void dump_vtable_entry (FILE *, tree);
 static void dump_array (FILE *, tree);
 static void dump_vtable (tree, tree, tree);
 static void dump_vtt (tree, tree);
@@ -1711,11 +1712,12 @@ check_tag (tree tag, tree id, tree *tp, abi_tag_data *p)
 	  /* Don't inherit this tag multiple times.  */
 	  IDENTIFIER_MARKED (id) = true;
 
+	  ABI_TAG_INHERITED (p->tags) = true;
 	  if (TYPE_P (p->t))
 	    {
 	      /* Tags inherited from type template arguments are only used
 		 to avoid warnings.  */
-	      ABI_TAG_IMPLICIT (p->tags) = true;
+	      ABI_TAG_NOT_MANGLED (p->tags) = true;
 	      return;
 	    }
 	  /* For functions and variables we want to warn, too.  */
@@ -2004,7 +2006,7 @@ inherit_targ_abi_tags (tree t)
 }
 
 /* Return true, iff class T has a non-virtual destructor that is
-   accessible from outside the class heirarchy (i.e. is public, or
+   accessible from outside the class hierarchy (i.e. is public, or
    there's a suitable friend.  */
 
 static bool
@@ -3288,7 +3290,7 @@ warn_hidden (tree t)
 	unsigned j;
 	size_t num_overriders = 0;
 	hash_set<tree> overriden_base_fndecls;
-	/* base_fndecls that are hidden but not overriden. The "value"
+	/* base_fndecls that are hidden but not overridden. The "value"
 	   contains the last fndecl we saw that hides the "key".  */
 	hash_map<tree, tree> hidden_base_fndecls;
 
@@ -3454,9 +3456,9 @@ maybe_add_class_template_decl_list (tree type, tree t, int friend_p)
 /* This function is called from declare_virt_assop_and_dtor via
    dfs_walk_all.
 
-   DATA is a type that direcly or indirectly inherits the base
+   DATA is a type that directly or indirectly inherits the base
    represented by BINFO.  If BINFO contains a virtual assignment [copy
-   assignment or move assigment] operator or a virtual constructor,
+   assignment or move assignment] operator or a virtual constructor,
    declare that function in DATA if it hasn't been already declared.  */
 
 static tree
@@ -3902,17 +3904,28 @@ check_field_decl (tree field,
       else
 	{
 	  TYPE_NEEDS_CONSTRUCTING (t) |= TYPE_NEEDS_CONSTRUCTING (type);
-	  TYPE_HAS_NONTRIVIAL_DESTRUCTOR (t)
-	    |= TYPE_HAS_NONTRIVIAL_DESTRUCTOR (type);
 	  TYPE_HAS_COMPLEX_COPY_ASSIGN (t)
 	    |= (TYPE_HAS_COMPLEX_COPY_ASSIGN (type)
 		|| !TYPE_HAS_COPY_ASSIGN (type));
 	  TYPE_HAS_COMPLEX_COPY_CTOR (t) |= (TYPE_HAS_COMPLEX_COPY_CTOR (type)
 					     || !TYPE_HAS_COPY_CTOR (type));
-	  TYPE_HAS_COMPLEX_MOVE_ASSIGN (t) |= TYPE_HAS_COMPLEX_MOVE_ASSIGN (type);
+	  TYPE_HAS_COMPLEX_MOVE_ASSIGN (t)
+	    |= TYPE_HAS_COMPLEX_MOVE_ASSIGN (type);
 	  TYPE_HAS_COMPLEX_MOVE_CTOR (t) |= TYPE_HAS_COMPLEX_MOVE_CTOR (type);
-	  TYPE_HAS_COMPLEX_DFLT (t) |= (!TYPE_HAS_DEFAULT_CONSTRUCTOR (type)
-					|| TYPE_HAS_COMPLEX_DFLT (type));
+	  /* In C++26, triviality of default ctor or dtor of a variant member
+	     doesn't matter for triviality of the t's default ctor or dtor.
+	     Before C++26, non-trivial default ctor or dtor of a variant
+	     member makes it deleted with the exception of default ctor
+	     when DMI is present, but in that case default ctor is
+	     non-trivial.   */
+	  if (TREE_CODE (DECL_CONTEXT (field)) != UNION_TYPE)
+	    {
+	      TYPE_HAS_NONTRIVIAL_DESTRUCTOR (t)
+		|= TYPE_HAS_NONTRIVIAL_DESTRUCTOR (type);
+	      TYPE_HAS_COMPLEX_DFLT (t)
+		|= (!TYPE_HAS_DEFAULT_CONSTRUCTOR (type)
+		    || TYPE_HAS_COMPLEX_DFLT (type));
+	    }
 	}
 
       if (TYPE_HAS_COPY_CTOR (type)
@@ -6471,7 +6484,7 @@ check_bases_and_members (tree t)
 
   /* Deduce noexcept on destructor.  This needs to happen after we've set
      triviality flags appropriately for our bases, and before checking
-     overriden virtual functions via check_methods.  */
+     overridden virtual functions via check_methods.  */
   if (cxx_dialect >= cxx11)
     if (tree dtor = CLASSTYPE_DESTRUCTOR (t))
       for (tree fn : ovl_range (dtor))
@@ -9750,7 +9763,7 @@ dump_class_hierarchy_r (FILE *stream,
   tree base_binfo;
   int i;
 
-  fprintf (stream, "%s (0x" HOST_WIDE_INT_PRINT_HEX ") ",
+  fprintf (stream, "%s (" HOST_WIDE_INT_PRINT_HEX ") ",
 	   type_as_string (BINFO_TYPE (binfo), TFF_PLAIN_IDENTIFIER),
 	   (HOST_WIDE_INT) (uintptr_t) binfo);
   if (binfo != igo)
@@ -9773,7 +9786,7 @@ dump_class_hierarchy_r (FILE *stream,
   if (BINFO_PRIMARY_P (binfo))
     {
       indented = maybe_indent_hierarchy (stream, indent + 3, indented);
-      fprintf (stream, " primary-for %s (0x" HOST_WIDE_INT_PRINT_HEX ")",
+      fprintf (stream, " primary-for %s (" HOST_WIDE_INT_PRINT_HEX ")",
 	       type_as_string (BINFO_TYPE (BINFO_INHERITANCE_CHAIN (binfo)),
 			       TFF_PLAIN_IDENTIFIER),
 	       (HOST_WIDE_INT) (uintptr_t) BINFO_INHERITANCE_CHAIN (binfo));
@@ -9866,6 +9879,23 @@ dump_class_hierarchy (tree t)
     }
 }
 
+/* Dump VALUE, a vtable entry, to STREAM.  Print integer offsets as signed
+   values.  */
+
+static void
+dump_vtable_entry (FILE *stream, tree value)
+{
+  /* Vtable offset entries are stored in the pointer-sized vtable entry
+     type, but should be displayed as signed ptrdiff_t values.  */
+  tree cst = value;
+  STRIP_NOPS (cst);
+
+  if (TREE_CODE (cst) == INTEGER_CST)
+    print_decs (wi::to_wide (cst), stream);
+  else
+    fprintf (stream, "%s", expr_as_string (value, TFF_PLAIN_IDENTIFIER));
+}
+
 static void
 dump_array (FILE * stream, tree decl)
 {
@@ -9884,8 +9914,11 @@ dump_array (FILE * stream, tree decl)
 
   FOR_EACH_CONSTRUCTOR_VALUE (CONSTRUCTOR_ELTS (DECL_INITIAL (decl)),
 			      ix, value)
-    fprintf (stream, "%-4ld  %s\n", (long)(ix * elt),
-	     expr_as_string (value, TFF_PLAIN_IDENTIFIER));
+    {
+      fprintf (stream, "%-4ld  ", (long)(ix * elt));
+      dump_vtable_entry (stream, value);
+      fprintf (stream, "\n");
+    }
 }
 
 static void
@@ -9907,7 +9940,7 @@ dump_vtable (tree t, tree binfo, tree vtable)
       if (ctor_vtbl_p)
 	{
 	  if (!BINFO_VIRTUAL_P (binfo))
-	    fprintf (stream, " (0x" HOST_WIDE_INT_PRINT_HEX " instance)",
+	    fprintf (stream, " (" HOST_WIDE_INT_PRINT_HEX " instance)",
 		     (HOST_WIDE_INT) (uintptr_t) binfo);
 	  fprintf (stream, " in %s", type_as_string (t, TFF_PLAIN_IDENTIFIER));
 	}
@@ -10481,7 +10514,7 @@ dfs_accumulate_vtbl_inits (tree binfo,
        straighten this out.  */
     BINFO_VTABLE (binfo) = tree_cons (rtti_binfo, vtbl, BINFO_VTABLE (binfo));
   else if (BINFO_PRIMARY_P (binfo) && BINFO_VIRTUAL_P (binfo))
-    /* Throw away any unneeded intializers.  */
+    /* Throw away any unneeded initializers.  */
     (*l)->truncate (n_inits);
   else
      /* For an ordinary vtable, set BINFO_VTABLE.  */

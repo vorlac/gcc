@@ -17,7 +17,7 @@
            END-IF.
 
            MOVE SRC1 TO DST2.
-           IF DST1 not = 11.55
+           IF DST2 not = 11.55
                DISPLAY 'error: move/compare FLOAT-LONG to FLOAT-LONG failed ' DST2
                END-DISPLAY
            END-IF.
@@ -71,6 +71,7 @@
       *-                "entical): " DST1 " - " DST2
       *         END-DISPLAY
       *     END-IF.
+      * "  <== this double-quote helps emacs resume syntax highlighting
 
            MOVE 1.1234567 TO DST1.
            MOVE 1.1234569 TO DST2.

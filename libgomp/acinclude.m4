@@ -12,21 +12,6 @@ AC_DEFUN([LIBGOMP_CHECK_SYNC_BUILTINS], [
 	      [Define to 1 if the target supports __sync_*_compare_and_swap])
   fi])
 
-dnl Check whether the target supports hidden visibility.
-AC_DEFUN([LIBGOMP_CHECK_ATTRIBUTE_VISIBILITY], [
-  AC_CACHE_CHECK([whether the target supports hidden visibility],
-		 libgomp_cv_have_attribute_visibility, [
-  save_CFLAGS="$CFLAGS"
-  CFLAGS="$CFLAGS -Werror"
-  AC_TRY_COMPILE([void __attribute__((visibility("hidden"))) foo(void) { }],
-		 [], libgomp_cv_have_attribute_visibility=yes,
-		 libgomp_cv_have_attribute_visibility=no)
-  CFLAGS="$save_CFLAGS"])
-  if test $libgomp_cv_have_attribute_visibility = yes; then
-    AC_DEFINE(HAVE_ATTRIBUTE_VISIBILITY, 1,
-      [Define to 1 if the target supports __attribute__((visibility(...))).])
-  fi])
-
 dnl Check whether the target supports dllexport
 AC_DEFUN([LIBGOMP_CHECK_ATTRIBUTE_DLLEXPORT], [
   AC_CACHE_CHECK([whether the target supports dllexport],
@@ -267,7 +252,7 @@ if test x$enable_symvers = xsun ; then
     *)
       # Unlikely to work.
       AC_MSG_WARN([=== You have requested Sun symbol versioning, but])
-      AC_MSG_WARN([=== you are not targetting Solaris 2.])
+      AC_MSG_WARN([=== you are not targeting Solaris 2.])
       AC_MSG_WARN([=== Symbol versioning will be disabled.])
       enable_symvers=no
       ;;

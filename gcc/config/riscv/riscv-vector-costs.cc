@@ -515,7 +515,7 @@ compute_nregs_for_mode (loop_vec_info loop_vinfo, machine_mode mode,
 }
 
 /* This function helps to determine whether current LMUL will cause
-   potential vector register (V_REG) spillings according to live range
+   potential vector register (V_REG) spilling according to live range
    information.
 
      - First, compute how many variable are alive of each program point
@@ -965,7 +965,7 @@ costs::has_unexpected_spills_p (loop_vec_info loop_vinfo)
 	    = (*program_points_per_bb.get (bb)).length () + 1;
 	  if ((*iter).second.is_empty ())
 	    continue;
-	  /* We prefer larger LMUL unless it causes register spillings.  */
+	  /* We prefer larger LMUL unless it causes register spilling.  */
 	  unsigned int nregs
 	    = max_number_of_live_regs (loop_vinfo, bb, (*iter).second,
 				       max_point, biggest_mode, lmul);
@@ -1095,6 +1095,74 @@ costs::prefer_unrolled_loop () const
 	      <= (unsigned int) param_max_completely_peeled_insns));
 }
 
+/* Return the estimated number of vector iterations for LOOP_VINFO, or
+   HOST_WIDE_INT_M1U if the scalar iteration count is not known.  */
+static unsigned HOST_WIDE_INT
+estimated_loop_iters (loop_vec_info loop_vinfo)
+{
+  if (!LOOP_VINFO_NITERS_KNOWN_P (loop_vinfo))
+    return HOST_WIDE_INT_M1U;
+
+  unsigned HOST_WIDE_INT scalar_niters = LOOP_VINFO_INT_NITERS (loop_vinfo);
+  unsigned int vf = vect_vf_for_cost (loop_vinfo);
+  return (LOOP_VINFO_USING_PARTIAL_VECTORS_P (loop_vinfo)
+	  ? CEIL (scalar_niters, vf)
+	  : scalar_niters / vf);
+}
+
+/* Compare the estimated loop overheads of two loops.  With LMUL cost scaling,
+   simple loop bodies can have equal inside-loop costs for different LMULs.
+   Include loop-back branch costs so that larger RVV modes are preferred when
+   they reduce or eliminate vector loop iterations.  */
+static int
+compare_loop_overhead (loop_vec_info this_loop_vinfo,
+		       loop_vec_info other_loop_vinfo)
+{
+  gcc_assert (LOOP_VINFO_NITERS_KNOWN_P (this_loop_vinfo));
+  gcc_assert (LOOP_VINFO_NITERS_KNOWN_P (other_loop_vinfo));
+
+  unsigned HOST_WIDE_INT this_niters = estimated_loop_iters (this_loop_vinfo);
+  unsigned HOST_WIDE_INT other_niters = estimated_loop_iters (other_loop_vinfo);
+  bool this_eliminate_loop_p = this_niters == 1;
+  bool other_eliminate_loop_p = other_niters == 1;
+
+  if (this_eliminate_loop_p != other_eliminate_loop_p)
+    {
+      if (dump_enabled_p ())
+	dump_printf_loc (MSG_NOTE, vect_location,
+			 "Preferring %s loop because it is estimated to"
+			 " eliminate the main loop entirely\n",
+			 GET_MODE_NAME ((this_eliminate_loop_p
+					 ? this_loop_vinfo
+					 : other_loop_vinfo)->vector_mode));
+      return this_eliminate_loop_p ? -1 : 1;
+    }
+
+  unsigned int branch_cost
+    = builtin_vectorization_cost (cond_branch_taken, NULL_TREE, 0);
+  unsigned HOST_WIDE_INT this_overhead
+    = this_niters > 1 ? (this_niters - 1) * branch_cost : 0;
+  unsigned HOST_WIDE_INT other_overhead
+    = other_niters > 1 ? (other_niters - 1) * branch_cost : 0;
+
+  if (this_overhead != other_overhead)
+    {
+      if (dump_enabled_p ())
+	dump_printf_loc (MSG_NOTE, vect_location,
+			 "Preferring %s loop because it has lower"
+			 " loop overhead ("
+			 HOST_WIDE_INT_PRINT_UNSIGNED " vs. "
+			 HOST_WIDE_INT_PRINT_UNSIGNED ")\n",
+			 GET_MODE_NAME ((this_overhead < other_overhead
+					 ? this_loop_vinfo
+					 : other_loop_vinfo)->vector_mode),
+			 this_overhead, other_overhead);
+      return this_overhead < other_overhead ? -1 : 1;
+    }
+
+  return 0;
+}
+
 bool
 costs::better_main_loop_than_p (const vector_costs *uncast_other) const
 {
@@ -1213,7 +1281,28 @@ costs::better_main_loop_than_p (const vector_costs *uncast_other) const
 	   && m_cost_type == VLS_VECTOR_COST)
     return false;
 
-  return vector_costs::better_main_loop_than_p (other);
+  /* Fall back to generic costing if either iteration count is unknown.  For
+     known iteration counts, include loop overhead when comparing different
+     LMULs.  This handles such cases better than better_main_loop_than_p,
+     especially while outside costs can still overestimate prologue costs
+     (PR target/125476).  */
+  if (!LOOP_VINFO_NITERS_KNOWN_P (this_loop_vinfo)
+      || !LOOP_VINFO_NITERS_KNOWN_P (other_loop_vinfo))
+    return vector_costs::better_main_loop_than_p (other);
+
+  int diff = compare_inside_loop_cost (other);
+  if (diff != 0)
+    return diff < 0;
+
+  diff = compare_loop_overhead (this_loop_vinfo, other_loop_vinfo);
+  if (diff != 0)
+    return diff < 0;
+
+  diff = compare_outside_loop_cost (other);
+  if (diff != 0)
+    return diff < 0;
+
+  return false;
 }
 
 /* Returns the group size i.e. the number of vectors to be loaded by a
@@ -1235,6 +1324,94 @@ segment_loadstore_group_size (enum vect_cost_for_stmt kind,
   return 0;
 }
 
+/* Calculate LMUL-based cost scaling factor.
+   Larger LMUL values process more data but have proportionally
+   higher latency and register pressure.
+
+   Returns the cost scaling factor based on LMUL.  For LMUL > 1,
+   the factor represents the relative cost increase (2x, 4x, 8x).
+   For LMUL <= 1, returns 1 (no scaling).  */
+static unsigned
+get_lmul_cost_scaling (machine_mode mode)
+{
+  enum vlmul_type vlmul = get_vlmul (mode);
+
+  /* Cost scaling based on LMUL and data processed.
+     Larger LMUL values have proportionally higher latency:
+     - m1 (LMUL_1): 1x (baseline)
+     - m2 (LMUL_2): 2x (processes 2x data, ~2x latency)
+     - m4 (LMUL_4): 4x (processes 4x data, ~4x latency)
+     - m8 (LMUL_8): 8x (processes 8x data, ~8x latency)
+     - mf2/mf4/mf8: 1x (fractional LMUL, already efficient)  */
+  switch (vlmul)
+    {
+    case LMUL_2:
+      return 2;
+    case LMUL_4:
+      return 4;
+    case LMUL_8:
+      return 8;
+    case LMUL_1:
+    case LMUL_F2:
+    case LMUL_F4:
+    case LMUL_F8:
+    default:
+      return 1;
+    }
+}
+
+/* Return true if STMT_INFO or NODE represents a reduction operation.  */
+
+static bool
+is_reduction (stmt_vec_info stmt_info, slp_tree node)
+{
+  return (stmt_info && vect_is_reduction (stmt_info))
+	 || (node && vect_is_reduction (node));
+}
+
+/* Return the per-type reduction cost for VECTYPE, or 0 if no specific cost
+   applies.  For FP types, distinguish ordered vs unordered reductions.  */
+
+static int
+get_reduction_cost (vec_info *vinfo, const cpu_vector_cost *costs,
+		    loop_vec_info loop, slp_tree node, tree vectype)
+{
+  const common_vector_cost *common_costs
+    = loop && riscv_vla_mode_p (loop->vector_mode)
+      ? costs->vla : costs->vls;
+
+  bool is_ordered = false;
+  if (FLOAT_TYPE_P (vectype) && node)
+    {
+      int reduc_type = vect_reduc_type (vinfo, node);
+      is_ordered = (reduc_type == FOLD_LEFT_REDUCTION);
+    }
+
+  switch (GET_MODE_INNER (TYPE_MODE (vectype)))
+    {
+    case E_QImode:
+      return common_costs->reduc_i8_cost;
+    case E_HImode:
+      return common_costs->reduc_i16_cost;
+    case E_SImode:
+      return common_costs->reduc_i32_cost;
+    case E_DImode:
+      return common_costs->reduc_i64_cost;
+    case E_HFmode:
+    case E_BFmode:
+      return is_ordered ? common_costs->reduc_f16_ordered_cost
+			: common_costs->reduc_f16_cost;
+    case E_SFmode:
+      return is_ordered ? common_costs->reduc_f32_ordered_cost
+			: common_costs->reduc_f32_cost;
+    case E_DFmode:
+      return is_ordered ? common_costs->reduc_f64_ordered_cost
+			: common_costs->reduc_f64_cost;
+    default:
+      return 0;
+    }
+}
+
 /* Adjust vectorization cost after calling riscv_builtin_vectorization_cost.
    For some statement, we would like to further fine-grain tweak the cost on
    top of riscv_builtin_vectorization_cost handling which doesn't have any
@@ -1253,9 +1430,18 @@ costs::adjust_stmt_cost (enum vect_cost_for_stmt kind, loop_vec_info loop,
 	+= (FLOAT_TYPE_P (vectype) ? get_fr2vr_cost () : get_gr2vr_cost ());
       break;
     case vec_to_scalar:
-      stmt_cost
-	+= (FLOAT_TYPE_P (vectype) ? get_vr2fr_cost () : get_vr2gr_cost ());
-      break;
+      {
+	int reduc_cost = 0;
+	if (vectype && is_reduction (stmt_info, node))
+	  reduc_cost = get_reduction_cost (m_vinfo, costs, loop, node, vectype);
+
+	if (reduc_cost)
+	  stmt_cost = reduc_cost;
+
+	stmt_cost
+	  += (FLOAT_TYPE_P (vectype) ? get_vr2fr_cost () : get_vr2gr_cost ());
+	break;
+      }
     case vector_load:
     case vector_store:
 	{
@@ -1379,6 +1565,17 @@ costs::adjust_stmt_cost (enum vect_cost_for_stmt kind, loop_vec_info loop,
     default:
       break;
     }
+
+  /* Apply LMUL cost scaling uniformly to all vector operations.
+     Larger LMUL values have higher latency and register pressure,
+     which affects performance regardless of loop structure.  */
+  if (vectype)
+    {
+      unsigned lmul_factor = get_lmul_cost_scaling (TYPE_MODE (vectype));
+      if (lmul_factor > 1)
+	stmt_cost *= lmul_factor;
+    }
+
   return stmt_cost;
 }
 

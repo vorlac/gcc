@@ -514,6 +514,10 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
     template<typename _Rep, typename _Period>
       class duration
       {
+	// _GLIBCXX_RESOLVE_LIB_DEFECTS
+	// 4481. Disallow chrono::duration<const T, P>
+	static_assert(is_same<_Rep, __remove_cvref_t<_Rep>>::value,
+		      "rep should be cv-unqualified object type");
 	static_assert(!__is_duration<_Rep>::value,
 		      "rep cannot be a std::chrono::duration");
 	static_assert(__is_ratio<_Period>::value,
@@ -1213,7 +1217,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
 
     // To support the (forward) evolution of the library's defined
     // clocks, wrap inside inline namespace so that the current
-    // defintions of system_clock, steady_clock, and
+    // definitions of system_clock, steady_clock, and
     // high_resolution_clock types are uniquely mangled. This way, new
     // code can use the latests clocks, while the library can contain
     // compatibility definitions for previous versions.  At some

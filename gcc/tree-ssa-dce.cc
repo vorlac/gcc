@@ -70,6 +70,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-ssa.h"
 #include "ipa-modref-tree.h"
 #include "ipa-modref.h"
+#include "memmodel.h"
 
 static struct stmt_stats
 {
@@ -407,6 +408,29 @@ mark_stmt_if_obviously_necessary (gimple *stmt, bool aggressive)
 	/* For __cxa_atexit calls, don't mark as necessary right away. */
 	if (is_removable_cxa_atexit_call (call))
 	  return;
+
+	/* A relaxed atomic load with no LHS has no observable effect:
+	   the value is discarded and relaxed ordering provides no
+	   inter-thread synchronisation guarantee.  Don't mark it
+	   necessary so DCE can remove it. */
+	if (gimple_call_builtin_p (call, BUILT_IN_NORMAL))
+	  switch (DECL_FUNCTION_CODE (gimple_call_fndecl (call)))
+	    {
+	    case BUILT_IN_ATOMIC_LOAD_1:
+	    case BUILT_IN_ATOMIC_LOAD_2:
+	    case BUILT_IN_ATOMIC_LOAD_4:
+	    case BUILT_IN_ATOMIC_LOAD_8:
+	    case BUILT_IN_ATOMIC_LOAD_16:
+	      {
+	      tree model_arg = gimple_call_arg (call, 1);
+	      if (TREE_CODE (model_arg) == INTEGER_CST
+		  && is_mm_relaxed (memmodel_from_int (tree_to_uhwi (model_arg))))
+		return;
+	      break;
+	      }
+	    default:
+	      break;
+	    }
 
 	/* IFN_GOACC_LOOP calls are necessary in that they are used to
 	   represent parameter (i.e. step, bound) of a lowered OpenACC
@@ -757,7 +781,7 @@ mark_all_reaching_defs_necessary_1 (ao_ref *ref ATTRIBUTE_UNUSED,
 	return false;
     }
 
-  /* We want to skip statments that do not constitute stores but have
+  /* We want to skip statements that do not constitute stores but have
      a virtual definition.  */
   if (gcall *call = dyn_cast <gcall *> (def_stmt))
     {
@@ -925,7 +949,7 @@ propagate_necessity (bool aggressive)
 
 	     Consider the modified CFG created from current CFG by splitting
 	     edge B->C.  In the postdominance tree of modified CFG, C' is
-	     always child of C.  There are two cases how chlids of C' can look
+	     always child of C.  There are two cases how children of C' can look
 	     like:
 
 		1) C' is leaf
@@ -944,12 +968,12 @@ propagate_necessity (bool aggressive)
 		   case 2 happens iff there is no other way from B to C except
 		   the edge B->C.
 
-		   There is other way from B to C iff there is succesor of B that
+		   There is other way from B to C iff there is successor of B that
 		   is not postdominated by B.  Testing this condition is somewhat
-		   expensive, because we need to iterate all succesors of B.
+		   expensive, because we need to iterate all successors of B.
 		   We are safe to assume that this does not happen: we will mark B
 		   as needed when processing the other path from B to C that is
-		   conrol dependent on B and marking control dependencies of B
+		   control dependent on B and marking control dependencies of B
 		   itself is harmless because they will be processed anyway after
 		   processing control statement in B.
 
@@ -1492,7 +1516,7 @@ propagate_counts ()
 	  sum += e->count ();
 	  gcc_checking_assert (!cnt.get (e->src));
 	}
-      /* If we have partial profile and some counts of incomming edges are
+      /* If we have partial profile and some counts of incoming edges are
 	 unknown, it is probably better to keep the existing count.
 	 We could also propagate bi-directionally.  */
       if (sum.initialized_p () && !(sum == bb->count))
@@ -1602,7 +1626,7 @@ eliminate_unnecessary_stmts (bool aggressive)
 	    }
 	  /* Conditional checking that return value of allocation is non-NULL
 	     can be turned to constant if the allocation itself
-	     is unnecesary.  */
+	     is unnecessary.  */
 	  if (gimple_plf (stmt, STMT_NECESSARY)
 	      && gimple_code (stmt) == GIMPLE_COND
 	      && TREE_CODE (gimple_cond_lhs (stmt)) == SSA_NAME)

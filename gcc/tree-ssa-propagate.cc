@@ -30,7 +30,6 @@
 #include "gimple-iterator.h"
 #include "gimple-fold.h"
 #include "tree-eh.h"
-#include "gimplify.h"
 #include "tree-cfg.h"
 #include "tree-ssa.h"
 #include "tree-ssa-propagate.h"
@@ -699,7 +698,7 @@ private:
 
 /* Call post_new_stmt for each new statement that has been added
    to the current BB.  OLD_GSI is the statement iterator before the BB
-   changes ocurred.  NEW_GSI is the iterator which may contain new
+   changes occurred.  NEW_GSI is the iterator which may contain new
    statements.  */
 
 void
@@ -1011,7 +1010,7 @@ substitute_and_fold_engine::substitute_and_fold (basic_block block)
 
   /* Fixup stmts that became noreturn calls.  This may require splitting
      blocks and thus isn't possible during the dominator walk.  Do this
-     in reverse order so we don't inadvertedly remove a stmt we want to
+     in reverse order so we don't inadvertently remove a stmt we want to
      fixup by visiting a dominating now noreturn call first.  */
   while (!walker.stmts_to_fixup.is_empty ())
     {

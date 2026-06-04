@@ -96,6 +96,8 @@ bool raw_constraint_p;
 
 int reload_completed;
 
+bool post_ra_split_completed;
+
 /* Nonzero after thread_prologue_and_epilogue_insns has run.  */
 int epilogue_completed;
 
@@ -3525,6 +3527,8 @@ split_insn (rtx_insn *insn)
      splitters instead of computing the proper hard register.  */
   if (reload_completed && first != last)
     {
+      auto old_post_ra_split_completed = post_ra_split_completed;
+      post_ra_split_completed = true;
       first = NEXT_INSN (first);
       for (;;)
 	{
@@ -3534,6 +3538,7 @@ split_insn (rtx_insn *insn)
 	    break;
 	  first = NEXT_INSN (first);
 	}
+      post_ra_split_completed = old_post_ra_split_completed;
     }
 
   return last;
@@ -3609,6 +3614,9 @@ split_all_insns (void)
 	}
     }
 
+  if (reload_completed)
+    post_ra_split_completed = true;
+
   default_rtl_profile ();
   if (changed)
     {
@@ -3658,6 +3666,9 @@ split_all_insns_noflow (void)
 	    split_insn (insn);
 	}
     }
+
+  if (reload_completed)
+    post_ra_split_completed = true;
 }
 
 struct peep2_insn_data
@@ -4023,6 +4034,7 @@ peep2_attempt (basic_block bb, rtx_insn *insn, int match_len, rtx_insn *attempt)
 
       CALL_INSN_FUNCTION_USAGE (new_insn)
 	= CALL_INSN_FUNCTION_USAGE (old_insn);
+      CALL_INSN_ABI_ID (new_insn) = CALL_INSN_ABI_ID (old_insn);
       SIBLING_CALL_P (new_insn) = SIBLING_CALL_P (old_insn);
 
       for (note = REG_NOTES (old_insn);

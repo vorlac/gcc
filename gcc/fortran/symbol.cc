@@ -4189,6 +4189,21 @@ free_omp_udr_tree (gfc_symtree * omp_udr_tree)
   free (omp_udr_tree);
 }
 
+/* Similar, for !$omp declare mappers.  */
+
+static void
+free_omp_udm_tree (gfc_symtree *omp_udm_tree)
+{
+  if (omp_udm_tree == NULL)
+    return;
+
+  free_omp_udm_tree (omp_udm_tree->left);
+  free_omp_udm_tree (omp_udm_tree->right);
+
+  gfc_free_omp_udm (omp_udm_tree->n.omp_udm);
+  free (omp_udm_tree);
+}
+
 
 /* Recursive function that deletes an entire tree and all the user
    operator nodes that it contains.  */
@@ -4363,6 +4378,7 @@ gfc_free_namespace (gfc_namespace *&ns)
   free_uop_tree (ns->uop_root);
   free_common_tree (ns->common_root);
   free_omp_udr_tree (ns->omp_udr_root);
+  free_omp_udm_tree (ns->omp_udm_root);
   free_tb_tree (ns->tb_sym_root);
   free_tb_tree (ns->tb_uop_root);
   gfc_free_finalizer_list (ns->finalizers);
@@ -5710,4 +5726,34 @@ gfc_get_spec_ns (gfc_symbol *sym)
     }
 
   return sym->ns;
+}
+
+/* This section deals with looking up a symbol when the symtree name and symbol
+   name do not agree, so gfc_find_symbol() cannot be used.  */
+
+static gfc_symbol* found_sym;		/* Where to store the symbol.  */
+static const char* sym_target_name;	/* What name to look for.  */
+
+/* Helper function.  */
+
+static void
+compare_target_sym_name (gfc_symbol *sym)
+{
+  if (strcmp(sym->name, sym_target_name) == 0)
+    found_sym = sym;
+}
+
+/* Search for a symbol when the symtree name may be different from the
+   symbol name.  Return true if found.  */
+
+bool
+gfc_find_symbol_by_name (const char *name, gfc_namespace *ns,
+			       gfc_symbol **result)
+{
+  found_sym = NULL;
+  sym_target_name = name;
+
+  do_traverse_symtree (ns->sym_root, NULL, compare_target_sym_name);
+  *result = found_sym;
+  return result != 0;
 }

@@ -430,7 +430,7 @@ package Einfo is
 --    Alignment_Clause (synthesized)
 --       Applies to all entities for types and objects. If an alignment
 --       attribute definition clause is present for the entity, then this
---       function returns the N_Attribute_Definition clause that specifies the
+--       function returns the N_Attribute_Definition_Clause that specifies the
 --       alignment. If no alignment clause applies to the type, then the call
 --       to this function returns Empty. Note that the call can return a
 --       non-Empty value even if Has_Alignment_Clause is not set (happens with
@@ -729,11 +729,6 @@ package Einfo is
 
 --    Component_Type [implementation base type only]
 --       Defined in array types and string types. References component type.
-
---    Contains_Ignored_Ghost_Code
---       Defined in blocks, packages and their bodies, subprograms and their
---       bodies. Set if the entity contains any ignored Ghost code in the form
---       of declaration, procedure call, assignment statement or pragma.
 
 --    Continue_Mark
 --       Defined in loop entities. It points to the loop's statement after
@@ -1493,6 +1488,17 @@ package Einfo is
 --       for Ghost entities without an assertion level, or a user-defined
 --       assertion level.
 
+--    Has_Activation_Chain_Entity
+--       Defined in entities that can appear in the scope stack (see spec
+--       of Sem). It is set if an activation chain entity (_chain) has been
+--       declared and initialized in the corresponding scope.
+
+--       Note that E_Return_Statement also has this attribute, although it is
+--       not really a task activator: this chain is only used to store the
+--       tasks temporarily, and is not used for activating them. On successful
+--       completion of the return statement, the created tasks are moved onto
+--       the caller's chain, and the caller activates them.
+
 --    Has_Aliased_Components [implementation base type only]
 --       Defined in array type entities. Indicates that the component type
 --       of the array is aliased. Should this also be set for records to
@@ -1608,7 +1614,7 @@ package Einfo is
 
 --    Has_Delayed_Aspects
 --       Defined in all entities. Set if the Rep_Item chain for the entity has
---       one or more N_Aspect_Definition nodes chained which are not to be
+--       one or more N_Aspect_Definition nodes chained that are not to be
 --       evaluated till the freeze point. The aspect definition expression
 --       clause has been preanalyzed to get visibility at the point of use,
 --       but no other action has been taken.
@@ -2294,17 +2300,20 @@ package Einfo is
 --       to multiple subprogram entities).
 
 --    In_Package_Body
---       Defined in package entities. Set on the entity that denotes the
---       package (the defining occurrence of the package declaration) while
---       analyzing and expanding the package body. Reset on completion of
---       analysis/expansion.
+--       Defined in all entities. Can be set only in package entities, objects
+--       and overloadable entities. For package entities, this flag is set to
+--       indicate that the body of the package is being analyzed. The flag is
+--       reset at the end of the package body. For objects and overloadable
+--       entities, indicates that the declaration of the entity occurs in the
+--       body of a package.
 
 --    In_Private_Part
---       Defined in all entities. Can be set only in package entities and
---       objects. For package entities, this flag is set to indicate that the
---       private part of the package is being analyzed. The flag is reset at
---       the end of the package declaration. For objects it indicates that the
---       declaration of the object occurs in the private part of a package.
+--       Defined in all entities. Can be set only in package entities, objects
+--       and overloadable entities. For package entities, this flag is set to
+--       indicate that the private part of the package is being analyzed. The
+--       flag is reset at the end of the package declaration. For objects and
+--       overloadable entities, indicates that the declaration of the entity
+--       occurs in the private part of a package.
 
 --    Incomplete_Actuals
 --       Defined on package entities that are instances. Indicates the actuals
@@ -3038,10 +3047,10 @@ package Einfo is
 --       about them.
 
 --    Is_Limited_Composite
---       Defined in all entities. Set for composite types that have a limited
---       component. Used to enforce the rule that operations on the composite
---       type that depend on the full view of the component do not become
---       visible until the immediate scope of the composite type itself
+--       Defined in types and subtypes. Set for composite types that have a
+--       limited component. Used to enforce the rule that operations on the
+--       composite type that depend on the full view of the component do not
+--       become visible until the immediate scope of the composite type itself
 --       (RM 7.3.1 (5)).
 
 --    Is_Limited_Interface
@@ -3647,22 +3656,19 @@ package Einfo is
 --       type of the object.
 
 --    Lit_Hash [root type only]
---       Defined in enumeration types and subtypes. Non-empty only for the
---       case of an enumeration root type, where it contains the entity for
+--       Defined in enumeration types and subtypes. Contains the entity for
 --       the generated hash function. See unit Exp_Imgv for full details of
 --       the nature and use of this entity for implementing the Value
 --       attribute for the enumeration type in question.
 
---    Lit_Indexes
---       Defined in enumeration types and subtypes. Non-empty only for the
---       case of an enumeration root type, where it contains the entity for
+--    Lit_Indexes [root type only]
+--       Defined in enumeration types and subtypes. Contains the entity for
 --       the generated indexes entity. See unit Exp_Imgv for full details of
 --       the nature and use of this entity for implementing the Image and
 --       Value attributes for the enumeration type in question.
 
---    Lit_Strings
---       Defined in enumeration types and subtypes. Non-empty only for the
---       case of an enumeration root type, where it contains the entity for
+--    Lit_Strings [root type only]
+--       Defined in enumeration types and subtypes. Contains the entity for
 --       the literals string entity. See unit Exp_Imgv for full details of
 --       the nature and use of this entity for implementing the Image and
 --       Value attributes for the enumeration type in question.
@@ -3682,7 +3688,7 @@ package Einfo is
 --       having Has_Machine_Radix_Clause True. This happens when a type is
 --       derived from a type with a clause present.
 
---    Master_Id
+--    Master_Id [root type only]
 --       Defined in access types and subtypes. Empty unless Has_Task is set for
 --       the designated type, in which case it points to the entity for the
 --       Master_Id for the access type master. Also set for access-to-limited-
@@ -5246,7 +5252,7 @@ package Einfo is
    --  E_Access_Type
    --  E_Access_Subtype
    --    Direct_Primitive_Operations $$$ type
-   --    Master_Id
+   --    Master_Id                             (root type only)
    --    Directly_Designated_Type
    --    Associated_Storage_Pool               (root type only)
    --    Finalization_Collection               (root type only)
@@ -5325,6 +5331,7 @@ package Einfo is
    --    Contains_Ignored_Ghost_Code
    --    Delay_Cleanups
    --    Discard_Names
+   --    Has_Activation_Chain_Entity
    --    Has_Master_Entity
    --    Has_Nested_Block_With_Handler
    --    Is_Exception_Handler
@@ -5530,12 +5537,12 @@ package Einfo is
    --  E_Enumeration_Subtype
    --    First_Entity $$$ type
    --    Renamed_Object $$$
-   --    Lit_Strings                          (root type only)
    --    First_Literal
+   --    Lit_Hash                             (root type only)
    --    Lit_Indexes                          (root type only)
+   --    Lit_Strings                          (root type only)
    --    Default_Aspect_Value                 (base type only)
    --    Scalar_Range
-   --    Lit_Hash                             (root type only)
    --    Enum_Pos_To_Rep                      (type only)
    --    Static_Discrete_Predicate
    --    Has_Biased_Representation
@@ -5637,6 +5644,7 @@ package Einfo is
    --    Delay_Cleanups
    --    Discard_Names
    --    Elaboration_Entity_Required
+   --    Has_Activation_Chain_Entity
    --    Has_Completion
    --    Has_Controlling_Result
    --    Has_Expanded_Contract                (non-generic case only)
@@ -5696,7 +5704,7 @@ package Einfo is
    --  E_General_Access_Type
    --    First_Entity $$$
    --    Renamed_Entity $$$
-   --    Master_Id
+   --    Master_Id                            (root type only)
    --    Directly_Designated_Type
    --    Associated_Storage_Pool              (root type only)
    --    Finalization_Collection              (root type only)
@@ -5778,6 +5786,7 @@ package Einfo is
 
    --  E_Loop
    --    First_Exit_Statement
+   --    Has_Activation_Chain_Entity
    --    Has_Exit
    --    Has_Loop_Entry_Attributes
    --    Has_Master_Entity
@@ -5892,6 +5901,7 @@ package Einfo is
    --    Elaborate_Body_Desirable             (non-generic case only)
    --    Elaboration_Entity_Required
    --    From_Limited_With
+   --    Has_Activation_Chain_Entity
    --    Has_All_Calls_Remote
    --    Has_Completion
    --    Has_Forward_Instantiation
@@ -6003,6 +6013,7 @@ package Einfo is
    --    Default_Expressions_Processed
    --    Delay_Cleanups
    --    Discard_Names
+   --    Has_Activation_Chain_Entity
    --    Has_Completion
    --    Has_Expanded_Contract                (non-generic case only)
    --    Has_Master_Entity
@@ -6174,6 +6185,7 @@ package Einfo is
    --    Return_Applies_To
    --    First_Entity $$$
    --    Last_Entity $$$
+   --    Has_Activation_Chain_Entity
 
    --  E_Signed_Integer_Type
    --  E_Signed_Integer_Subtype
@@ -6259,6 +6271,7 @@ package Einfo is
    --    Contract
    --    SPARK_Aux_Pragma
    --    Delay_Cleanups
+   --    Has_Activation_Chain_Entity
    --    Has_Master_Entity
    --    Has_Storage_Size_Clause              (base type only)
    --    Ignore_SPARK_Mode_Pragmas

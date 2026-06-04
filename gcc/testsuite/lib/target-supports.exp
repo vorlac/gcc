@@ -670,7 +670,6 @@ proc check_effective_target_variadic_mi_thunk { } {
 	 || [istarget h8300-*-*]
 	 || [istarget iq2000-*-*]
 	 || [istarget lm32-*-*]
-	 || [istarget m32c-*-*]
 	 || [istarget m32r-*-*]
 	 || [istarget mcore-*-*]
 	 || [istarget moxie-*-*]
@@ -795,8 +794,6 @@ proc check_profiling_available { test_what } {
 	    verbose "autofdo not supported"
 	    return 0
 	}
-	puts $wrapper
-	global srcdir
 	set status [remote_exec host "$wrapper true -v >/dev/null"]
 	if { [lindex $status 0] != 0 } {
 	    verbose "autofdo not supported because perf does not work"
@@ -860,7 +857,6 @@ proc check_profiling_available { test_what } {
 	     || [istarget fido-*-elf]
 	     || [istarget h8300-*-*]
 	     || [istarget lm32-*-*]
-	     || [istarget m32c-*-elf]
 	     || [istarget m68k-*-elf]
 	     || [istarget m68k-*-uclinux*]
 	     || [istarget mips*-*-elf*]
@@ -2104,6 +2100,16 @@ proc check_effective_target_riscv_zacas { } {
     }]
 }
 
+# Return 1 if the target arch supports the atomic-acquire and load-release extension, 0 otherwise.
+# Cache the result.
+proc check_effective_target_riscv_zalasr { } {
+    return [check_no_compiler_messages riscv_ext_zalasr assembly {
+       #ifndef __riscv_zalasr
+       #error "Not __riscv_zalasr"
+       #endif
+    }]
+}
+
 # Return 1 if the target arch supports the double precision floating point
 # extension, 0 otherwise.  Cache the result.
 
@@ -2528,7 +2534,7 @@ proc check_effective_target_riscv_v_misalign_ok { } {
 proc riscv_get_arch { } {
     set gcc_march ""
     # ??? do we neeed to add more extensions to the list below?
-    foreach ext { i e m a f d q c b v zicsr zifencei zfh zba zbb zbc zbkb zbkc zbs zvbb zvfh ztso zaamo zalrsc zabha zacas } {
+    foreach ext { i e m a f d q c b v zicsr zifencei zfh zba zbb zbc zbkb zbkc zbs zvbb zvfh ztso zaamo zalrsc zalasr zabha zacas } {
 	if { [check_no_compiler_messages  riscv_ext_$ext assembly [string map [list DEF __riscv_$ext] {
 		#ifndef DEF
 		#error "Not DEF"
@@ -2723,6 +2729,14 @@ proc remove_options_for_riscv_zalrsc { flags } {
 	set modified_flags [add_options_for_riscv_zalrsc $no_a_flags]
     }
     return $modified_flags
+}
+
+proc add_options_for_riscv_zalasr { flags } {
+    return [add_options_for_riscv_z_ext zalasr $flags]
+}
+
+proc remove_options_for_riscv_zalasr { flags } {
+    return [remove_options_for_riscv_z_ext zalasr $flags]
 }
 
 proc add_options_for_riscv_zabha { flags } {
@@ -6696,6 +6710,23 @@ proc check_effective_target_aarch64_sve2p1_hw { } {
     }]
 }
 
+# Return true if this is an AArch64 target that can run SVE2.2 code.
+
+proc check_effective_target_aarch64_sve2p2_hw { } {
+    if { ![istarget aarch64*-*-*] } {
+	return 0
+    }
+    return [check_runtime aarch64_sve2p2_hw_available {
+	#pragma GCC target "+sve2p2"
+	int
+	main (void)
+	{
+	  asm volatile ("compact z0.b, p0, z1.b");
+	  return 0;
+	}
+    }]
+}
+
 # Return true if this is an AArch64 target that can run SVE code and
 # if its SVE vectors have exactly BITS bits.
 
@@ -9218,7 +9249,6 @@ proc check_effective_target_natural_alignment_32 { } {
 	   || [istarget rl78-*-*]
 	   || [istarget pdp11-*-*]
 	   || [istarget msp430-*-*]
-	   || [istarget m32c-*-*]
 	   || [istarget cris-*-*] } {
 	   return 0
 	 } else {
@@ -12759,7 +12789,7 @@ set exts {
     "sb" "simd" "sve-b16b16" "sve" "sve2" "sve-sm4" "sve-aes" "sve-bitperm"
     "sve-sha3" "f8f16mm" "f8f32mm" "sve-f16f32mm"
     "sme-f8f16" "sme-f8f32"
-    "sme-b16b16" "sme-f16f16" "sme-i16i64" "sme" "sme2" "sme2p1"
+    "sme-b16b16" "sme-f16f16" "sme-i16i64" "sme" "sme2" "sme2p1" "sme2p2"
     "ssve-fp8dot2" "ssve-fp8dot4" "ssve-fp8fma" "sve-bfscale" "sme-lutv2"
 }
 
@@ -12792,6 +12822,16 @@ proc check_effective_target_aarch64_asm_sve2p1_ok { } {
 	return [check_no_compiler_messages aarch64_sve2p1_assembler object {
 	    __asm__ (".arch_extension sve2p1; ld1w {z0.q},p7/z,[x0]");
 	} "-march=armv8-a+sve2p1"]
+    } else {
+	return 0
+    }
+}
+
+proc check_effective_target_aarch64_asm_sve2p2_ok { } {
+    if { [istarget aarch64*-*-*] } {
+	return [check_no_compiler_messages aarch64_sve2p2_assembler object {
+	    __asm__ (".arch_extension sve2p2; compact z0.b,p0,z1.b");
+	} "-march=armv8-a+sve2p2"]
     } else {
 	return 0
     }
@@ -14819,6 +14859,17 @@ proc check_effective_target_alarm { } {
 	  /* Infinite loop to simulate work...  */
 	  while (1);
 	  abort ();
+	}
+    }]
+}
+
+# Return true if sleep is supported on the target.
+
+proc check_effective_target_sleep { } {
+    return [check_no_compiler_messages sleep executable {
+	#include <unistd.h>
+	int main (void) {
+	  sleep (1);
 	}
     }]
 }

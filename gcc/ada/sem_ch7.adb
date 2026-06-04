@@ -136,9 +136,6 @@ package body Sem_Ch7 is
    --  one entity on its visibility chain, and recurses on the visible part if
    --  the entity is an inner package.
 
-   function Is_Private_Base_Type (E : Entity_Id) return Boolean;
-   --  True for a private type that is not a subtype
-
    function Is_Visible_Dependent (Dep : Entity_Id) return Boolean;
    --  If the private dependent is a private type whose full view is derived
    --  from the parent type, its full properties are revealed only if we are in
@@ -700,7 +697,7 @@ package body Sem_Ch7 is
             if Is_Type (Id)
               and then (Is_Limited_Composite (Id)
                          or else Is_Private_Composite (Id))
-              and then No (Private_Component (Id))
+              and then No (Partially_Visible_Part (Id))
             then
                Set_Is_Limited_Composite (Id, False);
                Set_Is_Private_Composite (Id, False);
@@ -2720,7 +2717,7 @@ package body Sem_Ch7 is
    begin
       if not Has_Completion (E)
         and then Nkind (P) = N_Package_Declaration
-        and then (Present (Activation_Chain_Entity (P)) or else Has_RACW (E))
+        and then (Has_Activation_Chain_Entity (E) or else Has_RACW (E))
       then
          B :=
            Make_Package_Body (Sloc (E),

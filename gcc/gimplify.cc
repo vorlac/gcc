@@ -896,131 +896,6 @@ gimple_add_tmp_var (tree tmp)
     }
 }
 
-
-
-/* This page contains routines to unshare tree nodes, i.e. to duplicate tree
-   nodes that are referenced more than once in GENERIC functions.  This is
-   necessary because gimplification (translation into GIMPLE) is performed
-   by modifying tree nodes in-place, so gimplification of a shared node in a
-   first context could generate an invalid GIMPLE form in a second context.
-
-   This is achieved with a simple mark/copy/unmark algorithm that walks the
-   GENERIC representation top-down, marks nodes with TREE_VISITED the first
-   time it encounters them, duplicates them if they already have TREE_VISITED
-   set, and finally removes the TREE_VISITED marks it has set.
-
-   The algorithm works only at the function level, i.e. it generates a GENERIC
-   representation of a function with no nodes shared within the function when
-   passed a GENERIC function (except for nodes that are allowed to be shared).
-
-   At the global level, it is also necessary to unshare tree nodes that are
-   referenced in more than one function, for the same aforementioned reason.
-   This requires some cooperation from the front-end.  There are 2 strategies:
-
-     1. Manual unsharing.  The front-end needs to call unshare_expr on every
-        expression that might end up being shared across functions.
-
-     2. Deep unsharing.  This is an extension of regular unsharing.  Instead
-        of calling unshare_expr on expressions that might be shared across
-        functions, the front-end pre-marks them with TREE_VISITED.  This will
-        ensure that they are unshared on the first reference within functions
-        when the regular unsharing algorithm runs.  The counterpart is that
-        this algorithm must look deeper than for manual unsharing, which is
-        specified by LANG_HOOKS_DEEP_UNSHARING.
-
-  If there are only few specific cases of node sharing across functions, it is
-  probably easier for a front-end to unshare the expressions manually.  On the
-  contrary, if the expressions generated at the global level are as widespread
-  as expressions generated within functions, deep unsharing is very likely the
-  way to go.  */
-
-/* Similar to copy_tree_r but do not copy SAVE_EXPR or TARGET_EXPR nodes.
-   These nodes model computations that must be done once.  If we were to
-   unshare something like SAVE_EXPR(i++), the gimplification process would
-   create wrong code.  However, if DATA is non-null, it must hold a pointer
-   set that is used to unshare the subtrees of these nodes.  */
-
-static tree
-mostly_copy_tree_r (tree *tp, int *walk_subtrees, void *data)
-{
-  tree t = *tp;
-  enum tree_code code = TREE_CODE (t);
-
-  /* Do not copy SAVE_EXPR, TARGET_EXPR or BIND_EXPR nodes themselves, but
-     copy their subtrees if we can make sure to do it only once.  */
-  if (code == SAVE_EXPR || code == TARGET_EXPR || code == BIND_EXPR)
-    {
-      if (data && !((hash_set<tree> *)data)->add (t))
-	;
-      else
-	*walk_subtrees = 0;
-    }
-
-  /* Stop at types, decls, constants like copy_tree_r.  */
-  else if (TREE_CODE_CLASS (code) == tcc_type
-	   || TREE_CODE_CLASS (code) == tcc_declaration
-	   || TREE_CODE_CLASS (code) == tcc_constant)
-    *walk_subtrees = 0;
-
-  /* Cope with the statement expression extension.  */
-  else if (code == STATEMENT_LIST)
-    ;
-
-  /* Leave the bulk of the work to copy_tree_r itself.  */
-  else
-    copy_tree_r (tp, walk_subtrees, NULL);
-
-  return NULL_TREE;
-}
-
-/* Callback for walk_tree to unshare most of the shared trees rooted at *TP.
-   If *TP has been visited already, then *TP is deeply copied by calling
-   mostly_copy_tree_r.  DATA is passed to mostly_copy_tree_r unmodified.  */
-
-static tree
-copy_if_shared_r (tree *tp, int *walk_subtrees, void *data)
-{
-  tree t = *tp;
-  enum tree_code code = TREE_CODE (t);
-
-  /* Skip types, decls, and constants.  But we do want to look at their
-     types and the bounds of types.  Mark them as visited so we properly
-     unmark their subtrees on the unmark pass.  If we've already seen them,
-     don't look down further.  */
-  if (TREE_CODE_CLASS (code) == tcc_type
-      || TREE_CODE_CLASS (code) == tcc_declaration
-      || TREE_CODE_CLASS (code) == tcc_constant)
-    {
-      if (TREE_VISITED (t))
-	*walk_subtrees = 0;
-      else
-	TREE_VISITED (t) = 1;
-    }
-
-  /* If this node has been visited already, unshare it and don't look
-     any deeper.  */
-  else if (TREE_VISITED (t))
-    {
-      walk_tree (tp, mostly_copy_tree_r, data, NULL);
-      *walk_subtrees = 0;
-    }
-
-  /* Otherwise, mark the node as visited and keep looking.  */
-  else
-    TREE_VISITED (t) = 1;
-
-  return NULL_TREE;
-}
-
-/* Unshare most of the shared trees rooted at *TP.  DATA is passed to the
-   copy_if_shared_r callback unmodified.  */
-
-void
-copy_if_shared (tree *tp, void *data)
-{
-  walk_tree (tp, copy_if_shared_r, data, NULL);
-}
-
 /* Unshare all the trees in the body of FNDECL, as well as in the bodies of
    any nested functions.  */
 
@@ -1087,41 +962,6 @@ unvisit_body (tree fndecl)
     for (cgn = first_nested_function (cgn);
 	 cgn; cgn = next_nested_function (cgn))
       unvisit_body (cgn->decl);
-}
-
-/* Unconditionally make an unshared copy of EXPR.  This is used when using
-   stored expressions which span multiple functions, such as BINFO_VTABLE,
-   as the normal unsharing process can't tell that they're shared.  */
-
-tree
-unshare_expr (tree expr)
-{
-  walk_tree (&expr, mostly_copy_tree_r, NULL, NULL);
-  return expr;
-}
-
-/* Worker for unshare_expr_without_location.  */
-
-static tree
-prune_expr_location (tree *tp, int *walk_subtrees, void *)
-{
-  if (EXPR_P (*tp))
-    SET_EXPR_LOCATION (*tp, UNKNOWN_LOCATION);
-  else
-    *walk_subtrees = 0;
-  return NULL_TREE;
-}
-
-/* Similar to unshare_expr but also prune all expression locations
-   from EXPR.  */
-
-tree
-unshare_expr_without_location (tree expr)
-{
-  walk_tree (&expr, mostly_copy_tree_r, NULL, NULL);
-  if (EXPR_P (expr))
-    walk_tree (&expr, prune_expr_location, NULL, NULL);
-  return expr;
 }
 
 /* Return the EXPR_LOCATION of EXPR, if it (maybe recursively) has
@@ -2221,7 +2061,7 @@ gimplify_decl_expr (tree *stmt_p, gimple_seq *seq_p)
 	    walk_tree (&init, force_labels_r, NULL, NULL);
 	}
       /* When there is no explicit initializer, if the user requested,
-	 We should insert an artifical initializer for this automatic
+	 We should insert an artificial initializer for this automatic
 	 variable.  */
       else if (var_needs_auto_init_p (decl)
 	       && !decl_had_value_expr_p)
@@ -6460,7 +6300,7 @@ gimplify_init_constructor (tree *expr_p, gimple_seq *pre_p, gimple_seq *post_p,
 	struct gimplify_init_ctor_preeval_data preeval_data;
 	HOST_WIDE_INT num_ctor_elements, num_nonzero_elements;
 	HOST_WIDE_INT num_unique_nonzero_elements;
-	int complete_p;
+	ctor_completeness complete_p;
 	bool valid_const_initializer;
 
 	/* Aggregate types must lower constructors to initialization of
@@ -6545,7 +6385,7 @@ gimplify_init_constructor (tree *expr_p, gimple_seq *pre_p, gimple_seq *post_p,
 	     objects.  Initializers for such objects must explicitly set
 	     every field that needs to be set.  */
 	  cleared = false;
-	else if (!complete_p)
+	else if (complete_p.sparse)
 	  /* If the constructor isn't complete, clear the whole object
 	     beforehand, unless CONSTRUCTOR_NO_CLEARING is set on it.
 
@@ -6570,7 +6410,8 @@ gimplify_init_constructor (tree *expr_p, gimple_seq *pre_p, gimple_seq *post_p,
 	   That will avoid wasting cycles preserving any padding bits
 	   that might be there, and if there aren't any, the compiler
 	   is smart enough to optimize the clearing out.  */
-	else if (complete_p <= 0
+	else if ((complete_p.sparse || complete_p.padded_union
+		  || complete_p.padded_non_union)
 		 && !TREE_ADDRESSABLE (ctor)
 		 && !TREE_THIS_VOLATILE (object)
 		 && (TYPE_MODE (type) != BLKmode || TYPE_NO_FORCE_BLK (type))
@@ -6589,7 +6430,7 @@ gimplify_init_constructor (tree *expr_p, gimple_seq *pre_p, gimple_seq *post_p,
 	   clearing), and don't try to make bitwise copies of
 	   TREE_ADDRESSABLE types.  */
 	if (valid_const_initializer
-	    && complete_p
+	    && !complete_p.sparse
 	    && !(cleared || num_nonzero_elements == 0)
 	    && !TREE_ADDRESSABLE (type))
 	  {
@@ -6642,6 +6483,24 @@ gimplify_init_constructor (tree *expr_p, gimple_seq *pre_p, gimple_seq *post_p,
 		   pretend we didn't do anything here to let that happen.  */
 		return GS_UNHANDLED;
 	      }
+	  }
+
+	if (!cleared)
+	  {
+	    if (complete_p.padded_non_union
+		&& warn_zero_init_padding_bits >= ZERO_INIT_PADDING_BITS_ALL)
+		warning (OPT_Wzero_init_padding_bits_,
+			 "padding might not be initialized to zero; "
+			 "if code relies on it being zero, consider "
+			 "using %<-fzero-init-padding-bits=all%>");
+	    else if (complete_p.padded_union
+		     && warn_zero_init_padding_bits
+			>= ZERO_INIT_PADDING_BITS_UNIONS)
+		warning (OPT_Wzero_init_padding_bits_,
+			 "padding might not be initialized to zero; "
+			 "if code relies on it being zero, consider "
+			 "using %<-fzero-init-padding-bits=unions%> "
+			 "or %<-fzero-init-padding-bits=all%>");
 	  }
 
 	/* If a single access to the target must be ensured and there are
@@ -7464,7 +7323,7 @@ gimplify_modify_expr (tree *expr_p, gimple_seq *pre_p, gimple_seq *post_p,
 	return ret;
     }
 
-  /* In case of va_arg internal fn wrappped in a WITH_SIZE_EXPR, add the type
+  /* In case of va_arg internal fn wrapped in a WITH_SIZE_EXPR, add the type
      size as argument to the call.  */
   if (TREE_CODE (*from_p) == WITH_SIZE_EXPR)
     {
@@ -9182,7 +9041,7 @@ oacc_default_clause (struct gimplify_omp_ctx *ctx, tree decl, unsigned flags)
 
   /* For Fortran COMMON blocks, only used variables in those blocks are
      transferred and remapped.  The block itself will have a private clause to
-     avoid transfering the data twice.
+     avoid transferring the data twice.
      The hook evaluates to false by default.  For a variable in Fortran's COMMON
      or EQUIVALENCE block, returns 'true' (as we have shared=false) - as only
      the variables in such a COMMON/EQUIVALENCE block shall be privatized not
@@ -9302,7 +9161,7 @@ omp_notice_variable (struct gimplify_omp_ctx *ctx, tree decl, bool in_code)
       if (DECL_HAS_VALUE_EXPR_P (decl))
 	{
 	  if (ctx->region_type & ORT_ACC)
-	    /* For OpenACC, defer expansion of value to avoid transfering
+	    /* For OpenACC, defer expansion of value to avoid transferring
 	       privatized common block data instead of im-/explicitly
 	       transferred variables which are in common blocks.  */
 	    ;
@@ -13817,6 +13676,8 @@ gimplify_scan_omp_clauses (tree *list_p, gimple_seq *pre_p,
       || code == OACC_UPDATE
       || code == OACC_DECLARE)
     {
+      if (!(region_type & ORT_ACC))
+	*list_p = omp_remove_duplicate_maps (*list_p, false);
       groups = omp_gather_mapping_groups (list_p);
 
       if (groups)
@@ -15077,7 +14938,7 @@ gimplify_scan_omp_clauses (tree *list_p, gimple_seq *pre_p,
 	  decl = OMP_CLAUSE_ALLOCATE_ALLOCATOR (c);
 	  if (decl
 	      && TREE_CODE (decl) == INTEGER_CST
-	      && wi::eq_p (wi::to_widest (decl), GOMP_OMP_PREDEF_ALLOC_THREADS)
+	      && wi::eq_p (wi::to_widest (decl), GOMP_OMP_PREDEF_ALLOC_THREAD)
 	      && (code == OMP_TARGET || code == OMP_TASK || code == OMP_TASKLOOP))
 	    warning_at (OMP_CLAUSE_LOCATION (c), OPT_Wopenmp,
 			"allocator with access trait set to %<thread%> "

@@ -855,18 +855,6 @@ public:
   }
 };
 
-class svcvtnt_impl : public CODE_FOR_MODE0 (aarch64_sve_cvtnt)
-{
-public:
-  gimple *
-  fold (gimple_folder &f) const override
-  {
-    if (f.pred == PRED_x && is_pfalse (gimple_call_arg (f.call, 1)))
-      f.fold_call_to (build_zero_cst (TREE_TYPE (f.lhs)));
-    return NULL;
-  }
-};
-
 class svdiv_impl : public rtx_code_function
 {
 public:
@@ -1294,6 +1282,19 @@ class sveorv_impl : public reduction
 public:
   CONSTEXPR sveorv_impl () : reduction (UNSPEC_XORV) {}
 
+  gimple *
+  fold (gimple_folder &f) const override
+  {
+    if (is_pfalse (gimple_call_arg (f.call, 0)))
+      return f.fold_call_to (build_zero_cst (TREE_TYPE (f.lhs)));
+    return NULL;
+  }
+};
+
+class svexpand_impl
+  : public QUIET_CODE_FOR_MODE0 (aarch64_sve_expand)
+{
+public:
   gimple *
   fold (gimple_folder &f) const override
   {
@@ -3594,7 +3595,7 @@ FUNCTION (svcreate2, svcreate_impl, (2))
 FUNCTION (svcreate3, svcreate_impl, (3))
 FUNCTION (svcreate4, svcreate_impl, (4))
 FUNCTION (svcvt, svcvt_impl,)
-FUNCTION (svcvtnt, svcvtnt_impl,)
+FUNCTION (svcvtnt, NARROWING_TOP_CONVERT0 (aarch64_sve_cvtnt),)
 FUNCTION (svdiv, svdiv_impl,)
 FUNCTION (svdivr, rtx_code_function_rotated, (DIV, UDIV, UNSPEC_COND_FDIV))
 FUNCTION (svdot, svdot_impl,)
@@ -3607,6 +3608,7 @@ FUNCTION (svdupq_lane, svdupq_lane_impl,)
 FUNCTION (sveor, rtx_code_function, (XOR, XOR, -1))
 FUNCTION (sveorv, sveorv_impl,)
 FUNCTION (svexpa, unspec_based_function, (-1, -1, UNSPEC_FEXPA))
+FUNCTION (svexpand, svexpand_impl,)
 FUNCTION (svext, QUIET_CODE_FOR_MODE0 (aarch64_sve_ext),)
 FUNCTION (svextb, svext_bhw_impl, (QImode))
 FUNCTION (svexth, svext_bhw_impl, (HImode))

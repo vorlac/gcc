@@ -458,7 +458,7 @@ struct c_declspecs {
   BOOL_BITFIELD complex_p : 1;
   /* Whether "inline" was specified.  */
   BOOL_BITFIELD inline_p : 1;
-  /* Whether "_Noreturn" was speciied.  */
+  /* Whether "_Noreturn" was specified.  */
   BOOL_BITFIELD noreturn_p : 1;
   /* Whether "__thread" or "_Thread_local" was specified.  */
   BOOL_BITFIELD thread_p : 1;
@@ -786,6 +786,7 @@ extern void c_initialize_diagnostics (diagnostics::context *);
 extern bool c_var_mod_p (tree x, tree fn);
 extern alias_set_type c_get_alias_set (tree);
 extern int c_type_dwarf_attribute (const_tree, int);
+extern tree c_enum_underlying_base_type (const_tree);
 
 /* in c-typeck.cc */
 extern int in_alignof;
@@ -851,11 +852,10 @@ extern tree c_objc_common_truthvalue_conversion (location_t, tree,
 						 tree = integer_type_node);
 extern tree require_complete_type (location_t, tree);
 extern bool same_translation_unit_p (const_tree, const_tree);
-extern int comptypes (tree, tree);
+extern bool comptypes (tree, tree);
 extern bool comptypes_same_p (tree, tree);
 extern bool comptypes_equiv_p (tree, tree);
-extern int comptypes_check_different_types (tree, tree, bool *);
-extern int comptypes_check_enum_int (tree, tree, bool *);
+extern bool comptypes_check_enum_int (tree, tree, bool *);
 extern bool c_mark_addressable (tree, bool = false, bool = false);
 extern void c_incomplete_type_error (location_t, const_tree, const_tree);
 extern tree c_type_promotes_to (tree);
@@ -890,7 +890,7 @@ extern struct c_expr parser_build_unary_op (location_t, enum tree_code,
     					    struct c_expr);
 extern struct c_expr parser_build_binary_op (location_t,
     					     enum tree_code, struct c_expr,
-					     struct c_expr);
+					     struct c_expr, tree);
 extern tree build_conditional_expr (location_t, tree, bool, tree, tree,
 				    location_t, tree, tree, location_t);
 extern tree build_compound_expr (location_t, tree, tree);
@@ -1009,7 +1009,6 @@ extern tree c_check_omp_declare_reduction_r (tree *, int *, void *);
 extern tree c_omp_mapper_id (tree);
 extern tree c_omp_mapper_decl (tree);
 extern void c_omp_scan_mapper_bindings (location_t, tree *, tree);
-extern tree c_omp_instantiate_mappers (tree);
 extern bool c_check_in_current_scope (tree);
 extern void c_pushtag (location_t, tree, tree);
 extern void c_bind (location_t, tree, bool);

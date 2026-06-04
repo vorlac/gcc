@@ -785,4 +785,57 @@ sat_u_mul_##NT##_from_##WT##_fmt_7 (NT a, NT b) \
   sat_u_mul_##NT##_from_##WT##_fmt_7 (a, b)
 #define RUN_SAT_U_MUL_FMT_7_WRAP(NT, WT, a, b) RUN_SAT_U_MUL_FMT_7(NT, WT, a, b)
 
+#define DEF_SAT_U_MUL_FMT_8(NT, WT)             \
+NT __attribute__((noinline))                    \
+sat_u_mul_##NT##_from_##WT##_fmt_8 (NT a, NT b) \
+{                                               \
+  WT x = (WT)a * (WT)b;                         \
+  NT max = -1;                                  \
+  return x >= (WT)(max) ? max : (NT)x;          \
+}
+
+#define DEF_SAT_U_MUL_FMT_8_WRAP(NT, WT) DEF_SAT_U_MUL_FMT_8(NT, WT)
+#define RUN_SAT_U_MUL_FMT_8(NT, WT, a, b) \
+  sat_u_mul_##NT##_from_##WT##_fmt_8 (a, b)
+#define RUN_SAT_U_MUL_FMT_8_WRAP(NT, WT, a, b) RUN_SAT_U_MUL_FMT_8(NT, WT, a, b)
+
+#define DEF_SAT_U_MUL_FMT_9(T)                                 \
+T __attribute__((noinline))                                    \
+sat_u_mul_##T##_fmt_9 (T a, T b)                               \
+{                                                              \
+  T result;                                                    \
+  return __builtin_mul_overflow (a, b, &result) ? -1 : result; \
+}
+
+#define DEF_SAT_U_MUL_FMT_9_WRAP(T) DEF_SAT_U_MUL_FMT_9(T)
+#define RUN_SAT_U_MUL_FMT_9(T, a, b) sat_u_mul_##T##_fmt_9(a, b)
+#define RUN_SAT_U_MUL_FMT_9_WRAP(T, a, b) RUN_SAT_U_MUL_FMT_9(T, a, b)
+
+#define DEF_SAT_U_MUL_FMT_10(T)                                     \
+T __attribute__((noinline))                                         \
+sat_u_mul_##T##_fmt_10 (T a, T b)                                   \
+{                                                                   \
+  T result;                                                         \
+  return __builtin_mul_overflow (a, b, &result) == 0 ? result : -1; \
+}
+
+#define DEF_SAT_U_MUL_FMT_10_WRAP(T) DEF_SAT_U_MUL_FMT_10(T)
+#define RUN_SAT_U_MUL_FMT_10(T, a, b) sat_u_mul_##T##_fmt_10(a, b)
+#define RUN_SAT_U_MUL_FMT_10_WRAP(T, a, b) RUN_SAT_U_MUL_FMT_10(T, a, b)
+
+#define DEF_SAT_U_MUL_FMT_11(NT, WT)             \
+NT __attribute__((noinline))                     \
+sat_u_mul_##NT##_from_##WT##_fmt_11 (NT a, NT b) \
+{                                                \
+  WT x = (WT)a * (WT)b;                          \
+  NT max = -1;                                   \
+  bool overflow_p = x >= (WT)(max);              \
+  return -(NT)(overflow_p) | (NT)x;              \
+}
+
+#define DEF_SAT_U_MUL_FMT_11_WRAP(NT, WT) DEF_SAT_U_MUL_FMT_11(NT, WT)
+#define RUN_SAT_U_MUL_FMT_11(NT, WT, a, b) \
+  sat_u_mul_##NT##_from_##WT##_fmt_11 (a, b)
+#define RUN_SAT_U_MUL_FMT_11_WRAP(NT, WT, a, b) RUN_SAT_U_MUL_FMT_11(NT, WT, a, b)
+
 #endif

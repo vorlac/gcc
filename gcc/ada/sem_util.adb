@@ -143,11 +143,9 @@ package body Sem_Util is
    --  Shared function used to detect effectively volatile objects and
    --  effectively volatile objects for reading.
 
-   function Is_Fully_Initialized_Variant (Typ : Entity_Id) return Boolean;
-   --  Subsidiary to Is_Fully_Initialized_Type. For an unconstrained type
-   --  with discriminants whose default values are static, examine only the
-   --  components in the selected variant to determine whether all of them
-   --  have a default.
+   function Is_Fully_Initialized_Constrained_Array
+     (Typ : Entity_Id) return Boolean;
+   --  Determines if Typ is a fully initialized constrained array type
 
    function Is_Preelaborable_Function (Id : Entity_Id) return Boolean;
    --  Ada 2022: Determine whether the specified function is suitable as the
@@ -2594,6 +2592,8 @@ package body Sem_Util is
 
    procedure Check_Fully_Declared (T : Entity_Id; N : Node_Id) is
    begin
+      --  The immediate case is an incomplete type
+
       if Ekind (T) = E_Incomplete_Type then
 
          --  Ada 2005 (AI-50217): If the type is available through a limited
@@ -2612,10 +2612,14 @@ package body Sem_Util is
               ("premature usage of incomplete}", N, First_Subtype (T));
          end if;
 
-      --  Need comments for these tests ???
+      --  The other case is an incompletely defined type. But we exclude formal
+      --  types, as well as references in generic units to entities declared
+      --  outside of them, and all references in spec expressions.
 
-      elsif Has_Private_Component (T)
+      elsif Is_Incompletely_Defined (T)
         and then not Is_Generic_Type (Root_Type (T))
+        and then (not Is_Generic_Unit (Current_Scope)
+                   or else Scope_Within_Or_Same (Scope (T), Current_Scope))
         and then not In_Spec_Expression
       then
          --  Special case: if T is the anonymous type created for a single
@@ -2796,7 +2800,7 @@ package body Sem_Util is
                if Is_Writable_Actual then
 
                   --  Skip checking the error in non-elementary types since
-                  --  RM 6.4.1(6.15/3) is restricted to elementary types, but
+                  --  RM 6.4.1(6.16/3) is restricted to elementary types, but
                   --  store this actual in Writable_Actuals_List since it is
                   --  needed to perform checks on other constructs that have
                   --  arbitrary order of evaluation (for example, aggregates).
@@ -2954,7 +2958,7 @@ package body Sem_Util is
       --  call C2 (not including the construct C itself), there is no other
       --  name anywhere within a direct constituent of the construct C other
       --  than the one containing C2, that is known to refer to the same
-      --  object (RM 6.4.1(6.17/3)).
+      --  object (RM 6.4.1(6.18/3)).
 
       case Nkind (N) is
          when N_Range =>
@@ -3201,7 +3205,7 @@ package body Sem_Util is
 
                --  For an array aggregate, a discrete_choice_list that has
                --  a nonstatic range is considered as two or more separate
-               --  occurrences of the expression (RM 6.4.1(6.20/3)).
+               --  occurrences of the expression (RM 6.4.1(6.21/3)).
 
                elsif Is_Array_Type (Etype (N))
                  and then Nkind (N) = N_Aggregate
@@ -5887,7 +5891,7 @@ package body Sem_Util is
             --  predefined "=" operator.
 
             if Is_Overloadable (Id)
-              and then (Is_Type_In_Pkg
+              and then ((Is_Type_In_Pkg and then not In_Package_Body (Id))
                          or else Is_Primitive (Id)
                          or else not Comes_From_Source (Id))
 
@@ -6758,7 +6762,10 @@ package body Sem_Util is
 
       elsif Scope_Is_Transient then
          while Present (E) loop
-            exit when Scope (E) = CS or else Scope (E) = Scope (CS);
+            exit when Scope (E) = CS
+              or else (Scope (E) = Scope (CS)
+                        and then N /= Name_uChain
+                        and then N /= Name_uMaster);
 
             E := Homonym (E);
          end loop;
@@ -7047,7 +7054,7 @@ package body Sem_Util is
       --  For renamings, return False if the prefix of any dereference within
       --  the renamed object_name is a variable, or any expression within the
       --  renamed object_name contains references to variables or calls on
-      --  nonstatic functions; otherwise return True (RM 6.4.1(6.10/3))
+      --  nonstatic functions; otherwise return True (RM 6.4.1(6.11/3))
 
       ------------------------
       -- Is_Object_Renaming --
@@ -7381,6 +7388,12 @@ package body Sem_Util is
 
       pragma Assert (Ekind (Self) = E_Assertion_Level);
       pragma Assert (Ekind (Other) = E_Assertion_Level);
+
+      if Other = Standard_Level_Runtime
+         and then not Is_Same_Or_Depends_On_Level (Self, Standard_Level_Static)
+      then
+         return True;
+      end if;
 
       if No (Parent_Levels (Self)) then
          return False;
@@ -8577,27 +8590,21 @@ package body Sem_Util is
    function Expression_Of_Expression_Function
      (Subp : Entity_Id) return Node_Id
    is
-      Expr_Func : Node_Id := Empty;
+      Subp_Decl : Node_Id;
 
    begin
       pragma Assert (Is_Expression_Function_Or_Completion (Subp));
 
-      if Nkind (Original_Node (Subprogram_Spec (Subp))) =
-           N_Expression_Function
-      then
-         Expr_Func := Original_Node (Subprogram_Spec (Subp));
+      --  The function declaration is either an expression function or is
+      --  completed by an expression function.
 
-      elsif Nkind (Original_Node (Subprogram_Body (Subp))) =
-              N_Expression_Function
-      then
-         Expr_Func := Original_Node (Subprogram_Body (Subp));
+      Subp_Decl := Unit_Declaration_Node (Subp);
 
-      else
-         pragma Assert (False);
-         null;
+      if Nkind (Original_Node (Subp_Decl)) /= N_Expression_Function then
+         Subp_Decl := Unit_Declaration_Node (Corresponding_Body (Subp_Decl));
       end if;
 
-      return Original_Node (Expression (Expr_Func));
+      return Expression (Original_Node (Subp_Decl));
    end Expression_Of_Expression_Function;
 
    -------------------------------
@@ -11506,22 +11513,27 @@ package body Sem_Util is
          end if;
 
          Assoc := First (Assocs);
-         Choice := First (Choices (Assoc));
 
-         if Nkind (Choice) = N_Identifier then
-            return Present (Get_Assertion_Level (Chars (Choice)));
+         if Nkind (Assoc) /= N_Component_Association then
+            return False;
          end if;
 
-         return False;
+         Choice := First (Choices (Assoc));
+
+         if Nkind (Choice) /= N_Identifier then
+            return False;
+         end if;
+
+         return Present (Get_Assertion_Level (Chars (Choice)));
       else
          pragma Assert (Nkind (N) = N_Pragma);
          Assocs := Pragma_Argument_Associations (N);
          Assoc := First (Assocs);
-         if Present (Assoc) and then Chars (Assoc) /= No_Name then
-            return Present (Get_Assertion_Level (Chars (Assoc)));
+         if No (Assoc) or else Chars (Assoc) = No_Name then
+            return False;
          end if;
 
-         return False;
+         return Present (Get_Assertion_Level (Chars (Assoc)));
       end if;
    end Has_Assertion_Level_Argument;
 
@@ -12493,15 +12505,16 @@ package body Sem_Util is
 
    function Has_Inferable_Discriminants (N : Node_Id) return Boolean is
 
-      function Prefix_Is_Formal_Parameter (N : Node_Id) return Boolean;
-      --  Determines whether the left-most prefix of a selected component is a
-      --  formal parameter in a subprogram. Assumes N is a selected component.
+      function Prefix_Is_Formal_Parameter_Of_EQ (N : Node_Id) return Boolean;
+      --  Determines whether the left-most prefix of selected component N
+      --  is a formal parameter of the predefined equality function of an
+      --  Unchecked_Union type.
 
-      --------------------------------
-      -- Prefix_Is_Formal_Parameter --
-      --------------------------------
+      --------------------------------------
+      -- Prefix_Is_Formal_Parameter_Of_EQ --
+      --------------------------------------
 
-      function Prefix_Is_Formal_Parameter (N : Node_Id) return Boolean is
+      function Prefix_Is_Formal_Parameter_Of_EQ (N : Node_Id) return Boolean is
          Sel_Comp : Node_Id;
 
       begin
@@ -12514,8 +12527,10 @@ package body Sem_Util is
             Sel_Comp := Parent (Sel_Comp);
          end loop;
 
-         return Is_Formal (Entity (Prefix (Sel_Comp)));
-      end Prefix_Is_Formal_Parameter;
+         return Is_Formal (Entity (Prefix (Sel_Comp)))
+           and then
+             Is_Unchecked_Union_Equality (Scope (Entity (Prefix (Sel_Comp))));
+      end Prefix_Is_Formal_Parameter_Of_EQ;
 
    --  Start of processing for Has_Inferable_Discriminants
 
@@ -12533,14 +12548,14 @@ package body Sem_Util is
             return False;
          end if;
 
-         --  A small hack. If we have a per-object constrained selected
-         --  component of a formal parameter, return True since we do not
-         --  know the actual parameter association yet.
+         --  We need to return True for the component of a formal parameter
+         --  of the predefined equality function of an Unchecked_Union type
+         --  when expanding it (see Expand_Unchecked_Union_Equality).
 
          return not Has_Per_Object_Constraint (Entity (Selector_Name (N)))
            or else not Is_Unchecked_Union (Etype (Prefix (N)))
            or else Has_Inferable_Discriminants (Prefix (N))
-           or else Prefix_Is_Formal_Parameter (N);
+           or else Prefix_Is_Formal_Parameter_Of_EQ (N);
 
       --  A qualified expression has inferable discriminants if its subtype
       --  mark is a constrained Unchecked_Union subtype.
@@ -12739,18 +12754,27 @@ package body Sem_Util is
       return False;
    end Has_Non_Null_Statements;
 
-   ----------------------------------
-   -- Is_Access_Subprogram_Wrapper --
-   ----------------------------------
+   -------------------------------------
+   -- Is_Access_To_Subprogram_Wrapper --
+   -------------------------------------
 
-   function Is_Access_Subprogram_Wrapper (E : Entity_Id) return Boolean is
-      Formal : constant Entity_Id := Last_Formal (E);
+   function Is_Access_To_Subprogram_Wrapper (E : Entity_Id) return Boolean is
+      Formal : Entity_Id;
+
    begin
-      return Present (Formal)
-        and then Ekind (Etype (Formal)) in Access_Subprogram_Kind
-        and then Access_Subprogram_Wrapper
-           (Directly_Designated_Type (Etype (Formal))) = E;
-   end Is_Access_Subprogram_Wrapper;
+      if not Is_Wrapper (E)
+        or else No (Last_Formal (E))
+      then
+         return False;
+
+      else
+         Formal := Last_Formal (E);
+
+         return Ekind (Etype (Formal)) in Access_Subprogram_Kind
+           and then Access_Subprogram_Wrapper
+              (Directly_Designated_Type (Etype (Formal))) = E;
+      end if;
+   end Is_Access_To_Subprogram_Wrapper;
 
    ---------------------------
    -- Is_Explicitly_Aliased --
@@ -13732,67 +13756,6 @@ package body Sem_Util is
         N_Indexed_Component   | N_Reference     | N_Selected_Component   |
         N_Slice;
    end Has_Prefix;
-
-   ---------------------------
-   -- Has_Private_Component --
-   ---------------------------
-
-   function Has_Private_Component (Type_Id : Entity_Id) return Boolean is
-      Btype     : Entity_Id := Base_Type (Type_Id);
-      Component : Entity_Id;
-
-   begin
-      if Error_Posted (Type_Id)
-        or else Error_Posted (Btype)
-      then
-         return False;
-      end if;
-
-      if Is_Class_Wide_Type (Btype) then
-         Btype := Root_Type (Btype);
-      end if;
-
-      if Is_Private_Type (Btype) then
-         declare
-            UT : constant Entity_Id := Underlying_Type (Btype);
-         begin
-            if No (UT) then
-               if No (Full_View (Btype)) then
-                  return not Is_Generic_Type (Btype)
-                            and then
-                         not Is_Generic_Type (Root_Type (Btype));
-               else
-                  return not Is_Generic_Type (Root_Type (Full_View (Btype)));
-               end if;
-            else
-               return not Is_Frozen (UT) and then Has_Private_Component (UT);
-            end if;
-         end;
-
-      elsif Is_Array_Type (Btype) then
-         return Has_Private_Component (Component_Type (Btype));
-
-      elsif Is_Record_Type (Btype) then
-         Component := First_Component (Btype);
-         while Present (Component) loop
-            if Has_Private_Component (Etype (Component)) then
-               return True;
-            end if;
-
-            Next_Component (Component);
-         end loop;
-
-         return False;
-
-      elsif Is_Protected_Type (Btype)
-        and then Present (Corresponding_Record_Type (Btype))
-      then
-         return Has_Private_Component (Corresponding_Record_Type (Btype));
-
-      else
-         return False;
-      end if;
-   end Has_Private_Component;
 
    --------------------------------
    -- Has_Relaxed_Initialization --
@@ -15480,59 +15443,6 @@ package body Sem_Util is
 
                               Next_Elmt (Subp_Elmt);
                            end loop;
-
-                           --  Traverse the primitive operations of the type
-                           --  to locate any indexing functions that have been
-                           --  added to the type (i.e., that have been neither
-                           --  inherited, nor override any of the inherited
-                           --  indexing functions).
-
-                           --  ??? Note that this doesn't currently account for
-                           --  the possibility of added nonprimitive indexing
-                           --  functions (class-wide functions of the derived
-                           --  type). This presumably would require traversing
-                           --  all of the declarations of the immediately
-                           --  enclosing declaration list, which perhaps we
-                           --  should arguably be doing in any case, rather
-                           --  than separately gathering inherited, overriding,
-                           --  and new indexing functions (and which might also
-                           --  be more efficient). Perhaps this could/should be
-                           --  done in Analyze_Aspects_At_Freeze_Point, but
-                           --  experimenting with that led to difficulties.
-
-                           declare
-                              Prim_Ops   : constant Elist_Id :=
-                                Primitive_Operations (Typ);
-                              Prim_Elmt  : Elmt_Id := First_Elmt (Prim_Ops);
-                              Prim_Id    : Entity_Id;
-                              Valid_Func : Boolean;
-
-                           begin
-                              while Present (Prim_Elmt) loop
-                                 Prim_Id := Node (Prim_Elmt);
-
-                                 if Chars (Prim_Id) = Chars (Expression (Item))
-                                   and then
-                                     not Is_Inherited_Operation (Prim_Id)
-                                   and then
-                                     not Is_Overriding_Subprogram (Prim_Id)
-                                 then
-                                    --  Verify that the new primitive has
-                                    --  a correct profile to qualify as an
-                                    --  indexing function for Typ.
-
-                                    Check_Function_For_Indexing_Aspect
-                                      (New_Item, Typ, Prim_Id, Valid_Func);
-
-                                    if Valid_Func then
-                                       Append_New_Elmt
-                                         (Prim_Id, New_Indexing_Subps);
-                                    end if;
-                                 end if;
-
-                                 Next_Elmt (Prim_Elmt);
-                              end loop;
-                           end;
 
                            --  Save new list of indexing functions on aspect
 
@@ -18133,13 +18043,9 @@ package body Sem_Util is
 
    function Is_Expression_Function (Subp : Entity_Id) return Boolean is
    begin
-      if Ekind (Subp) in E_Function | E_Subprogram_Body then
-         return
-           Nkind (Original_Node (Unit_Declaration_Node (Subp))) =
-             N_Expression_Function;
-      else
-         return False;
-      end if;
+      return Ekind (Subp) in E_Function | E_Subprogram_Body
+        and then Nkind (Original_Node (Unit_Declaration_Node (Subp))) =
+                                                         N_Expression_Function;
    end Is_Expression_Function;
 
    ------------------------------------------
@@ -18152,21 +18058,18 @@ package body Sem_Util is
       Subp_Decl : Node_Id;
 
    begin
-      if Ekind (Subp) = E_Function then
+      --  The function declaration is either an expression function or is
+      --  completed by an expression function.
+
+      if Is_Expression_Function (Subp) then
+         return True;
+
+      elsif Ekind (Subp) = E_Function then
          Subp_Decl := Unit_Declaration_Node (Subp);
 
-         --  The function declaration is either an expression function or is
-         --  completed by an expression function body.
-
-         return
-           Is_Expression_Function (Subp)
-             or else (Nkind (Subp_Decl) = N_Subprogram_Declaration
-                       and then Present (Corresponding_Body (Subp_Decl))
-                       and then Is_Expression_Function
-                                  (Corresponding_Body (Subp_Decl)));
-
-      elsif Ekind (Subp) = E_Subprogram_Body then
-         return Is_Expression_Function (Subp);
+         return Nkind (Subp_Decl) = N_Subprogram_Declaration
+           and then Present (Corresponding_Body (Subp_Decl))
+           and then Is_Expression_Function (Corresponding_Body (Subp_Decl));
 
       else
          return False;
@@ -18302,87 +18205,25 @@ package body Sem_Util is
    -------------------------------
 
    function Is_Fully_Initialized_Type (Typ : Entity_Id) return Boolean is
-   begin
-      --  Scalar types
 
-      if Is_Scalar_Type (Typ) then
+      function Is_Fully_Initialized_Record_Type
+        (Typ : Entity_Id) return Boolean;
+      --  Determines if record type Typ is fully initialized
 
-         --  A scalar type with an aspect Default_Value is fully initialized
+      function Is_Fully_Initialized_Variant
+        (Typ : Entity_Id) return Boolean;
+      --  Used when checking full type initialization. For an unconstrained
+      --  type with discriminants whose default values are static, examine only
+      --  the components in the selected variant to determine whether all of
+      --  them have a default.
 
-         --  Note: Iniitalize/Normalize_Scalars also ensure full initialization
-         --  of a scalar type, but we don't take that into account here, since
-         --  we don't want these to affect warnings.
+      --------------------------------------
+      -- Is_Fully_Initialized_Record_Type --
+      --------------------------------------
 
-         return Has_Default_Aspect (Typ);
-
-      elsif Is_Access_Type (Typ) then
-         return True;
-
-      elsif Is_Array_Type (Typ) then
-         if Is_Fully_Initialized_Type (Component_Type (Typ))
-           or else (Ada_Version >= Ada_2012 and then Has_Default_Aspect (Typ))
-         then
-            return True;
-         end if;
-
-         --  An interesting case, if we have a constrained type one of whose
-         --  bounds is known to be null, then there are no elements to be
-         --  initialized, so all the elements are initialized.
-
-         if Is_Constrained (Typ) then
-            declare
-               Indx     : Node_Id;
-               Indx_Typ : Entity_Id;
-               Lbd, Hbd : Node_Id;
-
-            begin
-               Indx := First_Index (Typ);
-               while Present (Indx) loop
-                  if Etype (Indx) = Any_Type then
-                     return False;
-
-                  --  If index is a range, use directly
-
-                  elsif Nkind (Indx) = N_Range then
-                     Lbd := Low_Bound  (Indx);
-                     Hbd := High_Bound (Indx);
-
-                  else
-                     Indx_Typ := Etype (Indx);
-
-                     if Is_Private_Type (Indx_Typ) then
-                        Indx_Typ := Full_View (Indx_Typ);
-                     end if;
-
-                     if No (Indx_Typ) or else Etype (Indx_Typ) = Any_Type then
-                        return False;
-                     else
-                        Lbd := Type_Low_Bound  (Indx_Typ);
-                        Hbd := Type_High_Bound (Indx_Typ);
-                     end if;
-                  end if;
-
-                  if Compile_Time_Known_Value (Lbd)
-                       and then
-                     Compile_Time_Known_Value (Hbd)
-                  then
-                     if Expr_Value (Hbd) < Expr_Value (Lbd) then
-                        return True;
-                     end if;
-                  end if;
-
-                  Next_Index (Indx);
-               end loop;
-            end;
-         end if;
-
-         --  If no null indexes, then type is not fully initialized
-
-         return False;
-
-      --  Record types
-
-      elsif Is_Record_Type (Typ) then
+      function Is_Fully_Initialized_Record_Type
+        (Typ : Entity_Id) return Boolean is
+      begin
          --  Mutably tagged types get default initialized to their parent
          --  subtype's default values.
 
@@ -18446,6 +18287,7 @@ package body Sem_Util is
 
          begin
             Comp := First_Component (Typ);
+
             while Present (Comp) loop
                if (No (Parent (Comp))
                     or else No (Expression (Parent (Comp))))
@@ -18464,21 +18306,157 @@ package body Sem_Util is
 
                Next_Component (Comp);
             end loop;
+
+            --  No uninitialized components, so type is fully initialized.
+            --  Note that this catches the case of no components as well.
+
+            return True;
          end;
+      end Is_Fully_Initialized_Record_Type;
 
-         --  No uninitialized components, so type is fully initialized.
-         --  Note that this catches the case of no components as well.
+      ----------------------------------
+      -- Is_Fully_Initialized_Variant --
+      ----------------------------------
 
+      function Is_Fully_Initialized_Variant (Typ : Entity_Id) return Boolean is
+         Loc           : constant Source_Ptr := Sloc (Typ);
+         Constraints   : constant List_Id    := New_List;
+         Components    : constant Elist_Id   := New_Elmt_List;
+         Comp_Elmt     : Elmt_Id;
+         Comp_Id       : Node_Id;
+         Comp_List     : Node_Id;
+         Discr         : Entity_Id;
+         Discr_Val     : Node_Id;
+
+         Report_Errors : Boolean;
+         pragma Warnings (Off, Report_Errors);
+
+      begin
+         if Serious_Errors_Detected > 0 then
+            return False;
+         end if;
+
+         if Is_Record_Type (Typ)
+           and then Nkind (Parent (Typ)) = N_Full_Type_Declaration
+           and then
+             Nkind (Type_Definition (Parent (Typ))) = N_Record_Definition
+         then
+            Comp_List := Component_List (Type_Definition (Parent (Typ)));
+
+            Discr := First_Discriminant (Typ);
+            while Present (Discr) loop
+               if Nkind (Parent (Discr)) = N_Discriminant_Specification then
+                  Discr_Val := Expression (Parent (Discr));
+
+                  if Present (Discr_Val)
+                    and then Is_OK_Static_Expression (Discr_Val)
+                  then
+                     Append_To (Constraints,
+                       Make_Component_Association (Loc,
+                         Choices    => New_List
+                                         (New_Occurrence_Of (Discr, Loc)),
+                         Expression => New_Copy (Discr_Val)));
+                  else
+                     return False;
+                  end if;
+               else
+                  return False;
+               end if;
+
+               Next_Discriminant (Discr);
+            end loop;
+
+            Gather_Components
+              (Typ           => Typ,
+               Comp_List     => Comp_List,
+               Governed_By   => Constraints,
+               Into          => Components,
+               Report_Errors => Report_Errors);
+
+            --  Check that each component present is fully initialized
+
+            Comp_Elmt := First_Elmt (Components);
+            while Present (Comp_Elmt) loop
+               Comp_Id := Node (Comp_Elmt);
+
+               if Ekind (Comp_Id) = E_Component
+                 and then (No (Parent (Comp_Id))
+                            or else No (Expression (Parent (Comp_Id))))
+                 and then not Is_Fully_Initialized_Type (Etype (Comp_Id))
+               then
+                  return False;
+               end if;
+
+               Next_Elmt (Comp_Elmt);
+            end loop;
+
+            return True;
+
+         elsif Is_Private_Type (Typ) then
+            declare
+               U : constant Entity_Id := Underlying_Type (Typ);
+
+            begin
+               if No (U) then
+                  return False;
+               else
+                  return Is_Fully_Initialized_Variant (U);
+               end if;
+            end;
+
+         else
+            return False;
+         end if;
+      end Is_Fully_Initialized_Variant;
+
+   --  Start of processing for Is_Fully_Initialized_Type
+
+   begin
+      --  Scalar types
+
+      if Is_Scalar_Type (Typ) then
+
+         --  A scalar type with an aspect Default_Value is fully initialized
+
+         --  Note: Initalize/Normalize_Scalars also ensure full initialization
+         --  of a scalar type, but we don't take that into account here, since
+         --  we don't want these to affect warnings.
+
+         return Has_Default_Aspect (Typ);
+
+      elsif Is_Access_Type (Typ) then
          return True;
+
+      elsif Is_Array_Type (Typ) then
+         if Is_Fully_Initialized_Type (Component_Type (Typ))
+           or else (Ada_Version >= Ada_2012 and then Has_Default_Aspect (Typ))
+         then
+            return True;
+         end if;
+
+         return Is_Fully_Initialized_Constrained_Array (Typ);
+
+      --  Record types
+
+      elsif Is_Record_Type (Typ) then
+         return Is_Fully_Initialized_Record_Type (Typ);
+
+      --  Concurrent types are always considered fully initialized and
+      --  partially initialized.
 
       elsif Is_Concurrent_Type (Typ) then
          return True;
 
-      elsif Is_Private_Type (Typ) then
+      elsif Is_Private_Type (Typ)
+        or else Is_Incomplete_Type (Typ)
+      then
          declare
             U : constant Entity_Id := Underlying_Type (Typ);
 
          begin
+            --  If the underlying type is not available assume partially
+            --  initialized.
+
             if No (U) then
                return False;
             else
@@ -18486,103 +18464,75 @@ package body Sem_Util is
             end if;
          end;
 
+      --  For any other type (are there any?) assume partially initialized
+
       else
          return False;
       end if;
    end Is_Fully_Initialized_Type;
 
-   ----------------------------------
-   -- Is_Fully_Initialized_Variant --
-   ----------------------------------
+   --------------------------------------------
+   -- Is_Fully_Initialized_Constrained_Array --
+   --------------------------------------------
 
-   function Is_Fully_Initialized_Variant (Typ : Entity_Id) return Boolean is
-      Loc           : constant Source_Ptr := Sloc (Typ);
-      Constraints   : constant List_Id    := New_List;
-      Components    : constant Elist_Id   := New_Elmt_List;
-      Comp_Elmt     : Elmt_Id;
-      Comp_Id       : Node_Id;
-      Comp_List     : Node_Id;
-      Discr         : Entity_Id;
-      Discr_Val     : Node_Id;
-
-      Report_Errors : Boolean;
-      pragma Warnings (Off, Report_Errors);
+   function Is_Fully_Initialized_Constrained_Array
+     (Typ : Entity_Id) return Boolean
+   is
+      Indx     : Node_Id;
+      Indx_Typ : Entity_Id;
+      Lbd, Hbd : Node_Id;
 
    begin
-      if Serious_Errors_Detected > 0 then
+      if not Is_Constrained (Typ) then
          return False;
       end if;
 
-      if Is_Record_Type (Typ)
-        and then Nkind (Parent (Typ)) = N_Full_Type_Declaration
-        and then Nkind (Type_Definition (Parent (Typ))) = N_Record_Definition
-      then
-         Comp_List := Component_List (Type_Definition (Parent (Typ)));
+      --  An interesting case, if we have a constrained type one of whose
+      --  bounds is known to be null, then there are no elements to be
+      --  initialized, so all the elements are initialized.
 
-         Discr := First_Discriminant (Typ);
-         while Present (Discr) loop
-            if Nkind (Parent (Discr)) = N_Discriminant_Specification then
-               Discr_Val := Expression (Parent (Discr));
+      Indx := First_Index (Typ);
+      while Present (Indx) loop
+         if Etype (Indx) = Any_Type then
+            return False;
 
-               if Present (Discr_Val)
-                 and then Is_OK_Static_Expression (Discr_Val)
-               then
-                  Append_To (Constraints,
-                    Make_Component_Association (Loc,
-                      Choices    => New_List (New_Occurrence_Of (Discr, Loc)),
-                      Expression => New_Copy (Discr_Val)));
-               else
-                  return False;
-               end if;
-            else
-               return False;
+         --  If index is a range, use directly
+
+         elsif Nkind (Indx) = N_Range then
+            Lbd := Low_Bound  (Indx);
+            Hbd := High_Bound (Indx);
+
+         else
+            Indx_Typ := Etype (Indx);
+
+            if Is_Private_Type (Indx_Typ) then
+               Indx_Typ := Full_View (Indx_Typ);
             end if;
 
-            Next_Discriminant (Discr);
-         end loop;
-
-         Gather_Components
-           (Typ           => Typ,
-            Comp_List     => Comp_List,
-            Governed_By   => Constraints,
-            Into          => Components,
-            Report_Errors => Report_Errors);
-
-         --  Check that each component present is fully initialized
-
-         Comp_Elmt := First_Elmt (Components);
-         while Present (Comp_Elmt) loop
-            Comp_Id := Node (Comp_Elmt);
-
-            if Ekind (Comp_Id) = E_Component
-              and then (No (Parent (Comp_Id))
-                         or else No (Expression (Parent (Comp_Id))))
-              and then not Is_Fully_Initialized_Type (Etype (Comp_Id))
-            then
-               return False;
-            end if;
-
-            Next_Elmt (Comp_Elmt);
-         end loop;
-
-         return True;
-
-      elsif Is_Private_Type (Typ) then
-         declare
-            U : constant Entity_Id := Underlying_Type (Typ);
-
-         begin
-            if No (U) then
+            if No (Indx_Typ) or else Etype (Indx_Typ) = Any_Type then
                return False;
             else
-               return Is_Fully_Initialized_Variant (U);
+               Lbd := Type_Low_Bound  (Indx_Typ);
+               Hbd := Type_High_Bound (Indx_Typ);
             end if;
-         end;
+         end if;
 
-      else
-         return False;
-      end if;
-   end Is_Fully_Initialized_Variant;
+         if Compile_Time_Known_Value (Lbd)
+              and then
+            Compile_Time_Known_Value (Hbd)
+         then
+            if Expr_Value (Hbd) < Expr_Value (Lbd) then
+               return True;
+            end if;
+         end if;
+
+         Next_Index (Indx);
+      end loop;
+
+      --  If no null indexes, then type is not fully initialized
+
+      return False;
+   end Is_Fully_Initialized_Constrained_Array;
 
    -----------------------------------
    -- Is_Function_With_Side_Effects --
@@ -18671,6 +18621,69 @@ package body Sem_Util is
 
       return False;
    end Is_In_Context_Clause;
+
+   -----------------------------
+   -- Is_Incompletely_Defined --
+   -----------------------------
+
+   function Is_Incompletely_Defined (Type_Id : Entity_Id) return Boolean is
+      Btype     : Entity_Id := Base_Type (Type_Id);
+      Component : Entity_Id;
+
+   begin
+      if Error_Posted (Type_Id)
+        or else Error_Posted (Btype)
+      then
+         return False;
+      end if;
+
+      if Is_Class_Wide_Type (Btype) then
+         Btype := Root_Type (Btype);
+      end if;
+
+      if Is_Private_Type (Btype) then
+         declare
+            UT : constant Entity_Id := Underlying_Type (Btype);
+         begin
+            if No (UT) then
+               if No (Full_View (Btype)) then
+                  return not Is_Generic_Type (Btype)
+                            and then
+                         not Is_Generic_Type (Root_Type (Btype));
+               else
+                  return not Is_Generic_Type (Root_Type (Full_View (Btype)));
+               end if;
+            else
+               return
+                 not Is_Frozen (UT) and then Is_Incompletely_Defined (UT);
+            end if;
+         end;
+
+      elsif Is_Array_Type (Btype) then
+         return Is_Incompletely_Defined (Component_Type (Btype));
+
+      elsif Is_Record_Type (Btype) then
+         Component := First_Component (Btype);
+         while Present (Component) loop
+            if Is_Incompletely_Defined (Etype (Component)) then
+               return True;
+            end if;
+
+            Next_Component (Component);
+         end loop;
+
+         return False;
+
+      elsif Is_Protected_Type (Btype)
+        and then Present (Corresponding_Record_Type (Btype))
+      then
+         return
+           Is_Incompletely_Defined (Corresponding_Record_Type (Btype));
+
+      else
+         return False;
+      end if;
+   end Is_Incompletely_Defined;
 
    ---------------------------
    -- Is_Independent_Object --
@@ -18780,7 +18793,8 @@ package body Sem_Util is
         and then Present (Subprogram_Body (Subp))
         and then Was_Expression_Function (Subprogram_Body (Subp))
       then
-         Return_Expr := Expression_Of_Expression_Function (Subp);
+         Return_Expr :=
+           Original_Node (Expression_Of_Expression_Function (Subp));
 
          --  The returned object must not have a qualified expression and its
          --  nominal subtype must be statically compatible with the result
@@ -20402,9 +20416,98 @@ package body Sem_Util is
 
    function Is_Partially_Initialized_Type
      (Typ              : Entity_Id;
-      Include_Implicit : Boolean := True) return Boolean
+      Include_Implicit : Boolean := True;
+      Predicate_Check  : Boolean := False) return Boolean
    is
+      function Is_Partially_Initialized_Record_Type
+        (Typ : Entity_Id) return Boolean;
+      --  Determines if record type Typ is partially initialized
+
+      ------------------------------------------
+      -- Is_Partially_Initialized_Record_Type --
+      ------------------------------------------
+
+      function Is_Partially_Initialized_Record_Type
+        (Typ : Entity_Id) return Boolean is
+      begin
+         --  A discriminated type is always partially initialized if in
+         --  all mode
+
+         if Has_Discriminants (Typ) and then Include_Implicit then
+            return True;
+
+         --  A tagged type is always partially initialized
+
+         elsif Is_Tagged_Type (Typ) then
+            return True;
+         end if;
+
+         --  Check discriminants and record components
+
+         declare
+            Comp        : Entity_Id;
+            First_Round : constant Natural :=
+                            (if Predicate_Check
+                               and then Has_Discriminants (Typ)
+                             then 1 else 2);
+
+         begin
+            --  Loop through components in two rounds: discriminants first
+            --  (only if we must check discriminants), and record components
+            --  in the second round.
+
+            for Round in First_Round .. 2 loop
+               if Round = 1 then
+                  Comp := First_Discriminant (Typ);
+               else
+                  Comp := First_Component (Typ);
+
+                  --  Case of record type with no components; we consider
+                  --  the type to be initialized.
+
+                  if No (Comp) then
+                     return False;
+                  end if;
+               end if;
+
+               while Present (Comp) loop
+
+                  --  If a component has an initialization expression then the
+                  --  enclosing record type is partially initialized.
+
+                  if Present (Parent (Comp))
+                    and then Present (Expression (Parent (Comp)))
+                  then
+                     return True;
+
+                  --  If a component is of a type which is itself partially
+                  --  initialized, then the enclosing record type is also.
+
+                  elsif Is_Partially_Initialized_Type (Etype (Comp),
+                          Include_Implicit => Include_Implicit,
+                          Predicate_Check  => Predicate_Check)
+                  then
+                     return True;
+                  end if;
+
+                  Comp := (if Round = 1 then Next_Discriminant (Comp)
+                                        else Next_Component (Comp));
+               end loop;
+            end loop;
+
+            --  No initialized components found. If we found any components
+            --  they were all uninitialized so the result is false.
+
+            return False;
+         end;
+      end Is_Partially_Initialized_Record_Type;
+
+   --  Start of processing for Is_Partially_Initialized_Type
+
    begin
+      --  Predicate check requires Include_Implicit = False
+      pragma Assert (not Predicate_Check or else not Include_Implicit);
+
       if Is_Scalar_Type (Typ) then
          return Has_Default_Aspect (Base_Type (Typ));
 
@@ -20416,91 +20519,24 @@ package body Sem_Util is
          --  If component type is partially initialized, so is array type
 
          if Has_Default_Aspect (Base_Type (Typ))
-           or else Is_Partially_Initialized_Type
-                     (Component_Type (Typ), Include_Implicit)
+           or else Is_Partially_Initialized_Type (Component_Type (Typ),
+                     Include_Implicit => Include_Implicit,
+                     Predicate_Check  => Predicate_Check)
          then
             return True;
 
          --  Otherwise we are only partially initialized if we are fully
-         --  initialized (this is the empty array case, no point in us
-         --  duplicating that code here).
+         --  initialized (this includes the empty array case).
 
          else
-            return Is_Fully_Initialized_Type (Typ);
+            return Is_Fully_Initialized_Constrained_Array (Typ);
          end if;
 
       elsif Is_Record_Type (Typ) then
+         return Is_Partially_Initialized_Record_Type (Typ);
 
-         --  A discriminated type is always partially initialized if in
-         --  all mode
-
-         if Has_Discriminants (Typ) and then Include_Implicit then
-            return True;
-
-         --  A tagged type is always partially initialized
-
-         elsif Is_Tagged_Type (Typ) then
-            return True;
-
-         --  Case of record type with no components
-
-         elsif No (First_Component (Typ)) then
-            return False;
-
-         --  Case of record type with components
-
-         else
-            declare
-               Comp : Entity_Id;
-
-               Component_Present : Boolean := False;
-               --  Set True if at least one component is present. If no
-               --  components are present, then record type is fully
-               --  initialized (another odd case, like the null array).
-
-            begin
-               --  Loop through components
-
-               Comp := First_Component (Typ);
-               while Present (Comp) loop
-                  Component_Present := True;
-
-                  --  If a component has an initialization expression then the
-                  --  enclosing record type is partially initialized
-
-                  if Present (Parent (Comp))
-                    and then Present (Expression (Parent (Comp)))
-                  then
-                     return True;
-
-                  --  If a component is of a type which is itself partially
-                  --  initialized, then the enclosing record type is also.
-
-                  elsif Is_Partially_Initialized_Type
-                          (Etype (Comp), Include_Implicit)
-                  then
-                     return True;
-                  end if;
-
-                  Next_Component (Comp);
-               end loop;
-
-               --  No initialized components found. If we found any components
-               --  they were all uninitialized so the result is false.
-
-               if Component_Present then
-                  return False;
-
-               --  But if we found no components, then all the components are
-               --  initialized so we consider the type to be initialized.
-
-               else
-                  return True;
-               end if;
-            end;
-         end if;
-
-      --  Concurrent types are always fully initialized
+      --  Concurrent types are always considered fully initialized and
+      --  partially initialized.
 
       elsif Is_Concurrent_Type (Typ) then
          return True;
@@ -20509,22 +20545,29 @@ package body Sem_Util is
       --  type then just assume this partially initialized. Not clear if this
       --  can happen in a non-error case, but no harm in testing for this.
 
-      elsif Is_Private_Type (Typ) then
+      elsif Is_Private_Type (Typ)
+        or else Is_Incomplete_Type (Typ)
+      then
          declare
             U : constant Entity_Id := Underlying_Type (Typ);
          begin
+            --  If the underlying type is not available assume partially
+            --  initialized.
+
             if No (U) then
                return True;
             else
-               return Is_Partially_Initialized_Type (U, Include_Implicit);
+               return Is_Partially_Initialized_Type (U,
+                        Include_Implicit => Include_Implicit,
+                        Predicate_Check  => Predicate_Check);
             end if;
          end;
+      end if;
 
       --  For any other type (are there any?) assume partially initialized
 
-      else
-         return True;
-      end if;
+      pragma Assert (False);
+      return True;
    end Is_Partially_Initialized_Type;
 
    ------------------------------------
@@ -25946,7 +25989,21 @@ package body Sem_Util is
 
          if Reporting then
             if Is_Entity_Name (Name (N)) then
-               Error_Msg_N ("too many arguments in call to&", Name (N));
+               if Ekind (S) = E_Enumeration_Literal then
+                  Error_Msg_N ("cannot index enumeration literal &", Name (N));
+                  if Present (Homonym (S))
+                    and then Sloc (Homonym (S)) = Standard_Location
+                  then
+                     Error_Msg_Qual_For_Standard := True;
+                     Error_Msg_Qual_Level := 1;
+                     Error_Msg_NE
+                       ("\\did you mean &'?", Name (N), Homonym (S));
+                     Error_Msg_Qual_For_Standard := False;
+                     Error_Msg_Qual_Level := 0;
+                  end if;
+               else
+                  Error_Msg_N ("too many arguments in call to&", Name (N));
+               end if;
             else
                Error_Msg_N ("too many arguments in call", N);
             end if;
@@ -26946,6 +27003,97 @@ package body Sem_Util is
       return Empty;
    end Param_Entity;
 
+   ------------------------------------
+   -- Partially_Visible_Subcomponent --
+   ------------------------------------
+
+   function Partially_Visible_Part (Type_Id : Entity_Id) return Entity_Id is
+      Ancestor : constant Entity_Id := Base_Type (Type_Id);
+
+      function Trace_Components
+        (T     : Entity_Id;
+         Check : Boolean) return Entity_Id;
+      --  Recursive function that does the work, and checks against circular
+      --  definition for each subcomponent type.
+
+      ----------------------
+      -- Trace_Components --
+      ----------------------
+
+      function Trace_Components
+        (T     : Entity_Id;
+         Check : Boolean) return Entity_Id
+      is
+         Btype     : constant Entity_Id := Base_Type (T);
+         Component : Entity_Id;
+         P         : Entity_Id;
+         Candidate : Entity_Id := Empty;
+
+      begin
+         if Check and then Btype = Ancestor then
+            Error_Msg_N ("circular type definition", Type_Id);
+            return Any_Type;
+         end if;
+
+         if Is_Private_Type (Btype) and then not Is_Generic_Type (Btype) then
+            if Present (Full_View (Btype))
+              and then Is_Record_Type (Full_View (Btype))
+              and then not Is_Frozen (Btype)
+            then
+               --  To indicate that the ancestor depends on a private type, the
+               --  current Btype is sufficient. However, to check for circular
+               --  definition we must recurse on the full view.
+
+               Candidate := Trace_Components (Full_View (Btype), True);
+
+               if Candidate = Any_Type then
+                  return Any_Type;
+               else
+                  return Btype;
+               end if;
+
+            else
+               return Btype;
+            end if;
+
+         elsif Is_Array_Type (Btype) then
+            return Trace_Components (Component_Type (Btype), True);
+
+         elsif Is_Record_Type (Btype) then
+            Component := First_Entity (Btype);
+            while Present (Component)
+              and then Comes_From_Source (Component)
+            loop
+               --  Skip anonymous types generated by constrained components
+
+               if not Is_Type (Component) then
+                  P := Trace_Components (Etype (Component), True);
+
+                  if Present (P) then
+                     if P = Any_Type then
+                        return P;
+                     else
+                        Candidate := P;
+                     end if;
+                  end if;
+               end if;
+
+               Next_Entity (Component);
+            end loop;
+
+            return Candidate;
+
+         else
+            return Empty;
+         end if;
+      end Trace_Components;
+
+   --  Start of processing for Private_Component
+
+   begin
+      return Trace_Components (Type_Id, False);
+   end Partially_Visible_Part;
+
    ----------------------
    -- Policy_In_Effect --
    ----------------------
@@ -27024,6 +27172,14 @@ package body Sem_Util is
 
       if Kind = No_Name then
          Kind := Policy_In_List (Check_Policy_List_Config);
+      end if;
+
+      --  Normalize the policy names
+
+      if Kind = Name_Off then
+         Kind := Name_Ignore;
+      elsif Kind = Name_On then
+         Kind := Name_Check;
       end if;
 
       --  The context lacks policy pragmas, determine the mode based on whether
@@ -27197,97 +27353,6 @@ package body Sem_Util is
          return True;
       end if;
    end Predicate_Tests_On_Arguments;
-
-   -----------------------
-   -- Private_Component --
-   -----------------------
-
-   function Private_Component (Type_Id : Entity_Id) return Entity_Id is
-      Ancestor  : constant Entity_Id := Base_Type (Type_Id);
-
-      function Trace_Components
-        (T     : Entity_Id;
-         Check : Boolean) return Entity_Id;
-      --  Recursive function that does the work, and checks against circular
-      --  definition for each subcomponent type.
-
-      ----------------------
-      -- Trace_Components --
-      ----------------------
-
-      function Trace_Components
-        (T     : Entity_Id;
-         Check : Boolean) return Entity_Id
-      is
-         Btype     : constant Entity_Id := Base_Type (T);
-         Component : Entity_Id;
-         P         : Entity_Id;
-         Candidate : Entity_Id := Empty;
-
-      begin
-         if Check and then Btype = Ancestor then
-            Error_Msg_N ("circular type definition", Type_Id);
-            return Any_Type;
-         end if;
-
-         if Is_Private_Type (Btype) and then not Is_Generic_Type (Btype) then
-            if Present (Full_View (Btype))
-              and then Is_Record_Type (Full_View (Btype))
-              and then not Is_Frozen (Btype)
-            then
-               --  To indicate that the ancestor depends on a private type, the
-               --  current Btype is sufficient. However, to check for circular
-               --  definition we must recurse on the full view.
-
-               Candidate := Trace_Components (Full_View (Btype), True);
-
-               if Candidate = Any_Type then
-                  return Any_Type;
-               else
-                  return Btype;
-               end if;
-
-            else
-               return Btype;
-            end if;
-
-         elsif Is_Array_Type (Btype) then
-            return Trace_Components (Component_Type (Btype), True);
-
-         elsif Is_Record_Type (Btype) then
-            Component := First_Entity (Btype);
-            while Present (Component)
-              and then Comes_From_Source (Component)
-            loop
-               --  Skip anonymous types generated by constrained components
-
-               if not Is_Type (Component) then
-                  P := Trace_Components (Etype (Component), True);
-
-                  if Present (P) then
-                     if P = Any_Type then
-                        return P;
-                     else
-                        Candidate := P;
-                     end if;
-                  end if;
-               end if;
-
-               Next_Entity (Component);
-            end loop;
-
-            return Candidate;
-
-         else
-            return Empty;
-         end if;
-      end Trace_Components;
-
-   --  Start of processing for Private_Component
-
-   begin
-      return Trace_Components (Type_Id, False);
-   end Private_Component;
 
    ---------------------------
    -- Primitive_Names_Match --
@@ -29147,7 +29212,8 @@ package body Sem_Util is
                       and then not In_Internal_Unit (N);
 
    begin
-      return Result;
+      return Result
+        or else Get_Aspect_Id (Prag_Name) in Ignored_Aspects;
    end Should_Ignore_Pragma_Sem;
 
    --------------------
@@ -29339,13 +29405,21 @@ package body Sem_Util is
                return False;
             end if;
 
+            --  Reject for example subprogram calls in object notation
+
+            if Ekind (Entity (Selector_Name (N))) not in E_Component
+                                                       | E_Discriminant
+            then
+               return False;
+            end if;
+
             declare
                Comp : constant Entity_Id :=
                  Original_Record_Component (Entity (Selector_Name (N)));
             begin
-              --  AI12-0373 confirms that we should not call
-              --  Has_Discriminant_Dependent_Constraint here which would be
-              --  too strong.
+               --  AI12-0373 confirms that we should not call
+               --  Has_Discriminant_Dependent_Constraint here,
+               --  which would be too strong.
 
                if Is_Declared_Within_Variant (Comp) then
                   return False;
@@ -31597,6 +31671,11 @@ package body Sem_Util is
 
    package body Old_Attr_Util is
       package body Conditional_Evaluation is
+
+         function As_Boolean (N : Node_Id) return Node_Id;
+         --  Decorate newly created node with Etype = Standard_Boolean,
+         --  and return it.
+
          type Determining_Expr_Context is
            (No_Context, If_Expr, Case_Expr, Short_Circuit_Op, Membership_Test);
 
@@ -31655,6 +31734,16 @@ package body Sem_Util is
          function Is_Known_On_Entry (Expr : Node_Id) return Boolean;
          --  See RM 6.1.1 for definition of term "known on entry".
 
+         ----------------
+         -- As_Boolean --
+         ----------------
+
+         function As_Boolean (N : Node_Id) return Node_Id is
+         begin
+            Set_Etype (N, Standard_Boolean);
+            return N;
+         end As_Boolean;
+
          --------------------------------------
          -- Conditional_Evaluation_Condition --
          --------------------------------------
@@ -31676,6 +31765,7 @@ package body Sem_Util is
                            Left_Opnd  => Result,
                            Right_Opnd =>
                              Determining_Condition (Determiners (I)));
+               Result := As_Boolean (Result);
             end loop;
             return Result;
          end Conditional_Evaluation_Condition;
@@ -31693,14 +31783,16 @@ package body Sem_Util is
                   if Det.Is_And_Then then
                      return New_Copy_Tree (Det.Expr);
                   else
-                     return Make_Op_Not (Loc, New_Copy_Tree (Det.Expr));
+                     return As_Boolean
+                       (Make_Op_Not (Loc, New_Copy_Tree (Det.Expr)));
                   end if;
 
                when If_Expr =>
                   if Det.Is_Then_Part then
                      return New_Copy_Tree (Det.Expr);
                   else
-                     return Make_Op_Not (Loc, New_Copy_Tree (Det.Expr));
+                     return As_Boolean
+                       (Make_Op_Not (Loc, New_Copy_Tree (Det.Expr)));
                   end if;
 
                when Case_Expr =>
@@ -31711,10 +31803,11 @@ package body Sem_Util is
                         Alts := Others_Discrete_Choices (First (Alts));
                      end if;
 
-                     return Make_In (Loc,
-                       Left_Opnd    => New_Copy_Tree (Det.Expr),
-                       Right_Opnd   => Empty,
-                       Alternatives => New_Copy_List (Alts));
+                     return As_Boolean
+                       (Make_In (Loc,
+                        Left_Opnd    => New_Copy_Tree (Det.Expr),
+                        Right_Opnd   => Empty,
+                        Alternatives => New_Copy_List (Alts)));
                   end;
 
                when Membership_Test =>
@@ -31747,12 +31840,13 @@ package body Sem_Util is
                      end Copy_Prefix;
 
                   begin
-                     return Make_In (Loc,
-                       Left_Opnd    => New_Copy_Tree (Left_Opnd (Det.Expr)),
-                       Right_Opnd   => Empty,
-                       Alternatives => Copy_Prefix
-                                         (Alternatives (Det.Expr),
-                                          Det.First_Non_Preceding));
+                     return As_Boolean
+                       (Make_In (Loc,
+                        Left_Opnd    => New_Copy_Tree (Left_Opnd (Det.Expr)),
+                        Right_Opnd   => Empty,
+                        Alternatives => Copy_Prefix
+                          (Alternatives (Det.Expr),
+                           Det.First_Non_Preceding)));
                   end;
 
                when No_Context =>

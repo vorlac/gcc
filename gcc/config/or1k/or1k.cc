@@ -1032,7 +1032,7 @@ or1k_strict_argument_naming (cumulative_args_t /* ca */)
 
 /* Worker for TARGET_FUNCTION_ARG.
    Return the next register to be used to hold a function argument or NULL_RTX
-   if there's no more space.  Arugment CUM_V represents the current argument
+   if there's no more space.  Argument CUM_V represents the current argument
    offset, zero for the first function argument.  OpenRISC function arguments
    maybe be passed in registers r3 to r8.  */
 
@@ -1215,7 +1215,7 @@ or1k_print_operand_address (FILE *file, machine_mode, rtx addr)
 
 /* Worker for TARGET_PRINT_OPERAND.
    Print operand X, an RTX, to the file FILE.  The output is formed as expected
-   by the OpenRISC assember.  CODE is the letter following a '%' in an
+   by the OpenRISC assembler.  CODE is the letter following a '%' in an
    instrunction template used to control the RTX output.  Example(s):
 
      CODE   RTX                   OUTPUT     COMMENT
@@ -1389,10 +1389,11 @@ or1k_trampoline_init (rtx m_tramp, tree fndecl, rtx chain)
 static bool
 or1k_hard_regno_mode_ok (unsigned int regno, machine_mode mode)
 {
-  /* For OpenRISC, GENERAL_REGS can hold anything, while
-     FLAG_REGS are really single bits within SP[SR].  */
+  /* For OpenRISC, GENERAL_REGS can hold anything, while FLAG_REGS are
+     really single bits within SP[SR].  Also allow condition flag register
+     in SImode to match or1k_can_change_mode_class.  */
   if (REGNO_REG_CLASS (regno) == FLAG_REGS)
-    return mode == BImode;
+    return mode == BImode || mode == SImode;
   return true;
 }
 

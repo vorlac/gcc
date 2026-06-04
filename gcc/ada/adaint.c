@@ -444,11 +444,11 @@ __gnat_current_time_string (char *result)
 }
 
 void
-__gnat_to_gm_time (OS_Time *p_time, int *p_year, int *p_month, int *p_day,
+__gnat_to_gm_time (OS_Time date, int *p_year, int *p_month, int *p_day,
 		   int *p_hours, int *p_mins, int *p_secs)
 {
   struct tm *res;
-  time_t time = (time_t) *p_time;
+  time_t time = (time_t) date;
 
   res = gmtime (&time);
   if (res)
@@ -698,51 +698,18 @@ __gnat_get_current_dir (char *dir, int *length)
    dir[*length] = '\0';
 }
 
-/* Return the suffix for object files.  */
+/* Suffix for object files.  */
 
-void
-__gnat_get_object_suffix_ptr (int *len, const char **value)
-{
-  *value = HOST_OBJECT_SUFFIX;
+const char *__gnat_object_suffix = HOST_OBJECT_SUFFIX;
 
-  if (*value == 0)
-    *len = 0;
-  else
-    *len = strlen (*value);
+/* Suffix for executable files.  */
 
-  return;
-}
+const char *__gnat_executable_suffix = HOST_EXECUTABLE_SUFFIX;
 
-/* Return the suffix for executable files.  */
-
-void
-__gnat_get_executable_suffix_ptr (int *len, const char **value)
-{
-  *value = HOST_EXECUTABLE_SUFFIX;
-
-  if (!*value)
-    *len = 0;
-  else
-    *len = strlen (*value);
-
-  return;
-}
-
-/* Return the suffix for debuggable files. Usually this is the same as the
+/* Suffix for debuggable files. Usually this is the same as the
    executable extension.  */
 
-void
-__gnat_get_debuggable_suffix_ptr (int *len, const char **value)
-{
-  *value = HOST_EXECUTABLE_SUFFIX;
-
-  if (*value == 0)
-    *len = 0;
-  else
-    *len = strlen (*value);
-
-  return;
-}
+const char *__gnat_debuggable_suffix = HOST_EXECUTABLE_SUFFIX;
 
 /* Returns the OS filename and corresponding encoding.  */
 
@@ -2050,7 +2017,7 @@ __gnat_set_OWNER_ACL (TCHAR *wname,
 
   if (AccessMode == SET_ACCESS)
     {
-      /*  SET_ACCESS, we want to set an explicte set of permissions, do not
+      /*  SET_ACCESS, we want to set an explicit set of permissions, do not
 	  merge with current DACL.  */
       if (SetEntriesInAcl (1, &ea, NULL, &pNewDACL) != ERROR_SUCCESS)
 	return;
@@ -3240,41 +3207,28 @@ __gnat_copy_attribs (char *from ATTRIBUTE_UNUSED, char *to ATTRIBUTE_UNUSED,
   TCHAR wfrom [GNAT_MAX_PATH_LEN + 2];
   TCHAR wto [GNAT_MAX_PATH_LEN + 2];
   BOOL res;
-  FILETIME fct, flat, flwt;
-  HANDLE hfrom, hto;
+  HANDLE hto;
 
   S2WSC (wfrom, from, GNAT_MAX_PATH_LEN + 2);
   S2WSC (wto, to, GNAT_MAX_PATH_LEN + 2);
 
-  /*  Do we need to copy the timestamp ? */
+  WIN32_FILE_ATTRIBUTE_DATA info;
+  res = GetFileAttributesEx(wfrom, GetFileExInfoStandard, &info);
+  if (res == 0)
+    return -1;
 
   if (mode != 2) {
-     /* retrieve from times */
-
-     hfrom = CreateFile
-       (wfrom, GENERIC_READ, 0, NULL, OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL, NULL);
-
-     if (hfrom == INVALID_HANDLE_VALUE)
-       return -1;
-
-     res = GetFileTime (hfrom, &fct, &flat, &flwt);
-
-     CloseHandle (hfrom);
-
-     if (res == 0)
-       return -1;
-
-     /* retrieve from times */
+     /* Mode is not "None", copy timestamps */
 
      hto = CreateFile
-       (wto, GENERIC_WRITE, 0, NULL, OPEN_EXISTING,
+       (wto, FILE_WRITE_ATTRIBUTES, 0, NULL, OPEN_EXISTING,
         FILE_ATTRIBUTE_NORMAL, NULL);
 
      if (hto == INVALID_HANDLE_VALUE)
        return -1;
 
-     res = SetFileTime (hto, NULL, &flat, &flwt);
+     res = SetFileTime
+       (hto, NULL, &info.ftCreationTime, &info.ftLastAccessTime);
 
      CloseHandle (hto);
 
@@ -3282,20 +3236,14 @@ __gnat_copy_attribs (char *from ATTRIBUTE_UNUSED, char *to ATTRIBUTE_UNUSED,
        return -1;
   }
 
-  /* Do we need to copy the permissions ? */
-  /* Set file attributes in full mode. */
+  if (mode != 0) {
+    /* Mode is not "Time_Stamps", copy file attributes. */
 
-  if (mode != 0)
-    {
-      DWORD attribs = GetFileAttributes (wfrom);
+    res = SetFileAttributes (wto, info.dwFileAttributes);
 
-      if (attribs == INVALID_FILE_ATTRIBUTES)
-	return -1;
-
-      res = SetFileAttributes (wto, attribs);
-      if (res == 0)
-	return -1;
-    }
+    if (res == 0)
+      return -1;
+  }
 
   return 0;
 

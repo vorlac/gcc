@@ -1023,6 +1023,10 @@ wrapup_namespace_globals ()
 
 	  if (VAR_P (decl)
 	      && DECL_EXTERNAL (decl)
+	      /* We mark consteval-only variables DECL_EXTERNAL, but
+		  extern constexpr inline std::meta::info i{};
+		 is a definition (the extern is redundant).  */
+	      && !DECL_INITIAL (decl)
 	      && DECL_INLINE_VAR_P (decl)
 	      && DECL_ODR_USED (decl))
 	    error_at (DECL_SOURCE_LOCATION (decl),
@@ -5584,6 +5588,11 @@ cxx_init_decl_processing (void)
 
   c_common_nodes_and_builtins ();
 
+  /* Call the target stack_protect_guard hook if the stack protection
+     guard is declared as a global symbol.  */
+  if (targetm.stack_protect_guard_symbol_p ())
+    pushdecl (targetm.stack_protect_guard ());
+
   tree bool_ftype = build_function_type_list (boolean_type_node, NULL_TREE);
   tree decl
     = add_builtin_function ("__builtin_is_constant_evaluated",
@@ -6200,7 +6209,7 @@ fixup_anonymous_aggr (tree t)
   vec_safe_truncate (vec, store);
 
   /* Wipe RTTI info.  */
-  CLASSTYPE_TYPEINFO_VAR (t) = NULL_TREE;
+  SET_CLASSTYPE_TYPEINFO_VAR (t, NULL_TREE);
 
   /* Anonymous aggregates cannot have fields with ctors, dtors or complex
      assignment operators (because they cannot have these methods themselves).
@@ -7605,7 +7614,7 @@ reshape_init_array_1 (tree elt_type, tree max_index, reshape_iter *d,
       else
 	midx = tree_to_poly_uint64 (fold_convert (size_type_node, max_index));
 
-      /* For VLA vectors, we restict the number of elements in the constructor
+      /* For VLA vectors, we restrict the number of elements in the constructor
 	 to lower bound of the VLA elements.  */
       max_index_cst = constant_lower_bound (midx);
     }
@@ -9414,7 +9423,7 @@ omp_declare_variant_finalize (tree decl, tree attr)
     }
   /* This loop is like private_lookup_attribute, except that it works
      with tree * rather than tree, as we might want to remove the
-     attributes that are diagnosed as errorneous.  */
+     attributes that are diagnosed as erroneous.  */
   while (*list)
     {
       tree attr = get_attribute_name (*list);
@@ -9883,9 +9892,7 @@ cp_finish_decl (tree decl, tree init, bool init_const_expr_p,
 	 require a guard variable, and since the mangled name of the
 	 guard variable will depend on the mangled name of this
 	 variable.  */
-      if (DECL_FUNCTION_SCOPE_P (decl)
-	  && TREE_STATIC (decl)
-	  && !DECL_ARTIFICIAL (decl))
+      if (DECL_FUNCTION_SCOPE_P (decl) && TREE_STATIC (decl))
 	{
 	  /* The variable holding an anonymous union will have had its
 	     discriminator set in finish_anon_union, after which it's
@@ -15811,7 +15818,7 @@ grokdeclarator (const cp_declarator *declarator,
   id_loc = declarator ? declarator->id_loc : input_location;
 
   if (innermost_code != cdk_function
-    /* Don't check this if it can be the artifical decltype(auto)
+    /* Don't check this if it can be the artificial decltype(auto)
        we created when building a constraint in a compound-requirement:
        that the type-constraint is plain is going to be checked in
        cp_parser_compound_requirement.  */
@@ -18861,7 +18868,7 @@ copy_type_enum (tree dst, tree src)
 /* Begin compiling the definition of an enumeration type.
    NAME is its name,
 
-   if ENUMTYPE is not NULL_TREE then the type has alredy been found.
+   if ENUMTYPE is not NULL_TREE then the type has already been found.
 
    UNDERLYING_TYPE is the type that will be used as the storage for
    the enumeration type. This should be NULL_TREE if no storage type
@@ -20271,20 +20278,21 @@ store_parm_decls (tree current_function_parms)
 
   /* Register cleanups for parameters with trivial_abi attribute, the cleanup
      of which is the callee's responsibility.  */
-  for (tree parm = DECL_ARGUMENTS (fndecl); parm; parm = DECL_CHAIN (parm))
-    {
-      if (TREE_CODE (parm) == PARM_DECL)
-	{
-	  tree parm_type = TREE_TYPE (parm);
-	  if (has_trivial_abi_attribute (parm_type))
-	    {
-	      tree cleanup
-		= cxx_maybe_build_cleanup (parm, tf_warning_or_error);
-	      if (cleanup && cleanup != error_mark_node)
-		finish_decl_cleanup (parm, cleanup);
-	    }
-	}
-    }
+  if (!processing_template_decl)
+    for (tree parm = DECL_ARGUMENTS (fndecl); parm; parm = DECL_CHAIN (parm))
+      {
+	if (TREE_CODE (parm) == PARM_DECL)
+	  {
+	    tree parm_type = TREE_TYPE (parm);
+	    if (has_trivial_abi_attribute (parm_type))
+	      {
+		tree cleanup
+		  = cxx_maybe_build_cleanup (parm, tf_warning_or_error);
+		if (cleanup && cleanup != error_mark_node)
+		  finish_decl_cleanup (parm, cleanup);
+	      }
+	  }
+      }
 
   if (use_eh_spec_block (current_function_decl))
     current_eh_spec_block = begin_eh_spec_block ();

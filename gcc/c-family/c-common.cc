@@ -945,7 +945,7 @@ get_cpp_ttype_from_string_type (tree string_type)
   return CPP_OTHER;
 }
 
-/* The global record of string concatentations, for use in
+/* The global record of string concatenations, for use in
    extracting locations within string literals.  */
 
 GTY(()) string_concat_db *g_string_concat_db;
@@ -1380,6 +1380,9 @@ c_common_get_narrower (tree op, int *unsignedp_ptr)
   if (TREE_CODE (TREE_TYPE (op)) == ENUMERAL_TYPE
       && ENUM_IS_SCOPED (TREE_TYPE (op)))
     {
+      if (BITINT_TYPE_P (TREE_TYPE (op)))
+	return fold_convert (ENUM_UNDERLYING_TYPE (TREE_TYPE (op)), op);
+
       /* C++0x scoped enumerations don't implicitly convert to integral
 	 type; if we stripped an explicit conversion to a larger type we
 	 need to replace it so common_type will still work.  */
@@ -2818,9 +2821,9 @@ c_common_signed_or_unsigned_type (int unsignedp, tree type)
       || TYPE_UNSIGNED (type) == unsignedp)
     return type;
 
-  if (TREE_CODE (type) == BITINT_TYPE
-      /* signed _BitInt(1) is invalid, avoid creating that.  */
-      && (unsignedp || TYPE_PRECISION (type) > 1))
+  if (BITINT_TYPE_P (type)
+      /* signed _BitInt(1) is invalid before C2Y, avoid creating that.  */
+      && (unsignedp || flag_isoc2y || TYPE_PRECISION (type) > 1))
     return build_bitint_type (TYPE_PRECISION (type), unsignedp);
 
 #define TYPE_OK(node)							    \
@@ -3422,12 +3425,6 @@ pointer_int_sum (location_t loc, enum tree_code resultcode,
 	}
     }
 
-  /* We are manipulating pointer values, so we don't need to warn
-     about relying on undefined signed overflow.  We disable the
-     warning here because we use integer types so fold won't know that
-     they are really pointers.  */
-  fold_defer_overflow_warnings ();
-
   /* If what we are about to multiply by the size of the elements
      contains a constant term, apply distributive law
      and multiply that constant term separately.
@@ -3476,8 +3473,6 @@ pointer_int_sum (location_t loc, enum tree_code resultcode,
 
       ret = fold_build_pointer_plus_loc (loc, ptrop, intop);
 
-      fold_undefer_and_ignore_overflow_warnings ();
-
       return ret;
     }
 
@@ -3505,8 +3500,6 @@ pointer_int_sum (location_t loc, enum tree_code resultcode,
     intop = fold_build1_loc (loc, NEGATE_EXPR, sizetype, intop);
 
   ret = fold_build_pointer_plus_loc (loc, ptrop, intop);
-
-  fold_undefer_and_ignore_overflow_warnings ();
 
   return ret;
 }
@@ -3961,8 +3954,10 @@ c_common_get_alias_set (tree t)
 	 TYPE_ALIAS_SET_KNOWN_P.  */
       if (TYPE_UNSIGNED (t))
 	{
-	  /* There is no signed _BitInt(1).  */
-	  if (TREE_CODE (t) == BITINT_TYPE && TYPE_PRECISION (t) == 1)
+	  /* There is no signed _BitInt(1) before C2Y.  */
+	  if (TREE_CODE (t) == BITINT_TYPE
+	      && !flag_isoc2y
+	      && TYPE_PRECISION (t) == 1)
 	    return -1;
 	  tree t1 = c_common_signed_type (t);
 	  gcc_checking_assert (t != t1);
@@ -7740,7 +7735,7 @@ sync_resolve_size (tree function, vec<tree, va_gc> *params, bool fetch,
 
   size = tree_to_uhwi (TYPE_SIZE_UNIT (type));
   if (size == 16
-      && TREE_CODE (type) == BITINT_TYPE
+      && BITINT_TYPE_P (type)
       && !targetm.scalar_mode_supported_p (TImode))
     {
       if (fetch && !orig_format)
@@ -7751,7 +7746,7 @@ sync_resolve_size (tree function, vec<tree, va_gc> *params, bool fetch,
   if (size == 1 || size == 2 || size == 4 || size == 8 || size == 16)
     return size;
 
-  if (fetch && !orig_format && TREE_CODE (type) == BITINT_TYPE)
+  if (fetch && !orig_format && BITINT_TYPE_P (type))
     return -1;
 
  incompatible:
@@ -8479,7 +8474,7 @@ atomic_bitint_fetch_using_cas_loop (location_t loc,
 
   tree nonatomic_lhs_type = TREE_TYPE (TREE_TYPE ((*orig_params)[0]));
   nonatomic_lhs_type = TYPE_MAIN_VARIANT (nonatomic_lhs_type);
-  gcc_assert (TREE_CODE (nonatomic_lhs_type) == BITINT_TYPE);
+  gcc_assert (BITINT_TYPE_P (nonatomic_lhs_type));
 
   tree lhs_addr = (*orig_params)[0];
   tree val = convert (nonatomic_lhs_type, (*orig_params)[1]);
@@ -8872,7 +8867,7 @@ resolve_overloaded_builtin (location_t loc, tree function,
 	if (new_return)
 	  {
 	    /* Cast function result from I{1,2,4,8,16} to the required type.  */
-	    if (TREE_CODE (TREE_TYPE (new_return)) == BITINT_TYPE)
+	    if (BITINT_TYPE_P (TREE_TYPE (new_return)))
 	      {
 		struct bitint_info info;
 		unsigned prec = TYPE_PRECISION (TREE_TYPE (new_return));
@@ -9058,6 +9053,9 @@ user_facing_original_type_p (const_tree type)
   if (tree orig_id = TYPE_IDENTIFIER (orig_type))
     if (!name_reserved_for_implementation_p (IDENTIFIER_POINTER (orig_id)))
       return true;
+
+  if (typedef_variant_p (orig_type))
+    return user_facing_original_type_p (orig_type);
 
   switch (TREE_CODE (orig_type))
     {
@@ -9747,7 +9745,7 @@ cb_get_suggestion (cpp_reader *, const char *goal,
   return bm.get_best_meaningful_candidate ();
 }
 
-/* Return the latice point which is the wider of the two FLT_EVAL_METHOD
+/* Return the lattice point which is the wider of the two FLT_EVAL_METHOD
    modes X, Y.  This isn't just  >, as the FLT_EVAL_METHOD values added
    by C TS 18661-3 for interchange  types that are computed in their
    native precision are larger than the C11 values for evaluating in the
@@ -10234,7 +10232,7 @@ maybe_add_include_fixit (rich_location *richloc, const char *header,
 /* Attempt to convert a braced array initializer list CTOR for array
    TYPE into a STRING_CST for convenience and efficiency.  Return
    the converted string on success or the original ctor on failure.
-   Also, for non-convertable CTORs which contain RAW_DATA_CST values
+   Also, for non-convertible CTORs which contain RAW_DATA_CST values
    among the elts try to extend the range of RAW_DATA_CSTs.  */
 
 static tree

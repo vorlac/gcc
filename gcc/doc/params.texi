@@ -889,6 +889,11 @@ protection when @option{-fstack-protector} is used.
 The minimum size of variables taking part in stack slot sharing when not
 optimizing.
 
+@paindex max-niter-dominators-walk
+@item max-niter-dominators-walk
+Maximum number of dominators BBs to walk when simplifying loop bounds
+and conditions.
+
 @paindex max-jump-thread-duplication-stmts
 @item max-jump-thread-duplication-stmts
 Maximum number of statements allowed in a block that needs to be
@@ -1872,9 +1877,9 @@ a diagnostic as infeasible.
 The number of executions of a basic block that is considered hot.
 The parameter is used only in GIMPLE FE.
 
-@paindex analyzer-bb-explosion-factor
-@item analyzer-bb-explosion-factor
-The maximum number of ``after supernode'' exploded nodes within the analyzer
+@paindex analyzer-supernode-explosion-factor
+@item analyzer-supernode-explosion-factor
+The maximum number of exploded nodes within the analyzer
 per supernode, before terminating analysis.
 
 @paindex analyzer-text-art-string-ellipsis-threshold
@@ -2068,7 +2073,7 @@ loop.  The default value is four.
 
 @paindex aarch64-tag-memory-loop-threshold
 @item aarch64-tag-memory-loop-threshold
-Parameter to control the treshold in number of granules beyond which an
+Parameter to control the threshold in number of granules beyond which an
 explicit loop for tagging a memory block is emitted.  The memory block
 is tagged using MTE instructions.
 

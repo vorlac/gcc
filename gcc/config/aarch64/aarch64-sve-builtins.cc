@@ -209,6 +209,10 @@ CONSTEXPR const group_suffix_info group_suffixes[] = {
 #define TYPES_all_float(S, D, T) \
   S (f16), S (f32), S (f64)
 
+/* _f32 _f64.  */
+#define TYPES_sd_float(S, D, T) \
+  S (f32), S (f64)
+
 /* _s8 _s16 _s32 _s64.  */
 #define TYPES_all_signed(S, D, T) \
   S (s8), S (s16), S (s32), S (s64)
@@ -830,6 +834,7 @@ DEF_SVE_TYPES_ARRAY (s_signed);
 DEF_SVE_TYPES_ARRAY (s_unsigned);
 DEF_SVE_TYPES_ARRAY (s_integer);
 DEF_SVE_TYPES_ARRAY (s_data);
+DEF_SVE_TYPES_ARRAY (sd_float);
 DEF_SVE_TYPES_ARRAY (sd_signed);
 DEF_SVE_TYPES_ARRAY (sd_unsigned);
 DEF_SVE_TYPES_ARRAY (sd_integer);
@@ -1514,7 +1519,7 @@ function_builder::add_function (const function_instance &instance,
 {
   unsigned int length = vec_safe_length (registered_functions);
   unsigned int code = (m_function_index << AARCH64_BUILTIN_SHIFT) | AARCH64_BUILTIN_SVE;
-  /* We need to be able to generate placeholders to enusre that we have a
+  /* We need to be able to generate placeholders to ensure that we have a
      consistent numbering scheme for function codes between the C and C++
      frontends, so that everything ties up in LTO.
 

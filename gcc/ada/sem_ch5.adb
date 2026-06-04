@@ -94,17 +94,6 @@ package body Sem_Ch5 is
    --  statements. On success, the return value is the entity of the loop
    --  referenced by the statement.
 
-   function Has_Sec_Stack_Call (N : Node_Id) return Boolean;
-   --  N is the node for an arbitrary construct. This function searches the
-   --  construct N to see if it contains a function call that returns on the
-   --  secondary stack, returning True if any such call is found, and False
-   --  otherwise.
-
-   --  ??? The implementation invokes Sem_Util.Requires_Transient_Scope so it
-   --  will return True if N contains a function call that needs finalization,
-   --  in addition to the above specification. See Analyze_Loop_Statement for
-   --  a similar comment about this entanglement.
-
    procedure Preanalyze_Range (R_Copy : Node_Id);
    --  Determine expected type of range or domain of iteration of Ada 2012
    --  loop by analyzing separate copy. Do the analysis and resolution of the
@@ -674,13 +663,13 @@ package body Sem_Ch5 is
       --  Error of assigning to limited type. We do however allow this in
       --  certain cases where the front end generates the assignments.
       --  Comes_From_Source test is needed to allow compiler-generated
-      --  constructor calls or streaming/put_image subprograms, which may
-      --  ignore privacy.
+      --  streaming/put_image subprograms, which may ignore privacy.
 
       elsif Is_Limited_Type (T1)
         and then not Assignment_OK (Lhs)
         and then not Assignment_OK (Original_Node (Lhs))
-        and then Comes_From_Source (N)
+        and then (Comes_From_Source (N)
+                   or else Is_Immutably_Limited_Type (T1))
       then
          --  CPP constructors can only be called in declarations
 

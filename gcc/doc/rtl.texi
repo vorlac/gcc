@@ -1577,9 +1577,9 @@ Returns the number of fractional bits of a datum of fixed-point mode @var{m}.
 
 @findex GET_MODE_MASK
 @item GET_MODE_MASK (@var{m})
-Returns a bitmask containing 1 for all bits in a word that fit within
-mode @var{m}.  This macro can only be used for modes whose bitsize is
-less than or equal to @code{HOST_BITS_PER_INT}.
+Returns a bitmask containing 1 for all bits in a @code{HOST_WIDE_INT}
+that fit within mode @var{m}.  This macro can only be used for modes
+whose bitsize is less than or equal to @code{HOST_BITS_PER_WIDE_INT}.
 
 @findex GET_MODE_ALIGNMENT
 @item GET_MODE_ALIGNMENT (@var{m})
@@ -3800,13 +3800,16 @@ function calls.  It is important to distinguish these instructions because
 they imply that certain registers and memory locations may be altered
 unpredictably.
 
-@findex CALL_INSN_FUNCTION_USAGE
 @code{call_insn} insns have the same extra fields as @code{insn} insns,
-accessed in the same way and in addition contain a field
-@code{CALL_INSN_FUNCTION_USAGE}, which contains a list (chain of
-@code{expr_list} expressions) containing @code{use}, @code{clobber} and
-sometimes @code{set} expressions that denote hard registers and
-@code{mem}s used or clobbered by the called function.
+accessed in the same way.  They have two further fields:
+
+@table @code
+@findex CALL_INSN_FUNCTION_USAGE
+@item CALL_INSN_FUNCTION_USAGE
+This field contains a list (chain of @code{expr_list} expressions)
+containing @code{use}, @code{clobber} and sometimes @code{set}
+expressions that denote hard registers and @code{mem}s used or
+clobbered by the called function.
 
 A @code{mem} generally points to a stack slot in which arguments passed
 to the libcall by reference (@pxref{Register Arguments,
@@ -3824,6 +3827,13 @@ If the list contains a @code{set} involving two registers, it indicates
 that the function returns one of its arguments.  Such a @code{set} may
 look like a no-op if the same register holds the argument and the return
 value.
+
+@findex CALL_INSN_ABI_ID
+@item CALL_INSN_ABI_ID
+This field identifies the callee's calling convention, as an index in
+the range [0, @code{NUM_ABI_IDS} - 1].  See @file{function-abi.h} for
+more details about the representation of these calling conventions.
+@end table
 
 @findex code_label
 @findex CODE_LABEL_NUMBER
@@ -4430,7 +4440,7 @@ using namespace rtl_ssa;
 However, this is purely a matter of taste, and the examples in the rest of
 this section do not require it.
 
-The RTL SSA represention is an optional on-the-side feature that applies
+The RTL SSA representation is an optional on-the-side feature that applies
 on top of the normal RTL instructions.  It is currently local to individual
 RTL passes and is not maintained across passes.
 
@@ -4520,7 +4530,7 @@ structures and the underlying CFG @code{basic_block} structures
 @cindex ``real'' instructions, RTL SSA
 @anchor{real RTL SSA insns}
 If a CFG basic block @var{bb} contains an RTL instruction @var{insn},
-the RTL SSA represenation of @var{bb} also contains an RTL SSA representation
+the RTL SSA representation of @var{bb} also contains an RTL SSA representation
 of @var{insn}@footnote{Note that this excludes non-instruction things like
 @code{note}s and @code{barrier}s that also appear in the chain of RTL
 instructions.}.  Within RTL SSA, these instructions are referred to as

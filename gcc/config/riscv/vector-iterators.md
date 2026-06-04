@@ -122,10 +122,6 @@
   UNSPEC_SF_VFNRCLIP
   UNSPEC_SF_VFNRCLIPU
   UNSPEC_SF_CV
-
-  ;; Vector conditional branch optabs
-  UNSPEC_COND_LEN_CMP_ALL
-  UNSPEC_COND_LEN_CMP_ANY
 ])
 
 (define_c_enum "unspecv" [
@@ -4746,7 +4742,7 @@
 ;; Due to we cannot define a mode_attr mapping one HF to both
 ;; the SI and DI, we use 2 different mode_atter to cover all
 ;; the combination as above, as well as the different iterator
-;; for the lrint<m><n> patterns. Aka:
+;; for the lrint<m><n> patterns.  Aka:
 ;;
 ;; V_F2SI_CONVERT: (HF, SF, DF) => SI
 ;; V_F2DI_CONVERT: (HF, SF, DF) => DI
@@ -6523,18 +6519,4 @@
   (V1DI "V1HI") (V2DI "V2HI") (V4DI "V4HI") (V8DI "V8HI") (V16DI "V16HI")
   (V32DI "V32HI") (V64DI "V64HI") (V128DI "V128HI") (V256DI "V256HI")
   (V512DI "V512HI")
-])
-
-;; Vector conditional branch iterators
-(define_int_iterator COND_LEN_CBRANCH_CMP
- [UNSPEC_COND_LEN_CMP_ALL UNSPEC_COND_LEN_CMP_ANY])
-
-(define_int_attr cbranch_op [
-  (UNSPEC_COND_LEN_CMP_ALL "EQ")
-  (UNSPEC_COND_LEN_CMP_ANY "NE")
-])
-
-(define_int_attr cbranch_optab [
-  (UNSPEC_COND_LEN_CMP_ALL "cond_len_vec_cbranch_all")
-  (UNSPEC_COND_LEN_CMP_ANY "cond_len_vec_cbranch_any")
 ])

@@ -451,7 +451,7 @@ gfc_vptr_size_get (tree vptr)
 
 /* IF ts is null (default), search for the last _class ref in the chain
    of references of the expression and cut the chain there.  Although
-   this routine is similiar to class.cc:gfc_add_component_ref (), there
+   this routine is similar to class.cc:gfc_add_component_ref (), there
    is a significant difference: gfc_add_component_ref () concentrates
    on an array ref that is the last ref in the chain and is oblivious
    to the kind of refs following.
@@ -5724,7 +5724,9 @@ gfc_conv_subref_array_arg (gfc_se *se, gfc_expr * expr, int g77,
 
   gcc_assert (lse.ss == gfc_ss_terminator);
 
-  tmp = gfc_trans_scalar_assign (&lse, &rse, expr->ts, false, true);
+  /* Do not do deallocations when we are looking at a g77-style argument.  */
+
+  tmp = gfc_trans_scalar_assign (&lse, &rse, expr->ts, false, !g77);
   gfc_add_expr_to_block (&body, tmp);
 
   /* Generate the copying loops.  */
@@ -10222,7 +10224,7 @@ gfc_trans_subcomponent_assign (tree dest, gfc_component * cm,
           c = gfc_constructor_next (c);
         }
       /* The following constructor expression, if any, represents a specific
-         map intializer, as given by the user.  */
+         map initializer, as given by the user.  */
       if (c != NULL && c->expr != NULL)
         {
           gcc_assert (expr->expr_type == EXPR_STRUCTURE);
@@ -10692,7 +10694,7 @@ gfc_conv_expr (gfc_se * se, gfc_expr * expr)
 	 structure constructor or array constructor, the entity created by
 	 the constructor is finalized after execution of the innermost
 	 executable construct containing the reference. This, in fact,
-	 was later deleted by the Combined Techical Corrigenda 1 TO 4 for
+	 was later deleted by the Combined Technical Corrigenda 1 TO 4 for
 	 fortran 2008 (f08/0011).  */
       if ((gfc_option.allow_std & (GFC_STD_F2008 | GFC_STD_F2003))
 	  && !(gfc_option.allow_std & GFC_STD_GNU)
@@ -12180,7 +12182,7 @@ fcncall_realloc_result (gfc_se *se, int rank, tree dtype)
 
   /* Check that the shapes are the same between lhs and expression.
      The evaluation of the shape is done in 'shape_block' to avoid
-     unitialized warnings from the lhs bounds. */
+     uninitialized warnings from the lhs bounds. */
   not_same_shape = boolean_false_node;
   gfc_start_block (&shape_block);
   for (n = 0 ; n < rank; n++)
@@ -12861,7 +12863,7 @@ alloc_scalar_allocatable_for_assignment (stmtblock_t *block,
 
    a = a + 4
 
-   to make sure we do not check for reallocation unneccessarily.  */
+   to make sure we do not check for reallocation unnecessarily.  */
 
 
 /* Strip parentheses from an expression to get the underlying variable.
@@ -13246,7 +13248,7 @@ gfc_trans_assignment_1 (gfc_expr * expr1, gfc_expr * expr2, bool init_flag,
 	 structure constructor or array constructor, the entity created by
 	 the constructor is finalized after execution of the innermost
 	 executable construct containing the reference.
-	 These finalizations were later deleted by the Combined Techical
+	 These finalizations were later deleted by the Combined Technical
 	 Corrigenda 1 TO 4 for fortran 2008 (f08/0011).  */
       else if (gfc_notification_std (GFC_STD_F2018_DEL)
 	  && (expr2->expr_type == EXPR_STRUCTURE
@@ -13271,13 +13273,19 @@ gfc_trans_assignment_1 (gfc_expr * expr1, gfc_expr * expr2, bool init_flag,
        && !CLASS_DATA (expr2)->attr.class_pointer
        && !CLASS_DATA (expr2)->attr.allocatable);
 
+  /* What can be sent to trans_class_assignment includes all the obvious
+     candidates but scalar assignment of a class expression to a derived type
+     must be done using gfc_trans_scalar_assign; partly because it is simpler
+     and partly because some cases fail, eg. class assignment to derived_type
+     select type temporaries.  */
   is_poly_assign
     = (use_vptr_copy
        || ((lhs_attr.pointer || lhs_attr.allocatable) && !lhs_attr.dimension))
       && (expr1->ts.type == BT_CLASS || gfc_is_class_array_ref (expr1, NULL)
 	  || gfc_is_class_scalar_expr (expr1)
 	  || gfc_is_class_array_ref (expr2, NULL)
-	  || gfc_is_class_scalar_expr (expr2))
+	  || (gfc_is_class_scalar_expr (expr2)
+	      && !(expr1->ts.type == BT_DERIVED && !lhs_attr.dimension)))
       && lhs_attr.flavor != FL_PROCEDURE;
 
   assoc_assign = is_assoc_assign (expr1, expr2);

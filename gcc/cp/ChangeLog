@@ -1,3 +1,533 @@
+2026-06-01  Joe Natter  <johannes.natter@outlook.at>
+
+	PR c++/125422
+	* init.cc (build_new_1): Avoid building a null-check
+	COND_EXPR when rval == data_addr.
+
+2026-06-01  yxj-github-437  <2457369732@qq.com>
+
+	* module.cc (module_state_config::get_dialect): Add reflection
+	dialect.
+
+2026-06-01  Eczbek  <eczbek.void@gmail.com>
+
+	PR c++/125317
+	* parser.cc (cp_parser_requirement_body): Set
+	parser->greater_than_is_operator_p.
+
+2026-05-30  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/125123
+	* parser.cc (cp_build_range_for_decls): If range_temp or begin
+	are static, set DECL_IGNORED_P on it.
+	* pt.cc (finish_expansion_stmt): Similarly for iter.
+	* decl.cc (cp_finish_decl): Call determine_local_discriminator
+	etc. also for DECL_ARTIFICIAL TREE_STATIC vars.
+
+2026-05-30  Dhruv Chawla  <dhruvc@nvidia.com>
+
+	* call.cc (involves_qualification_conversion_p): Fix typos.
+	(build_user_type_conversion_1): Likewise.
+	(complain_about_access): Likewise.
+	(maybe_warn_class_memaccess): Likewise.
+	* class.cc (inherit_targ_abi_tags): Likewise.
+	(warn_hidden): Likewise.
+	(maybe_add_class_template_decl_list): Likewise.
+	(check_bases_and_members): Likewise.
+	(dfs_accumulate_vtbl_inits): Likewise.
+	* constexpr.cc (cx_check_missing_mem_inits): Likewise.
+	(cxx_eval_call_expression): Likewise.
+	(modifying_const_object_error): Likewise.
+	(cxx_replaceable_global_alloc_fn): Likewise.
+	* contracts.cc (copy_contracts_list): Likewise.
+	(check_redecl_contract): Likewise.
+	(update_late_contract): Likewise.
+	(get_precondition_function): Likewise.
+	* coroutines.cc (cp_coroutine_transform::build_ramp_function): Likewise.
+	* cp-tree.def (DISJ_CONSTR): Likewise.
+	* cp-tree.h (struct lang_decl_base): Likewise.
+	(SCOPE_DEPTH): Likewise.
+	(set_anon_aggr_type_field): Likewise.
+	(struct cp_decl_specifier_seq): Likewise.
+	* decl.cc (reshape_init_array_1): Likewise.
+	(omp_declare_variant_finalize): Likewise.
+	(grokdeclarator): Likewise.
+	(copy_type_enum): Likewise.
+	* decl2.cc (struct priority_map_traits): Likewise.
+	(determine_visibility): Likewise.
+	(constrain_class_visibility): Likewise.
+	(one_static_initialization_or_destruction): Likewise.
+	* g++spec.cc (lang_specific_driver): Likewise.
+	* init.cc (constant_value_1): Likewise.
+	(build_new): Likewise.
+	* mangle.cc (write_unqualified_name): Likewise.
+	* method.cc (inherited_ctor_binfo): Likewise.
+	(synthesized_method_walk): Likewise.
+	* module.cc (GTY): Likewise.
+	(trees_out::lang_decl_bools): Likewise.
+	(trees_out::core_vals): Likewise.
+	(trees_in::core_vals): Likewise.
+	(trees_in::install_implicit_member): Likewise.
+	(trees_in::odr_duplicate): Likewise.
+	(instantiating_tu_local_entity): Likewise.
+	(sort_cluster): Likewise.
+	(module_state::write_define): Likewise.
+	(module_state::write_begin): Likewise.
+	(declare_module): Likewise.
+	(init_modules): Likewise.
+	* name-lookup.cc (name_lookup::ambiguous): Likewise.
+	(pushdecl): Likewise.
+	(suggest_alternatives_for_1): Likewise.
+	(maybe_add_fuzzy_decl): Likewise.
+	* name-lookup.h (INHERITED_VALUE_BINDING_P): Likewise.
+	(HIDDEN_TYPE_BINDING_P): Likewise.
+	(BINDING_VECTOR_GLOBAL_DUPS_P): Likewise.
+	* operators.def: Likewise.
+	* parser.cc (cp_lexer_new_main): Likewise.
+	(get_cast_suggestion): Likewise.
+	(cp_parser_expression): Likewise.
+	(cp_parser_simple_type_specifier): Likewise.
+	(cp_parser_noexcept_specification_opt): Likewise.
+	(cp_parser_lookup_name): Likewise.
+	(class_decl_loc_t::diag_mismatched_tags): Likewise.
+	(cp_parser_cache_defarg): Likewise.
+	(cp_parser_objc_statement): Likewise.
+	(cp_parser_omp_loop_nest): Likewise.
+	(cp_parser_omp_taskloop): Likewise.
+	(cp_parser_objc_at_property_declaration): Likewise.
+	* parser.h (struct cp_unparsed_functions_entry): Likewise.
+	* pt.cc (tsubst_friend_class): Likewise.
+	(use_pack_expansion_extra_args_p): Likewise.
+	(tsubst_unary_left_fold): Likewise.
+	(tsubst_unary_right_fold): Likewise.
+	(filter_memfn_lookup): Likewise.
+	* semantics.cc (maybe_convert_cond): Likewise.
+	(finish_switch_cond): Likewise.
+	(cp_finish_omp_clause_doacross_sink): Likewise.
+	(finish_omp_target_clauses_r): Likewise.
+	* tree.cc (build_cplus_new): Likewise.
+	(apply_identity_attributes): Likewise.
+	* vtable-class-hierarchy.cc (vtv_compute_class_hierarchy_transitive_closure): Likewise.
+	(vtv_generate_init_routine): Likewise.
+
+2026-05-29  Jakub Jelinek  <jakub@redhat.com>
+
+	* init.cc (build_value_init_noctor): Zero initialize anonymous
+	union/struct subobjects.  Formatting fix.
+
+2026-05-28  Marek Polacek  <polacek@redhat.com>
+
+	PR c++/125454
+	* typeck.cc (cp_build_array_ref): Don't recurse for array[array].
+
+2026-05-27  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/125412
+	* reflect.cc (process_metafunction): If ht is error_operand_p,
+	set *non_constant_p and return NULL_TREE.
+
+2026-05-26  Marek Polacek  <polacek@redhat.com>
+
+	PR c++/125423
+	* pt.cc (tsubst_expr) <case REFLECT_EXPR>: Don't tsubst
+	REFLECT_BASEs.
+
+2026-05-23  Jason Merrill  <jason@redhat.com>
+
+	PR c++/125135
+	* pt.cc (check_non_deducible_conversions): Handle LOOKUP_DEFAULTED.
+
+2026-05-22  Julian Brown  <julian@codesourcery.com>
+	    Tobias Burnus  <tburnus@baylibre.com>
+
+	* parser.cc (cp_parser_omp_clause_from_to): Add parsing for
+	mapper modifier.
+	(cp_parser_omp_target_update): Instantiate mappers.
+
+2026-05-22  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/119059
+	* method.cc: Implement C++26 P3074R7 - trivial unions (was
+	std::uninitialized<T>) (except the sentence removed again in P3726R2)
+	and proposed resolution of CWG3189 - Implicitly deleted destructors
+	for union-like classes.
+	(walk_field_subobs): Don't do default_init_uninitialized_part checks
+	for variant members.  Don't check subobject ctor/dtor for variant
+	members for ctor/inheriting ctor or when subobject doesn't have member
+	initializer for dtor and it is either the dtor_from_ctor case or
+	the current class doesn't have user provided ctors.
+	* class.cc (check_field_decl): Don't or in
+	TYPE_HAS_NONTRIVIAL_DESTRUCTOR or TYPE_HAS_DEFAULT_CONSTRUCTOR of
+	variant subobjects for C++26.
+
+2026-05-21  Marek Polacek  <polacek@redhat.com>
+
+	PR c++/125330
+	* parser.cc (cp_parser_parameter_declaration_list): Also
+	pushdecl when parameter->default_argument is this_identifier.
+
+2026-05-21  Jason Merrill  <jason@redhat.com>
+
+	* constexpr.cc (init_subob_ctx): Check is_empty_field.
+
+2026-05-21  Jason Merrill  <jason@redhat.com>
+
+	PR c++/125384
+	PR c++/113563
+	* lambda.cc (build_capture_proxy): 'this' capture proxy is const.
+
+2026-05-21  Marek Polacek  <polacek@redhat.com>
+
+	PR c++/125284
+	PR c++/125333
+	* pt.cc (tsubst_decl) <case USING_DECL>: Copy targs before
+	modifying them.
+
+2026-05-21  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/125376
+	* coroutines.cc (register_local_var_uses): Ignore DECL_NAME for
+	name independent decls.
+
+2026-05-19  Marek Polacek  <polacek@redhat.com>
+
+	PR c++/123536
+	* cp-tree.h (process_outer_var_ref): Remove a parameter's name.
+	* expr.cc (mark_use): Return if mark_rvalue_use returns
+	error_mark_node.
+	* semantics.cc (process_outer_var_ref): Return decl when it is
+	instantiation-dependent.
+
+2026-05-19  Marek Polacek  <polacek@redhat.com>
+
+	PR c++/125336
+	* constexpr.cc (cxx_eval_bare_aggregate): Don't call
+	get_or_insert_ctor_field when there is no CONSTRUCTOR.  Assert
+	is_empty_class.
+
+2026-05-19  Paul-Antoine Arras  <parras@baylibre.com>
+	    Chung-Lin Tang  <cltang@baylibre.com>
+	    Sandra Loosemore  <sloosemore@baylibre.com>
+
+	* semantics.cc (finish_omp_clauses): Likewise.
+
+2026-05-18  Marek Polacek  <polacek@redhat.com>
+
+	* constexpr.cc (cxx_eval_bare_aggregate): Remove dead code.
+
+2026-05-15  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/125081
+	* typeck.cc (cp_build_binary_op): Emit -Wconstant-logical-operand
+	warnings.
+
+2026-05-15  Jason Merrill  <jason@redhat.com>
+
+	PR c++/125315
+	* constexpr.cc (init_subob_ctx): Allow both ctor and object
+	to be null for an empty subobject.
+
+2026-05-14  Patrick Palka  <ppalka@redhat.com>
+
+	PR c++/124628
+	* reflect.cc (resolve_type_of_reflected_decl): New.
+	(get_reflection): Call resolve_type_of_reflected_decl instead
+	of mark_used.
+	(has_type): Call resolve_type_of_reflected_decl before
+	checking for an undeduced auto.
+	(eval_can_substitute): Likewise.  Also look through BASELINK.
+	(members_of_representable): Call resolve_type_of_reflected_decl
+	before checking for an undeduced auto.
+
+2026-05-14  Tobias Burnus  <tburnus@baylibre.com>
+
+	* semantics.cc (cp_check_omp_declare_mapper): Change what
+	argument is expected; check that the struct var is used by at
+	least one map war. Print sorry when compiling with -std=c++98.
+	* pt.cc (tsubst_stmt, tsubst_expr): Call it.
+	* parser.cc (cp_parser_omp_declare_mapper): Update call.
+
+2026-05-13  Marek Polacek  <polacek@redhat.com>
+
+	PR c++/125280
+	* reflect.cc (consteval_only_p): Don't complete_type.
+	(consteval_only_p_walker::walk): Return false for
+	error_mark_node.
+
+2026-05-13  chzn@mail.ustc.edu.cn  <chzn@mail.ustc.edu.cn>
+	    Jason Merrill  <jason@redhat.com>
+
+	PR c++/123609
+	* parser.cc (cp_parser_class_head): Re-parse attributes
+	that caused a tentative parsing failure.
+
+2026-05-12  Jason Merrill  <jason@redhat.com>
+
+	PR c++/100903
+	* call.cc (build_over_call): Avoid -Wzero-as-null-pointer-constant
+	if the warning is disabled around the called function.
+
+2026-05-12  Marek Polacek  <polacek@redhat.com>
+
+	PR c++/50479
+	PR c++/62244
+	* parser.cc (cp_parser_parameter_declaration_list): Move the
+	grokdeclarator call and setting DECL_SOURCE_LOCATION to...
+	(cp_parser_parameter_declaration): ...here.  New tree parameter.
+	Set it.  Call pushdecl for a named decl with a default argument.
+
+2026-05-12  Marek Polacek  <polacek@redhat.com>
+
+	PR c++/125208
+	* reflect.cc (compare_reflections): Use == when comparing two
+	aliases.
+	* tree.cc (cp_tree_equal) <case REFLECT_EXPR>: Use
+	compare_reflections.
+
+2026-05-11  Jason Merrill  <jason@redhat.com>
+
+	* reflect.cc (null_reflection_p): New.
+	(splice): Use it.
+	* error.cc (dump_expr): Use it.
+	* cp-tree.h (null_reflection_p): Declare.
+
+2026-05-11  Marek Polacek  <polacek@redhat.com>
+
+	* decl2.cc (decl_defined_p): Also return true if DECL_INITIAL
+	and !DECL_IN_AGGR_P is true for a VAR_DECL.
+
+2026-05-09  Patrick Palka  <ppalka@redhat.com>
+
+	PR c++/121500
+	* cp-gimplify.cc (cp_genericize_r): Unconditionally walk
+	DECL_VALUE_EXPR.
+
+2026-05-08  Marek Polacek  <polacek@redhat.com>
+
+	PR c++/115181
+	PR c++/125043
+	PR c++/124979
+	* pt.cc (invalid_tparm_referent_p): Allow DECL_IGNORED_P in an
+	assert.
+
+2026-05-07  Marek Polacek  <polacek@redhat.com>
+
+	PR c++/124770
+	* decl.cc (wrapup_namespace_globals): Give the odr-used
+	inline variable error only when !DECL_INITIAL.
+
+2026-05-07  Marek Polacek  <polacek@redhat.com>
+
+	PR c++/125206
+	* tree.cc (strip_typedefs_expr) <case REFLECT_EXPR>: Always
+	return instead of recursing.
+
+2026-05-07  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/125007
+	* cp-tree.h (maybe_update_function_parm): Declare.
+	* reflect.cc (maybe_update_function_parm): No longer static.
+	* error.cc (dump_expr) <case REFLECT_EXPR>: Improve printing
+	of various reflections.
+
+2026-05-07  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/125184
+	* reflect.cc (check_out_of_consteval_use_r): Don't walk children of
+	USING_STMTs.
+
+2026-05-07  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/124347
+	* constexpr.cc (cxx_eval_builtin_function_call): For
+	mce_true strip nops in first argument of BUILT_IN*_OBJECT_SIZE
+	if the inner expression is ADDR_EXPR.
+
+2026-05-07  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/125111
+	* reflect.cc (extract_ref): Throw instead of trying to build
+	arrays of functions, methods or arrays with NULL TYPE_DOMAIN.
+
+2026-05-07  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/124991
+	* cp-tree.h (struct lang_type): Document typeinfo_var member.
+	(get_classtype_typeinfo_var): New inline function.
+	(CLASSTYPE_TYPEINFO_VAR): Use it.
+	(set_classtype_typeinfo_var): New inline function.
+	(SET_CLASSTYPE_TYPEINFO_VAR): Define.
+	(get_anon_aggr_type_field): New inline function.
+	(ANON_AGGR_TYPE_FIELD): Use it.
+	(set_anon_aggr_type_field): New inline function.
+	(SET_ANON_AGGR_TYPE_FIELD): Define.
+	* decl.cc (fixup_anonymous_aggr): Use SET_ANON_AGGR_TYPE_FIELD
+	instead of ANON_AGGR_TYPE_FIELD.
+	* module.cc (trees_in::read_class_def): Use
+	SET_CLASSTYPE_TYPEINFO_VAR instead of setting
+	CLASSTYPE_TYPEINFO_VAR and do it even for ANON_AGGR_TYPE_P
+	types.  Use SET_ANON_AGGR_TYPE_FIELD instead of setting
+	ANON_AGGR_TYPE_FIELD.
+	* rtti.cc (get_tinfo_decl_direct): Use SET_CLASSTYPE_TYPEINFO_VAR
+	instead of setting CLASSTYPE_TYPEINFO_VAR.
+	* semantics.cc (finish_member_declaration): Use
+	SET_ANON_AGGR_TYPE_FIELD instead of setting ANON_AGGR_TYPE_FIELD.
+
+2026-05-06  Patrick Palka  <ppalka@redhat.com>
+
+	PR c++/125179
+	* reflect.cc: (consteval_only_type_r): Remove this cp_walk_tree
+	callback and replace with ...
+	(consteval_only_walker): ... this recursive memoized
+	implementation.
+	(consteval_only_p): Define in terms of consteval_only_walker.
+
+2026-05-05  Patrick Palka  <ppalka@redhat.com>
+
+	PR c++/124957
+	* class.cc (check_tag): Set ABI_TAG_INHERITED on the TREE_LIST
+	of an inherited tag.  Adjust after ABI_TAG_IMPLICIT renaming.
+	* cp-tree.h (ABI_TAG_IMPLICIT): Rename to ...
+	(ABI_TAG_NOT_MANGLED): ... this.
+	(equal_abi_tags): Adjust forward declaration.
+	* mangle.cc (write_unqualified_name): Adjust equal_abi_tags call.
+	(sorted_abi_tags): New ignore_inherited_p parameter, for ignoring
+	ABI_TAG_INHERITED tags.  Adjust after ABI_TAG_INHERITED renaming.
+	(write_abi_tags): Adjust sorted_abi_tags call.
+	(equal_abi_tags): New ignore_inherited_p parameter.  Pass it to
+	sorted_abi_tags.
+	* module.cc (trees_in::check_abi_tags): Pass
+	ignore_inherited_p=true to equal_abi_tags iff there's a
+	mangled-ness mismatch.
+
+2026-05-05  Rainer Orth  <ro@CeBiTec.Uni-Bielefeld.DE>
+
+	* module.cc (elf_out::create_mapping) [MAPPED_WRITING]
+	(elf_out::create_mapping) [HAVE_POSIX_FALLOCATE]: Allow for
+	ENOTSUP return from posix_fallocate.
+
+2026-05-04  Andrew Pinski  <andrew.pinski@oss.qualcomm.com>
+
+	PR c++/65271
+	* parser.cc (cp_parser_class_specifier): Accept &&.
+
+2026-05-04  yxj-github-437  <2457369732@qq.com>
+
+	* constexpr.cc (cxx_eval_constant_expression): Do not cache
+	result with contract violation.
+
+2026-05-04  chzn@mail.ustc.edu.cn  <chzn@mail.ustc.edu.cn>
+
+	PR c++/124241
+	* search.cc (accessible_p): Call type_context_for_name_lookup
+	for otype if it's anonymous union.
+
+2026-05-03  Andrew Pinski  <andrew.pinski@oss.qualcomm.com>
+
+	PR c++/119567
+	* error.cc (dump_expr): Treat EXACT_DIV_EXPR the same as FLOOR_DIV_EXPR.
+
+2026-05-01  Patrick Palka  <ppalka@redhat.com>
+
+	PR c++/125115
+	* module.cc (trees_in::is_matching_decl): Turn e_type into a
+	reference and use it instead of TREE_TYPE (e_inner).  Always
+	use build_exception_variant to propagate an already-instantiated
+	noexcept.
+
+2026-05-01  Marek Polacek  <polacek@redhat.com>
+
+	PR c++/125096
+	* pt.cc (tsubst_splice_scope): Don't return early for
+	dependent_splice_p.  Propagate cv-qualifiers from the
+	SPLICE_SCOPE to the result.
+	* reflect.cc (valid_splice_scope_p): Accept SPLICE_SCOPE.
+
+2026-04-29  Patrick Palka  <ppalka@redhat.com>
+
+	PR c++/125035
+	* module.cc (merge_key): Add iobj_p and xobj_p bits.
+	(trees_out::key_mergeable) <case MK_named>: Set and stream
+	merge_key's iobj_p and xobj_p bits.
+	(check_mergeable_decl) <case FUNCTION_DECL>: Compare merge_key's
+	iobj_p and xobj_p bits with that of the given function.
+	(trees_in::key_mergeable): Stream merge_key's iobj_p and xobj_p
+	bits.
+
+2026-04-29  Patrick Palka  <ppalka@redhat.com>
+
+	PR c++/124582
+	PR c++/123810
+	* module.cc (check_mergeable_decl) <case TYPE_DECL>: Handle
+	merging a typedef to an unnamed type with the -freflection
+	representation.
+
+2026-04-29  Julian Brown  <julian@codesourcery.com>
+
+	* parser.cc (cp_parser_omp_target_data): Instantiate mappers for 'omp
+	target data'.
+	(cp_parser_omp_target_enter_data): Instantiate mappers for 'omp target
+	enter data'.
+	(cp_parser_omp_target_exit_data): Instantiate mappers for 'omp target
+	exit data'.
+	(cp_parser_omp_target): Add c_omp_region_type argument to
+	c_omp_instantiate_mappers call.
+	* pt.cc (tsubst_omp_clauses): Instantiate mappers for OMP regions other
+	than just C_ORT_OMP_TARGET.
+	(tsubst_expr): Update call to tsubst_omp_clauses for OMP_TARGET_UPDATE,
+	OMP_TARGET_ENTER_DATA, OMP_TARGET_EXIT_DATA stanza.
+	* semantics.cc (cxx_omp_map_array_section): Avoid calling
+	build_array_ref for non-array/non-pointer bases (error reported
+	already).
+
+2026-04-29  Jakub Jelinek  <jakub@redhat.com>
+
+	* reflect.cc (compare_reflection): For REFLECT_BASE use lhs == rhs rather
+	than cp_tree_equal.
+
+2026-04-28  Marek Polacek  <polacek@redhat.com>
+
+	PR c++/124756
+	* reflect.cc (get_reflection): Give an error when taking the
+	reflection of a block-scope extern.
+
+2026-04-28  Marek Polacek  <polacek@redhat.com>
+
+	* error.cc (inform_tree_category): Also print concept and alias
+	template.
+	* pt.cc (tsubst_splice_scope): Reword the diagnostic messages.
+	Call inform_tree_category.
+
+2026-04-28  Jason Merrill  <jason@redhat.com>
+
+	PR c++/125022
+	* decl.cc (store_parm_decls): Only do trivial_abi stuff when
+	!processing_template_decl.
+
+2026-04-27  Patrick Palka  <ppalka@redhat.com>
+
+	PR c++/124978
+	PR c++/115314
+	* semantics.cc (finish_decltype_type): Check REFERENCE_REF_P
+	instead of INDIRECT_REF_P before stripping implicit dereferences.
+
+2026-04-27  Patrick Palka  <ppalka@redhat.com>
+
+	PR c++/124953
+	* module.cc (trees_in::tree_node) <tt_nttp_var>: Push the result
+	of get_template_parm_object to post_load_decls.
+	(post_load_processing): Call cp_finish_decl on any not yet
+	completed NTTP objects.
+	* pt.cc (get_template_parm_object): Don't call cp_finish_decl
+	when !check_init.
+
+2026-04-27  Jason Merrill  <jason@redhat.com>
+
+	PR c++/124910
+	DR 2658
+	* constexpr.cc (reduced_constant_expression_p): Allow a union
+	with no active member.
+
 2026-04-23  Patrick Palka  <ppalka@redhat.com>
 
 	* module.cc (trees_out::core_vals) <case PTRMEM_CST>:

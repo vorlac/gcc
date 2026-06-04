@@ -1706,10 +1706,6 @@ FP_ASM_SPEC "\
    doesn't support 128-bit integers for MIPS32 currently.  */
 #define LONG_LONG_ACCUM_TYPE_SIZE (TARGET_64BIT ? 128 : 64)
 
-/* long double is not a fixed mode, but the idea is that, if we
-   support long double, we also want a 128-bit integer type.  */
-#define MAX_FIXED_MODE_SIZE MIPS_LONG_DOUBLE_TYPE_SIZE
-
 /* Width in bits of a pointer.  */
 #ifndef POINTER_SIZE
 #define POINTER_SIZE ((TARGET_LONG64 && TARGET_64BIT) ? 64 : 32)
@@ -2986,7 +2982,7 @@ while (0)
 		...
 		.uleb128 foo-$LFBxxx
 
-   The .uleb128 requies $LFBxxx to match the FDE start address, which is
+   The .uleb128 requires $LFBxxx to match the FDE start address, which is
    likewise a byte pointer rather than an ISA-encoded address.
 
    At the time of writing, this hook is not used for the function end

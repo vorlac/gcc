@@ -4,7 +4,7 @@ This file is part of GCC.
 
 GCC is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
-the Free Software Foundation; either version 3, or(at your option)
+the Free Software Foundation; either version 3, or (at your option)
 any later version.
 
 GCC is distributed in the hope that it will be useful,
@@ -177,7 +177,7 @@ vector_permconst::process_bb (basic_block bb)
 	continue;
 
       /* A load from the constant pool should have a REG_EQUAL
-	 note with the vector contant in the note.  */
+	 note with the vector constant in the note.  */
       rtx note = find_reg_equal_equiv_note (insn);
       if (!note
 	  || REG_NOTE_KIND (note) != REG_EQUAL

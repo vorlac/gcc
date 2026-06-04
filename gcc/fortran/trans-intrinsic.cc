@@ -1238,6 +1238,7 @@ gfc_conv_intrinsic_caf_get (gfc_se *se, gfc_expr *expr, tree lhs,
   array_expr = expr->value.function.actual->expr;
   ns = array_expr->expr_type == EXPR_VARIABLE
 	   && !array_expr->symtree->n.sym->attr.associate_var
+	   && !array_expr->symtree->n.sym->module
 	 ? array_expr->symtree->n.sym->ns
 	 : gfc_current_ns;
   type = gfc_typenode_for_spec (&array_expr->ts);
@@ -9839,37 +9840,6 @@ gfc_conv_intrinsic_loc (gfc_se * se, gfc_expr * expr)
   se->expr = temp_var;
 }
 
-
-/* Specialized trim for f_c_string.  */
-
-static void
-conv_trim (gfc_se *tse, gfc_se *str)
-{
-  tree cond, plen, pvar, tlen, ttmp, tvar;
-
-  tlen = gfc_create_var (gfc_charlen_type_node, "tlen");
-  plen = gfc_build_addr_expr (NULL_TREE, tlen);
-
-  tvar = gfc_create_var (pchar_type_node, "tstr");
-  pvar = gfc_build_addr_expr (ppvoid_type_node, tvar);
-
-  ttmp = build_call_expr_loc (input_location, gfor_fndecl_string_trim, 4,
-			      plen, pvar, str->string_length, str->expr);
-
-  gfc_add_expr_to_block (&tse->pre, ttmp);
-
-  /* Free the temporary afterwards, if necessary.  */
-  cond = fold_build2_loc (input_location, GT_EXPR, logical_type_node,
-			  tlen, build_int_cst (TREE_TYPE (tlen), 0));
-  ttmp = gfc_call_free (tvar);
-  ttmp = build3_v (COND_EXPR, cond, ttmp, build_empty_stmt (input_location));
-  gfc_add_expr_to_block (&tse->post, ttmp);
-
-  tse->expr = tvar;
-  tse->string_length = tlen;
-}
-
-
 /* The following routine generates code for the intrinsic functions from
    the ISO_C_BINDING module: C_LOC, C_FUNLOC, C_ASSOCIATED, and
    F_C_STRING.  */
@@ -9964,141 +9934,188 @@ conv_isocbinding_function (gfc_se *se, gfc_expr *expr)
 	 f_c_string(string, .false.) -> trim(string) // c_null_char
 	 f_c_string(string, .true.)  -> string       // c_null_char  */
 
-      gfc_se lse, rse, tse;
-      tree len, tmp, var;
       gfc_expr *string = arg->expr;
       gfc_expr *asis = arg->next->expr;
-      gfc_expr *cnc;
+      bool need_asis = false, need_trim = false;
+      gfc_se asis_se;
 
-      /* Convert string. */
-      gfc_init_se (&lse, se);
-      gfc_conv_expr (&lse, string);
-      gfc_conv_string_parameter (&lse);
-
-      /* Create a string for C_NULL_CHAR and convert it.  */
-      cnc = gfc_get_character_expr (gfc_default_character_kind,
-				    &string->where, "\0", 1);
-      gfc_init_se (&rse, se);
-      gfc_conv_expr (&rse, cnc);
-      gfc_conv_string_parameter (&rse);
-      gfc_free_expr (cnc);
-
-#ifdef cnode
-#undef cnode
-#endif
-#define cnode gfc_charlen_type_node
-      if (asis)
+      if (!asis)
 	{
-	  stmtblock_t block;
-	  gfc_se asis_se, vse;
-	  tree elen, evar, tlen, tvar;
-	  tree else_branch, then_branch;
-
-	  elen = evar = tlen = tvar = NULL_TREE;
-
-	  /* f_c_string(string, .true.) -> string // c_null_char  */
-
-	  gfc_init_block (&block);
-
-	  gfc_add_block_to_block (&block, &lse.pre);
-	  gfc_add_block_to_block (&block, &rse.pre);
-
-	  tlen = fold_build2_loc (input_location, PLUS_EXPR, cnode,
-				  fold_convert (cnode, lse.string_length),
-				  fold_convert (cnode, rse.string_length));
-
-	  gfc_init_se (&vse, se);
-	  tvar = gfc_conv_string_tmp (&vse, pchar_type_node, tlen);
-	  gfc_add_block_to_block (&block, &vse.pre);
-
-	  tmp = build_call_expr_loc (input_location, gfor_fndecl_concat_string,
-				     6, tlen, tvar,
-				     lse.string_length, lse.expr,
-				     rse.string_length, rse.expr);
-	  gfc_add_expr_to_block (&block, tmp);
-
-	  then_branch = gfc_finish_block (&block);
-
-	  /* f_c_string(string, .false.) = trim(string) // c_null_char  */
-
-	  gfc_init_block (&block);
-
-	  gfc_init_se (&tse, se);
-	  conv_trim (&tse, &lse);
-	  gfc_add_block_to_block (&block, &tse.pre);
-	  gfc_add_block_to_block (&block, &rse.pre);
-
-	  elen = fold_build2_loc (input_location, PLUS_EXPR, cnode,
-				  fold_convert (cnode, tse.string_length),
-				  fold_convert (cnode, rse.string_length));
-
-	  gfc_init_se (&vse, se);
-	  evar = gfc_conv_string_tmp (&vse, pchar_type_node, elen);
-	  gfc_add_block_to_block (&block, &vse.pre);
-
-	  tmp = build_call_expr_loc (input_location, gfor_fndecl_concat_string,
-				     6, elen, evar,
-				     tse.string_length, tse.expr,
-				     rse.string_length, rse.expr);
-	  gfc_add_expr_to_block (&block, tmp);
-
-	  else_branch = gfc_finish_block (&block);
-
-	  gfc_init_se (&asis_se, se);
-	  gfc_conv_expr (&asis_se, asis);
-	  if (asis->expr_type == EXPR_VARIABLE
-	    && asis->symtree->n.sym->attr.dummy
-	    && asis->symtree->n.sym->attr.optional)
-	    {
-	      tree present = gfc_conv_expr_present (asis->symtree->n.sym);
-	      asis_se.expr = build3_loc (input_location, COND_EXPR,
-					 logical_type_node, present,
-					 asis_se.expr,
-					 build_int_cst (logical_type_node, 0));
-	    }
-	  gfc_add_block_to_block (&se->pre, &asis_se.pre);
-	  tmp = fold_build3_loc (input_location, COND_EXPR, void_type_node,
-				 asis_se.expr, then_branch, else_branch);
-
-	  gfc_add_expr_to_block (&se->pre, tmp);
-
-	  var = fold_build3_loc (input_location, COND_EXPR, pchar_type_node,
-				 asis_se.expr, tvar, evar);
-	  gfc_add_expr_to_block (&se->pre, var);
-
-	  len = fold_build3_loc (input_location, COND_EXPR, cnode,
-				 asis_se.expr, tlen, elen);
-	  gfc_add_expr_to_block (&se->pre, len);
+	  need_trim = true;
+	  need_asis = false;
+	}
+      else if (asis->expr_type == EXPR_CONSTANT)
+	{
+	  need_asis = asis->value.logical;
+	  need_trim = !need_asis;
 	}
       else
 	{
-	  /* f_c_string(string) = trim(string) // c_null_char  */
-
-	  gfc_add_block_to_block (&se->pre, &lse.pre);
-	  gfc_add_block_to_block (&se->pre, &rse.pre);
-
-	  gfc_init_se (&tse, se);
-	  conv_trim (&tse, &lse);
-	  gfc_add_block_to_block (&se->pre, &tse.pre);
-	  gfc_add_block_to_block (&se->post, &tse.post);
-
-	  len = fold_build2_loc (input_location, PLUS_EXPR, cnode,
-				 fold_convert (cnode, tse.string_length),
-				 fold_convert (cnode, rse.string_length));
-
-	  var = gfc_conv_string_tmp (se, pchar_type_node, len);
-
-	  tmp = build_call_expr_loc (input_location, gfor_fndecl_concat_string,
-				     6, len, var,
-				     tse.string_length, tse.expr,
-				     rse.string_length, rse.expr);
-	  gfc_add_expr_to_block (&se->pre, tmp);
+	  /* A conditional expression is needed.  */
+	  need_asis = true;
+	  need_trim = true;
+	  gfc_init_se (&asis_se, se);
+	  gfc_conv_expr (&asis_se, asis);
+	  if (asis->expr_type == EXPR_VARIABLE
+	      && asis->symtree->n.sym->attr.dummy
+	      && asis->symtree->n.sym->attr.optional)
+	    {
+	      tree present = gfc_conv_expr_present (asis->symtree->n.sym);
+	      asis_se.expr
+		= build3_loc (input_location, COND_EXPR,
+			      logical_type_node, present,
+			      asis_se.expr, logical_false_node);
+	    }
+	  gfc_make_safe_expr (&asis_se);
 	}
 
-      se->expr = var;
-      se->string_length = len;
+      /* Handle the case of a constant string argument first.  */
+      if (string->expr_type == EXPR_CONSTANT)
+	{
+	  /* Output for the asis "then" case goes tlen/tstr, and the
+	     trimmed case in elen/estr.  */
+	  tree elen, estr, tlen, tstr;
+	  elen = estr = tlen = tstr = NULL_TREE;
 
-#undef cnode
+	  gfc_char_t *orig_string = string->value.character.string;
+	  gfc_charlen_t orig_len = string->value.character.length;
+	  gfc_charlen_t n;
+	  gfc_char_t *buf
+	    = (gfc_char_t *) alloca ((orig_len + 1) * sizeof (gfc_char_t));
+	  memcpy (buf, orig_string, orig_len * sizeof (gfc_char_t));
+	  buf[orig_len] = '\0';
+	  int kind = gfc_default_character_kind;
+	  gcc_assert (string->ts.kind == kind);
+
+	  /* Build the new string constant(s).  */
+	  if (need_asis)
+	    {
+	      tstr = gfc_build_wide_string_const (kind, orig_len + 1, buf);
+	      tlen = TYPE_MAX_VALUE (TYPE_DOMAIN (TREE_TYPE (tstr)));
+	      if (!need_trim)
+		{
+		  se->expr = tstr;
+		  se->string_length = tlen;
+		  return;
+		}
+	    }
+	  if (need_trim)
+	    {
+	      for (n = orig_len; n; n--)
+		if (buf[n - 1] != ' ')
+		  break;
+	      buf[n] = '\0';
+	      if (need_asis && n == orig_len)
+		{
+		  /* Special case; trimming is a no-op.  Add side-effects
+		     from the condition and then just return the string
+		     without a conditional.  */
+		  gfc_add_block_to_block (&se->pre, &asis_se.pre);
+		  se->expr = tstr;
+		  se->string_length = tlen;
+		  return;
+		}
+	      else
+		{
+		  estr = gfc_build_wide_string_const (kind, n + 1, buf);
+		  elen = TYPE_MAX_VALUE (TYPE_DOMAIN (TREE_TYPE (estr)));
+		}
+	      if (!need_asis)
+		{
+		  se->expr = estr;
+		  se->string_length = elen;
+		  return;
+		}
+	    }
+	  gcc_assert (need_asis && need_trim);
+	  gfc_add_block_to_block (&se->pre, &asis_se.pre);
+	  se->expr
+	    = fold_build3_loc (input_location, COND_EXPR,
+			       pchar_type_node, asis_se.expr,
+			       tstr, estr);
+	  se->string_length
+	    = fold_build3_loc (input_location, COND_EXPR,
+			       gfc_charlen_type_node, asis_se.expr,
+			       tlen, elen);
+	  return;
+	}
+      else
+	/* We have to generate code to do the string transformation(s) at
+	   runtime.  */
+	{
+	  tree tmp;
+
+	  /* Convert input string. */
+	  gfc_se sse;
+	  gfc_init_se (&sse, se);
+	  gfc_conv_expr (&sse, string);
+	  gfc_conv_string_parameter (&sse);
+	  gfc_make_safe_expr (&sse);
+	  gfc_add_block_to_block (&se->pre, &sse.pre);
+
+	  /* Use a temporary for the (possibly trimmed) string length.  */
+	  tree lenvar = gfc_create_var (gfc_charlen_type_node, NULL);
+	  gfc_add_modify (&se->pre, lenvar, sse.string_length);
+
+	  /* Build the expression for a call to LEN_TRIM if we may need
+	     to trim the string.  If it's conditional, handle that too.  */
+	  if (need_trim)
+	    {
+	      tree trimlen
+		= build_call_expr_loc (input_location,
+				       gfor_fndecl_string_len_trim, 2,
+				       lenvar, sse.expr);
+	      if (need_asis)
+		{
+		  gfc_add_block_to_block (&se->pre, &asis_se.pre);
+		  tmp = fold_build3_loc (input_location, COND_EXPR,
+					 gfc_charlen_type_node, asis_se.expr,
+					 lenvar, trimlen);
+		  gfc_add_modify (&se->pre, lenvar, tmp);
+		}
+	      else
+		gfc_add_modify (&se->pre, lenvar, trimlen);
+	    }
+
+	  /* Allocate a new string newvar that is lenvar+1 bytes long.
+	     memcpy the first lenvar bytes from the input string, and
+	     add a null character.  Note that lenvar, the length of
+	     the (trimmed) original string, has type gfc_charlen_type_node,
+	     but newlen is size_type_node.  */
+	  tree string_type_node = build_pointer_type (char_type_node);
+	  tree newvar = gfc_create_var (string_type_node, NULL);
+	  tree newlen = fold_build2_loc (input_location, PLUS_EXPR,
+					 size_type_node,
+					 fold_convert (size_type_node,
+						       lenvar),
+					 size_one_node);
+	  gfc_add_modify (&se->pre, newvar,
+			  gfc_call_malloc (&se->pre, string_type_node,
+					   newlen));
+	  tmp = build_call_expr_loc (input_location,
+				     builtin_decl_explicit (BUILT_IN_MEMCPY),
+				     3,
+				     fold_convert (pvoid_type_node, newvar),
+				     fold_convert (pvoid_type_node, sse.expr),
+				     fold_convert (size_type_node, lenvar));
+	  gfc_add_expr_to_block (&se->pre, tmp);
+	  tmp = fold_build2_loc (input_location, POINTER_PLUS_EXPR,
+				 string_type_node, newvar,
+				 fold_convert (size_type_node, lenvar));
+	  tmp = fold_build1_loc (input_location, INDIRECT_REF,
+				 char_type_node, tmp);
+	  gfc_add_modify (&se->pre, tmp,
+			  fold_convert (char_type_node, integer_zero_node));
+
+	  /* Remember to free the string later.  */
+	  tmp = gfc_call_free (newvar);
+	  gfc_add_expr_to_block (&se->post, tmp);
+
+	  /* Return the result.  */
+	  se->expr = newvar;
+	  se->string_length = fold_convert (gfc_charlen_type_node, newlen);
+	  return;
+	}
     }
   else
     gcc_unreachable ();
@@ -10265,6 +10282,122 @@ conv_isocbinding_subroutine (gfc_code *code)
   return gfc_finish_block (&se.pre);
 }
 
+
+/* The following routine generates code for both forms of the intrinsic
+   subroutine C_F_STRPOINTER from the ISO_C_BINDING module.  */
+static tree
+conv_isocbinding_subroutine_strpointer (gfc_code *code)
+{
+  gfc_actual_arglist *arg = code->ext.actual;
+  gfc_expr *arg0 = arg->expr;
+  gfc_expr *fstrptr = arg->next->expr;
+  gfc_expr *nchars = arg->next->next->expr;
+  tree ptr;
+  tree size = NULL_TREE;
+  tree nc = NULL_TREE;
+  tree fstrptr_ptr, fstrptr_len;
+  stmtblock_t block;
+  gfc_init_block (&block);
+  gfc_se se0, se1, se2;
+  gfc_init_se (&se0, NULL);
+  gfc_init_se (&se1, NULL);
+  gfc_init_se (&se2, NULL);
+
+  /* arg0 can either be a simply contiguous rank-one character array,
+     or a scalar of type c_ptr that points to a contiguous array.
+     In the first case nchars may be omitted and defaults to the size
+     of the array.  */
+  if (arg0->rank == 1)
+    {
+      gfc_array_ref *ar = gfc_find_array_ref (arg0);
+      if (ar->as && ar->as->type == AS_ASSUMED_SIZE
+	  && (ar->type == AR_FULL || ar->end[0] == nullptr))
+	/* No size available.  */
+	gfc_conv_array_parameter (&se0, arg0, true, NULL, NULL, NULL);
+      else
+	{
+	  gfc_conv_array_parameter (&se0, arg0, true, NULL, NULL, &size);
+	  gcc_assert (size);
+	}
+      ptr = se0.expr;
+    }
+  else if (arg0->rank == 0)
+    {
+      /* Scalar case.  arg0 is a C pointer to the string, and the
+	 nchars argument is required.  */
+      gfc_conv_expr (&se0, arg0);
+      ptr = se0.expr;
+      /* We already issued a diagnostic for this in parsing.  */
+      gcc_assert (nchars);
+    }
+  else
+    gcc_unreachable ();
+
+  /* Translate the fortran array pointer argument.  AFAICT the
+     representation here is that this returns the pointer location in
+     se1.expr and there is a separate decl for the length.
+     Of course none of this is properly documented....  :-(  */
+  gfc_conv_expr (&se1, fstrptr);
+  fstrptr_ptr = se1.expr;
+  gcc_assert (fstrptr->ts.u.cl && fstrptr->ts.u.cl->backend_decl);
+  fstrptr_len = fstrptr->ts.u.cl->backend_decl;
+
+  /* Translate nchars, if provided.  If we have both the array size
+     and nchars, take the minimum value.  NC is the tree expr to hold
+     the value.  */
+  if (nchars)
+    {
+      gfc_conv_expr (&se2, nchars);
+      nc = se2.expr;
+      if (size)
+	nc = fold_build2_loc (input_location, MIN_EXPR,
+			      TREE_TYPE (nc), nc, size);
+      /* Check for the case where an optional dummy parameter is
+	 passed as the optional nchars argument.  It's not supposed to
+	 be omitted if we don't also have an array size; rather than
+	 produce a run-time error, assume size 0.  */
+      if (nchars->expr_type == EXPR_VARIABLE
+	  && nchars->symtree->n.sym->attr.dummy
+	  && nchars->symtree->n.sym->attr.optional)
+	{
+	  tree present = gfc_conv_expr_present (nchars->symtree->n.sym);
+	  nc = build3_loc (input_location, COND_EXPR,
+			   TREE_TYPE (nc), present, nc,
+			   size ? size : build_int_cst (TREE_TYPE (nc), 0));
+	}
+    }
+  else
+    {
+      gcc_assert (size);
+      nc = size;
+    }
+
+  /* Collect argument side-effect statements.  */
+  gfc_add_block_to_block (&block, &se0.pre);
+  gfc_add_block_to_block (&block, &se1.pre);
+  gfc_add_block_to_block (&block, &se2.pre);
+
+  /* Generate a call to builtin_strnlen to get the C string length
+     for the output fstrptr.  */
+  ptr = gfc_evaluate_now (ptr, &block);
+  size = build_call_expr_loc (input_location,
+			      builtin_decl_explicit (BUILT_IN_STRNLEN), 2,
+			      fold_convert (const_ptr_type_node, ptr),
+			      fold_convert (size_type_node, nc));
+
+  /* Stuff the raw C char pointer PTR and actual length SIZE into fstrptr.  */
+  gfc_add_modify (&block, fstrptr_ptr,
+		  fold_convert (TREE_TYPE (fstrptr_ptr), ptr));
+  gfc_add_modify (&block, fstrptr_len,
+		  fold_convert (gfc_charlen_type_node, size));
+
+  /* Collect argument cleanups.  */
+  gfc_add_block_to_block (&block, &se2.post);
+  gfc_add_block_to_block (&block, &se1.post);
+  gfc_add_block_to_block (&block, &se0.post);
+
+  return gfc_finish_block (&block);
+}
 
 /* Save and restore floating-point state.  */
 
@@ -13531,6 +13664,10 @@ gfc_conv_intrinsic_subroutine (gfc_code *code)
     case GFC_ISYM_C_F_POINTER:
     case GFC_ISYM_C_F_PROCPOINTER:
       res = conv_isocbinding_subroutine (code);
+      break;
+
+    case GFC_ISYM_C_F_STRPOINTER:
+      res = conv_isocbinding_subroutine_strpointer (code);
       break;
 
     case GFC_ISYM_CAF_SEND:

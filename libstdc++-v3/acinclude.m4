@@ -733,7 +733,7 @@ dnl Assumes cross_compiling bits already done, and with_cross_host in
 dnl particular.
 dnl
 dnl This logic must match gcc/configure.ac's setting of gcc_gxx_include_dir.
-dnl config/gxx-include-dir.m4 must be kept consistant with this as well.
+dnl config/gxx-include-dir.m4 must be kept consistent with this as well.
 AC_DEFUN([GLIBCXX_EXPORT_INSTALL_INFO], [
   glibcxx_toolexecdir=no
   glibcxx_toolexeclibdir=no
@@ -1785,6 +1785,8 @@ AC_DEFUN([GLIBCXX_ENABLE_LIBSTDCXX_TIME], [
       # VxWorks has nanosleep as soon as the kernel is configured with
       # INCLUDE_POSIX_TIMERS, which is normally/most-often the case.
       vxworks*)
+        ac_has_clock_monotonic=yes
+        ac_has_clock_realtime=yes
         ac_has_nanosleep=yes
         ;;
       gnu* | linux* | kfreebsd*-gnu | knetbsd*-gnu)
@@ -3755,6 +3757,15 @@ AC_DEFUN([GLIBCXX_ENABLE_ATOMIC_BUILTINS], [
     esac
   fi
 
+  # The $glibcxx_builddir/include/$target/bits/atomic_word.h header is created
+  # by include/Makefile so isn't available during configure. Copy it from the
+  # source dir to $PWD so that we don't include it using an absolute path,
+  # which does not work for win32 native builds (PR libstdc++/125312).
+  if ! $LN_S "${glibcxx_srcdir}/config/${atomic_word_dir}/atomic_word.h" ./
+  then
+    AC_MSG_ERROR([cannot create ./atomic_word.h])
+  fi
+
   if test "$atomic_builtins_link_tests" = yes; then
 
     # Do link tests.
@@ -3763,7 +3774,7 @@ AC_DEFUN([GLIBCXX_ENABLE_ATOMIC_BUILTINS], [
 
     AC_CACHE_CHECK([for atomic builtins for _Atomic_word],
 	glibcxx_cv_atomic_word,
-	[AC_TRY_LINK([#include "${glibcxx_srcdir}/config/$atomic_word_dir/atomic_word.h"],
+	[AC_TRY_LINK([#include "atomic_word.h"],
 		     [_Atomic_word a = 0, b;
 		      b = __atomic_fetch_add(&a, 1, __ATOMIC_ACQ_REL);],
 		     [glibcxx_cv_atomic_word=yes],
@@ -3779,7 +3790,7 @@ AC_DEFUN([GLIBCXX_ENABLE_ATOMIC_BUILTINS], [
 
     cat > conftest.$ac_ext << EOF
 [#]line __oline__ "configure"
-[#]include "${glibcxx_srcdir}/config/$atomic_word_dir/atomic_word.h"
+[#]include "atomic_word.h"
 int main()
 {
   _Atomic_word a = 0, b;
@@ -3798,6 +3809,8 @@ EOF
     AC_MSG_RESULT($glibcxx_cv_atomic_word)
     rm -f conftest*
   fi
+
+  rm -f ./atomic_word.h
 
   CXXFLAGS="$old_CXXFLAGS"
   AC_LANG_RESTORE
@@ -4013,7 +4026,7 @@ if test x$enable_symvers = xsun ; then
     *)
       # Unlikely to work.
       AC_MSG_WARN([=== You have requested Sun symbol versioning, but])
-      AC_MSG_WARN([=== you are not targetting Solaris 2.])
+      AC_MSG_WARN([=== you are not targeting Solaris 2.])
       AC_MSG_WARN([=== Symbol versioning will be disabled.])
       enable_symvers=no
       ;;
@@ -4085,7 +4098,7 @@ changequote([,])dnl
 fi
 
 # For libtool versioning info, format is CURRENT:REVISION:AGE
-libtool_VERSION=6:35:0
+libtool_VERSION=6:36:0
 
 # Everything parsed; figure out what files and settings to use.
 case $enable_symvers in

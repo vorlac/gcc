@@ -101,6 +101,7 @@
    you make changes here, make them also there.  */
 #define ASM_CPU_SPEC \
 "%{mcpu=native: %(asm_cpu_native); \
+  mcpu=future: -mfuture; \
   mcpu=power11: -mpower11; \
   mcpu=power10: -mpower10; \
   mcpu=power9: -mpower9; \
@@ -532,9 +533,13 @@ extern int rs6000_vector_align[];
 				 || TARGET_VSX				 \
 				 || TARGET_HARD_FLOAT)
 
-/* E500 cores only support plain "sync", not lwsync.  */
+/* E500 and MPC8xx cores require all should-be-zero bits in sync to
+   actually be zero; using lwsync (L=1) causes a fault on these cores.
+   Classic cores (601, 603, 604, 750 etc.) simply ignore the L field
+   and always do a full hwsync.  */
 #define TARGET_NO_LWSYNC (rs6000_cpu == PROCESSOR_PPC8540 \
-			  || rs6000_cpu == PROCESSOR_PPC8548)
+			  || rs6000_cpu == PROCESSOR_PPC8548 \
+			  || rs6000_cpu == PROCESSOR_MPCCORE)
 
 
 /* Which machine supports the various reciprocal estimate instructions.  */
@@ -1773,10 +1778,10 @@ extern scalar_int_mode rs6000_pmode;
    In the PowerPC, we use this to adjust the length of an instruction if one or
    more prefixed instructions are generated, using the attribute
    num_prefixed_insns.  A prefixed instruction is 8 bytes instead of 4, but the
-   hardware requires that a prefied instruciton does not cross a 64-byte
+   hardware requires that a prefied instruction does not cross a 64-byte
    boundary.  This means the compiler has to assume the length of the first
    prefixed instruction is 12 bytes instead of 8 bytes.  Since the length is
-   already set for the non-prefixed instruction, we just need to udpate for the
+   already set for the non-prefixed instruction, we just need to update for the
    difference.  */
 
 #define ADJUST_INSN_LENGTH(INSN,LENGTH)					\

@@ -1361,7 +1361,7 @@ ec_descr_t __gg__exception_table[] = {
   { ec_argument_imp_command_e,   uc_category_implementor_e,
    "EC-ARGUMENT-IMP-COMMAND", "COMMAND-LINE Subscript out of bounds" },
   { ec_argument_imp_environment_e, uc_category_implementor_e,
-   "EC-ARGUMENT-IMP-ENVIRONMENT", "Envrionment Variable is not defined" },
+   "EC-ARGUMENT-IMP-ENVIRONMENT", "Environment Variable is not defined" },
 
   { ec_bound_e,                  ec_category_none_e,
    "EC-BOUND", "Boundary violation" },
@@ -1452,6 +1452,11 @@ ec_descr_t __gg__exception_table[] = {
   { ec_function_ptr_null_e,      uc_category_fatal_e,
    "EC-FUNCTION-PTR-NULL",
     "Function pointer used in calling a function is NULL" },
+
+  { ec_imp_e,                     ec_category_none_e,
+   "EC-IMP", "GCC-defined exception" },
+  { ec_imp_iconv_open_e,          uc_category_fatal_e,
+   "EC-IMP-ICONV-OPEN", "Encoding conversion unavailable for requested pair" },
 
   { ec_io_e,                     ec_category_none_e,
    "EC-IO", "Input-output exception" },

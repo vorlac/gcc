@@ -869,57 +869,22 @@
    (set_attr "mode"	"SI")
    (set_attr "length"	"3")])
 
-(define_insn_and_split "*splice_bits"
-  [(set (match_operand:SI 0 "register_operand" "=a")
-	(ior:SI (and:SI (match_operand:SI 1 "register_operand" "r")
-			(match_operand:SI 3 "const_int_operand" ""))
-		(and:SI (match_operand:SI 2 "register_operand" "r")
-			(match_operand:SI 4 "const_int_operand" ""))))]
-
-  "!optimize_debug && optimize
-   && INTVAL (operands[3]) + INTVAL (operands[4]) == -1
-   && (exact_log2 (INTVAL (operands[3]) + 1) > 16
-       || exact_log2 (INTVAL (operands[4]) + 1) > 16)"
-  "#"
-  "&& can_create_pseudo_p ()"
-  [(set (match_dup 5)
-	(ashift:SI (match_dup 1)
-		   (match_dup 4)))
-   (set (match_dup 6)
-	(lshiftrt:SI (match_dup 2)
-		     (match_dup 3)))
-   (set (match_dup 0)
-	(ior:SI (lshiftrt:SI (match_dup 5)
-			     (match_dup 4))
-		(ashift:SI (match_dup 6)
-			   (match_dup 3))))]
-{
-  int shift;
-  if (INTVAL (operands[3]) < 0)
-    {
-      rtx x;
-      x = operands[1], operands[1] = operands[2], operands[2] = x;
-      x = operands[3], operands[3] = operands[4], operands[4] = x;
-    }
-  shift = floor_log2 (INTVAL (operands[3]) + 1);
-  operands[3] = GEN_INT (shift);
-  operands[4] = GEN_INT (32 - shift);
-  operands[5] = gen_reg_rtx (SImode);
-  operands[6] = gen_reg_rtx (SImode);
-}
-  [(set_attr "type"	"arith")
-   (set_attr "mode"	"SI")
-   (set (attr "length")
-	(if_then_else (match_test "TARGET_DENSITY
-				   && (INTVAL (operands[3]) == 0x7FFFFFFF
-				       || INTVAL (operands[4]) == 0x7FFFFFFF)")
-		      (const_int 11)
-		      (const_int 12)))])
-
 
 ;; Zero-extend instructions.
 
-(define_insn "zero_extend<mode>si2"
+(define_expand "zero_extend<mode>si2"
+  [(set (match_operand:SI 0 "register_operand")
+	(zero_extend:SI (match_operand:HQI 1 "nonimmed_operand")))]
+  ""
+{
+  if (xtensa_expand_load_force_l32 (operands, SImode, <MODE>mode, true))
+    ;
+  else
+    emit_insn (gen_zero_extend<mode>si2_internal (operands[0], operands[1]));
+  DONE;
+})
+
+(define_insn "zero_extend<mode>si2_internal"
   [(set (match_operand:SI 0 "register_operand")
 	(zero_extend:SI (match_operand:HQI 1 "nonimmed_operand")))]
   ""
@@ -937,7 +902,9 @@
 	(sign_extend:SI (match_operand:HI 1 "register_operand" "")))]
   ""
 {
-  if (sext_operand (operands[1], HImode))
+  if (xtensa_expand_load_force_l32 (operands, SImode, HImode, false))
+    ;
+  else if (sext_operand (operands[1], HImode))
     emit_insn (gen_extendhisi2_internal (operands[0], operands[1]));
   else
     xtensa_extend_reg (operands[0], operands[1]);
@@ -959,7 +926,9 @@
 	(sign_extend:SI (match_operand:QI 1 "register_operand" "")))]
   ""
 {
-  if (TARGET_SEXT)
+  if (xtensa_expand_load_force_l32 (operands, SImode, QImode, false))
+    ;
+  else if (TARGET_SEXT)
     emit_insn (gen_extendqisi2_internal (operands[0], operands[1]));
   else
     xtensa_extend_reg (operands[0], operands[1]);
@@ -1110,7 +1079,35 @@
    (set_attr "mode"	"SI")
    (set_attr "length"	"6")])
 
-(define_insn "insvsi"
+(define_expand "insvsi"
+  [(set (zero_extract:SI (match_operand:SI 0 "register_operand")
+			 (match_operand:SI 1 "extui_fldsz_operand")
+			 (match_operand:SI 2 "const_int_operand"))
+	(match_operand:SI 3 "register_operand"))]
+  ""
+{
+  if (TARGET_DEPBITS)
+    emit_insn (gen_insvsi_internal (operands[0], operands[1], operands[2],
+				    operands[3]));
+  else
+    {
+      int fldsz = INTVAL (operands[1]), shift;
+      rtx temp = gen_reg_rtx (SImode), mask;
+      if (BITS_BIG_ENDIAN)
+	shift = (32 - (fldsz + INTVAL (operands[2]))) & 0x1f;
+      else
+	shift = INTVAL (operands[2]) & 0x1f;
+      mask = GEN_INT (((1 << fldsz) - 1) << shift);
+      emit_insn (shift ? gen_ashlsi3 (temp, operands[3], GEN_INT (shift))
+		       : gen_rtx_SET (temp, operands[3]));
+      emit_insn (gen_xorsi3 (temp, operands[0], temp));
+      emit_insn (gen_andsi3 (temp, temp, force_reg (SImode, mask)));
+      emit_insn (gen_xorsi3 (operands[0], operands[0], temp));
+    }
+  DONE;
+})
+
+(define_insn "insvsi_internal"
   [(set (zero_extract:SI (match_operand:SI 0 "register_operand" "+a")
 			 (match_operand:SI 1 "extui_fldsz_operand" "")
 			 (match_operand:SI 2 "const_int_operand" ""))
@@ -1302,6 +1299,8 @@
 	(match_operand:HI 1 "general_operand" ""))]
   ""
 {
+  if (xtensa_expand_load_force_l32 (operands, HImode, HImode, true))
+    DONE;
   if (xtensa_emit_move_sequence (operands, HImode))
     DONE;
 })
@@ -1331,6 +1330,8 @@
 	(match_operand:QI 1 "general_operand" ""))]
   ""
 {
+  if (xtensa_expand_load_force_l32 (operands, QImode, QImode, true))
+    DONE;
   if (xtensa_emit_move_sequence (operands, QImode))
     DONE;
 })
@@ -1621,7 +1622,7 @@
 		[(match_operand:SI 1 "register_operand" "r")
 		 (ashift:SI (match_operand:SI 2 "register_operand" "r")
 			    (const_int 3))]))]
-  "!optimize_debug && optimize"
+  ""
 {
   switch (GET_CODE (operands[3]))
     {

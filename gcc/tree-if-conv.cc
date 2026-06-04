@@ -815,7 +815,7 @@ idx_within_array_bound (tree ref, tree *idx, void *dta)
       || !high || TREE_CODE (high) != INTEGER_CST)
     return false;
 
-  /* Check if the intial idx is within bound.  */
+  /* Check if the initial idx is within bound.  */
   if (wi::to_widest (init) < wi::to_widest (low)
       || wi::to_widest (init) > wi::to_widest (high))
     return false;
@@ -893,9 +893,9 @@ base_object_writable (tree ref)
    iteration unconditionally.
 
    Returns true for the memory reference in STMT, same memory reference
-   is read or written unconditionally atleast once and the base memory
+   is read or written unconditionally at least once and the base memory
    reference is written unconditionally once.  This is to check reference
-   will not write fault.  Also retuns true if the memory reference is
+   will not write fault.  Also returns true if the memory reference is
    unconditionally read once then we are conditionally writing to memory
    which is defined as read and write and is bound to the definition
    we are seeing.  */
@@ -938,7 +938,7 @@ ifcvt_memrefs_wont_trap (gimple *stmt, vec<data_reference_p> drs)
       if (DR_IS_READ (a))
 	return true;
 
-      /* an unconditionaly write won't trap if the base is written
+      /* an unconditionally write won't trap if the base is written
          to unconditionally.  */
       if ((base_master_dr
 	   && DR_BASE_W_UNCONDITIONALLY (*base_master_dr))
@@ -1202,6 +1202,12 @@ if_convertible_stmt_p (gimple *stmt, vec<data_reference_p> refs)
 	      }
 	  }
 
+	/* Check if it's a prefetch.  Many ISAs contain vectorized and/or
+	   conditional prefetches so if-convert should convert them or remove
+	   them.  Mark them as supported.  */
+	if (gimple_call_builtin_p (stmt, BUILT_IN_PREFETCH))
+	  return true;
+
 	/* There are some IFN_s that are used to replace builtins but have the
 	   same semantics.  Even if MASK_CALL cannot handle them vectorable_call
 	   will insert the proper selection, so do not block conversion.  */
@@ -1379,7 +1385,7 @@ get_loop_body_in_if_conv_order (const class loop *loop)
   /* Go through loop and reject if-conversion or lowering of bitfields if we
      encounter statements we do not believe the vectorizer will be able to
      handle.  If adding a new type of statement here, make sure
-     'ifcvt_local_dce' is also able to handle it propertly.  */
+     'ifcvt_local_dce' is also able to handle it properly.  */
   for (index = 0; index < loop->num_nodes; index++)
     {
       basic_block bb = blocks[index];
@@ -2277,15 +2283,17 @@ again:
   if (!gimple_extract_op (arg0_def_stmt, &arg0_op))
     return;
 
-  /* At this point there should be no ssa names occuring in abnormals.  */
-  gcc_assert (!arg0_op.operands_occurs_in_abnormal_phi ());
+  /* Might pick up abnormals from previous bbs so stop the loop.  */
+  if (arg0_op.operands_occurs_in_abnormal_phi ())
+    return;
 
   gimple *arg1_def_stmt = SSA_NAME_DEF_STMT (*arg1);
   if (!gimple_extract_op (arg1_def_stmt, &arg1_op))
     return;
 
-  /* At this point there should be no ssa names occuring in abnormals.  */
-  gcc_assert (!arg1_op.operands_occurs_in_abnormal_phi ());
+  /* Might pick up abnormals from previous bbs so stop the loop.  */
+  if (arg1_op.operands_occurs_in_abnormal_phi ())
+    return;
 
   /* No factoring can happen if the codes are different
      or the number operands.  */
@@ -2309,10 +2317,10 @@ again:
      constant masks (operand 2).  The target might not support it
      and that might be invalid to do as such. Also with constants
      masks, the number of elements of the mask type does not need
-     to match tne number of elements of other operands and can be
+     to match the number of elements of other operands and can be
      arbitrary integral vector type so factoring that out can't work.
      Note in the case where one mask is a constant and the other is not,
-     the next check for compatiable types will reject the case the
+     the next check for compatible types will reject the case the
      constant mask has the incompatible type.  */
   if (arg1_op.code == VEC_PERM_EXPR && opnum == 2
       && TREE_CODE (new_arg0) == VECTOR_CST
@@ -2540,7 +2548,7 @@ predicate_scalar_phi (gphi *phi, gimple_stmt_iterator *gsi, bool loop_versioned)
       else
 	cond = bb_predicate (first_edge->src);
 
-      /* Gimplify the condition to a valid cond-expr conditonal operand.  */
+      /* Gimplify the condition to a valid cond-expr conditional operand.  */
       cond = gen_simplified_condition (cond, cond_set);
       cond = force_gimple_operand_gsi (gsi, unshare_expr (cond), true,
 				       NULL_TREE, true, GSI_SAME_STMT);
@@ -2654,7 +2662,7 @@ predicate_scalar_phi (gphi *phi, gimple_stmt_iterator *gsi, bool loop_versioned)
 	  swap = true;
 	  cond = TREE_OPERAND (cond, 0);
 	}
-      /* Gimplify the condition to a valid cond-expr conditonal operand.  */
+      /* Gimplify the condition to a valid cond-expr conditional operand.  */
       cond = force_gimple_operand_gsi (gsi, unshare_expr (cond), true,
 				       NULL_TREE, true, GSI_SAME_STMT);
       if (!(is_cond_scalar_reduction (phi, &reduc, arg0 , arg1,
@@ -3120,6 +3128,16 @@ predicate_statements (loop_p loop)
 	    ;
 	  else if (is_false_predicate (cond)
 		   && gimple_vdef (stmt))
+	    {
+	      unlink_stmt_vdef (stmt);
+	      gsi_remove (&gsi, true);
+	      release_defs (stmt);
+	      continue;
+	    }
+	  /* For now, just drop prefetches.  Do it now to remove any possible
+	     aliasing check failures from the address calculations of the
+	     prefetch.  Vect would be too late in that regard.  */
+	  else if (gimple_call_builtin_p (stmt, BUILT_IN_PREFETCH))
 	    {
 	      unlink_stmt_vdef (stmt);
 	      gsi_remove (&gsi, true);

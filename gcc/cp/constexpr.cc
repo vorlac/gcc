@@ -878,7 +878,7 @@ cx_check_missing_mem_inits (tree ctype, tree body, bool complain)
 	    }
 	  ftype = TREE_TYPE (field);
 	  if (!ftype || !TYPE_P (ftype) || !COMPLETE_TYPE_P (ftype))
-	    /* A flexible array can't be intialized here, so don't complain
+	    /* A flexible array can't be initialized here, so don't complain
 	       that it isn't.  */
 	    continue;
 	  if (is_empty_field (field))
@@ -920,7 +920,7 @@ cx_check_missing_mem_inits (tree ctype, tree body, bool complain)
 }
 
 /* We are processing the definition of the constexpr function FUN.
-   Check that its body fulfills the apropriate requirements and
+   Check that its body fulfills the appropriate requirements and
    enter it in the constexpr function definition table.  */
 
 void
@@ -2535,6 +2535,7 @@ cxx_eval_builtin_function_call (const constexpr_ctx *ctx, tree t, tree fun,
 
   int strops = 0;
   int strret = 0;
+  bool bos = false;
   if (fndecl_built_in_p (fun, BUILT_IN_NORMAL))
     switch (DECL_FUNCTION_CODE (fun))
       {
@@ -2576,6 +2577,10 @@ cxx_eval_builtin_function_call (const constexpr_ctx *ctx, tree t, tree fun,
 	  }
 	*non_constant_p = true;
 	return t;
+      case BUILT_IN_OBJECT_SIZE:
+      case BUILT_IN_DYNAMIC_OBJECT_SIZE:
+	bos = ctx->manifestly_const_eval == mce_true;
+	break;
       default:
 	break;
       }
@@ -2633,6 +2638,13 @@ cxx_eval_builtin_function_call (const constexpr_ctx *ctx, tree t, tree fun,
 	}
 
       args[i] = arg;
+    }
+  if (bos)
+    {
+      tree arg = args[0];
+      STRIP_NOPS (arg);
+      if (TREE_CODE (arg) == ADDR_EXPR)
+	args[0] = arg;
     }
 
   bool save_ffbcp = force_folding_builtin_constant_p;
@@ -3338,7 +3350,7 @@ modifying_const_object_error (tree expr, tree obj)
 }
 
 /* Return true if FNDECL is a replaceable global allocation function that
-   should be useable during constant expression evaluation.  */
+   should be usable during constant expression evaluation.  */
 
 static inline bool
 cxx_replaceable_global_alloc_fn (tree fndecl)
@@ -3351,7 +3363,7 @@ cxx_replaceable_global_alloc_fn (tree fndecl)
 }
 
 /* Return true if FNDECL is a placement new function that should be
-   useable during constant expression evaluation of std::construct_at.  */
+   usable during constant expression evaluation of std::construct_at.  */
 
 static inline bool
 cxx_placement_new_fn (tree fndecl)
@@ -4639,6 +4651,10 @@ cxx_eval_call_expression (const constexpr_ctx *ctx, tree t,
 	  /* Only cache a permitted result of a constant expression.  */
 	  if (cacheable && !reduced_constant_expression_p (result))
 	    cacheable = false;
+
+	  /* Only cache a result without contract violations.  */
+	  if (cacheable && ctx->global->contract_statement)
+	    cacheable = false;
 	}
       else
 	/* Couldn't get a function copy to evaluate.  */
@@ -4673,7 +4689,7 @@ cxx_eval_call_expression (const constexpr_ctx *ctx, tree t,
 
      However, in C++20, a constexpr constructor doesn't necessarily have
      to initialize all the fields, so we don't clear CONSTRUCTOR_NO_CLEARING
-     in order to detect reading an unitialized object in constexpr instead
+     in order to detect reading an uninitialized object in constexpr instead
      of value-initializing it.  (reduced_constant_expression_p is expected to
      take care of clearing the flag.)  */
   if (TREE_CODE (result) == CONSTRUCTOR
@@ -4746,10 +4762,9 @@ reduced_constant_expression_p (tree t, tree sz /* = NULL_TREE */)
 	  else if (cxx_dialect >= cxx20
 		   && TREE_CODE (TREE_TYPE (t)) == UNION_TYPE)
 	    {
-	      if (CONSTRUCTOR_NELTS (t) == 0)
-		/* An initialized union has a constructor element.  */
-		return false;
-	      /* And it only initializes one member.  */
+	      /* A union can have at most one active member.  A union with no
+		 active member has no constituent values, so all constituent
+		 values are constant.  */
 	      field = NULL_TREE;
 	    }
 	  else
@@ -6703,7 +6718,12 @@ init_subob_ctx (const constexpr_ctx *ctx, constexpr_ctx &new_ctx,
   else if (ctx->object)
     ctxtype = TREE_TYPE (ctx->object);
   else
-    gcc_unreachable ();
+    {
+      /* This can happen if the enclosing object is also an empty subobject
+	 (c++/125315).  */
+      gcc_checking_assert (is_empty_field (index));
+      return;
+    }
 
   if (VECTOR_TYPE_P (type)
       && VECTOR_TYPE_P (ctxtype)
@@ -6725,7 +6745,7 @@ init_subob_ctx (const constexpr_ctx *ctx, constexpr_ctx &new_ctx,
 	new_ctx.object = build_ctor_subob_ref (index, type, ctx->object);
     }
 
-  if (is_empty_class (type)
+  if (is_empty_field (index)
       && TREE_CODE (ctxtype) != UNION_TYPE)
     /* Leave ctor null for an empty subobject of a non-union class, they aren't
        represented in the result of evaluation.  */
@@ -6821,7 +6841,11 @@ cxx_eval_bare_aggregate (const constexpr_ctx *ctx, tree t,
       /* Like in cxx_eval_store_expression, omit entries for empty fields.  */
       bool no_slot = new_ctx.ctor == NULL_TREE;
       int pos_hint = -1;
-      if (new_ctx.ctor != ctx->ctor && !no_slot)
+      if (!ctx->ctor)
+	/* The enclosing object could be an empty subobject so we have no
+	   CONSTRUCTOR (c++/125336).  */
+	gcc_checking_assert (is_empty_class (type));
+      else if (new_ctx.ctor != ctx->ctor && !no_slot)
 	{
 	  /* If we built a new CONSTRUCTOR, attach it now so that other
 	     initializers can refer to it.  */
@@ -6863,16 +6887,7 @@ cxx_eval_bare_aggregate (const constexpr_ctx *ctx, tree t,
 	/* This is an initializer for an empty field; now that we've
 	   checked that it's constant, we can ignore it.  */
 	changed = true;
-      else if (index
-	       && (TREE_CODE (index) == NOP_EXPR
-		   || TREE_CODE (index) == POINTER_PLUS_EXPR))
-	{
-	  /* Old representation of empty bases.  FIXME remove.  */
-	  gcc_checking_assert (false);
-	  gcc_assert (is_empty_class (TREE_TYPE (TREE_TYPE (index))));
-	  changed = true;
-	}
-      else
+      else if (ctx->ctor)
 	{
 	  if (TREE_CODE (type) == UNION_TYPE
 	      && (*p)->last().index != index)

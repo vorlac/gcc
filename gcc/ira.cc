@@ -4032,7 +4032,7 @@ combine_and_move_insns (void)
 	  /* Append the REG_DEAD notes from def_insn.  */
 	  for (rtx *p = &REG_NOTES (def_insn); (link = *p) != 0; )
 	    {
-	      if (REG_NOTE_KIND (XEXP (link, 0)) == REG_DEAD)
+	      if (REG_NOTE_KIND (link) == REG_DEAD)
 		{
 		  *p = XEXP (link, 1);
 		  XEXP (link, 1) = REG_NOTES (use_insn);
@@ -5384,7 +5384,7 @@ struct sloc
 {
   rtx_insn *insn; /* Insn where the scratch was.  */
   int nop;  /* Number of the operand which was a scratch.  */
-  unsigned regno; /* regno gnerated instead of scratch */
+  unsigned regno; /* regno generated instead of scratch */
   int icode;  /* Original icode from which scratch was removed.  */
 };
 
@@ -5469,7 +5469,7 @@ ira_remove_insn_scratches (rtx_insn *insn, bool all_p, FILE *dump_file,
 	  insn_changed_p = true;
 	  *loc = reg = get_reg (*loc);
 	  ira_register_new_scratch_op (insn, i, INSN_CODE (insn));
-	  if (ira_dump_file != NULL)
+	  if (dump_file != NULL)
 	    fprintf (dump_file,
 		     "Removing SCRATCH to p%u in insn #%u (nop %d)\n",
 		     REGNO (reg), INSN_UID (insn), i);

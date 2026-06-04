@@ -30,7 +30,6 @@ along with GCC; see the file COPYING3.  If not see
 #include "fold-const.h"
 #include "cfganal.h"
 #include "tree-eh.h"
-#include "gimplify.h"
 #include "gimple-iterator.h"
 #include "tree-cfg.h"
 #include "tree-ssa-loop-manip.h"
@@ -262,7 +261,7 @@ static bitmap_obstack lim_bitmap_obstack;
 static obstack mem_ref_obstack;
 
 static bool ref_indep_loop_p (class loop *, im_mem_ref *, dep_kind);
-static bool ref_always_accessed_p (class loop *, im_mem_ref *, bool);
+static bool ref_always_stored_p (class loop *, im_mem_ref *);
 static bool refs_independent_p (im_mem_ref *, im_mem_ref *, bool = true);
 
 /* Minimum cost of an expensive expression.  */
@@ -494,7 +493,7 @@ get_coldest_out_loop (class loop *outermost_loop, class loop *loop,
 	      || flow_loop_nested_p (outermost_loop, loop));
 
   /* If bb_colder_than_loop_preheader returns false due to three-state
-    comparision, OUTERMOST_LOOP is returned finally to preserve the behavior.
+    comparison, OUTERMOST_LOOP is returned finally to preserve the behavior.
     Otherwise, return the coldest loop between OUTERMOST_LOOP and LOOP.  */
   if (curr_bb && bb_colder_than_loop_preheader (curr_bb, loop))
     return NULL;
@@ -856,7 +855,7 @@ determine_max_movement (gimple *stmt, bool must_preserve_exec)
 	  if (!extract_true_false_args_from_phi (dom, phi, NULL, NULL))
 	    return false;
 
-	/* Check if one of the depedent statement is a vector compare whether
+	/* Check if one of the dependent statement is a vector compare whether
 	   the target supports it,  otherwise it's invalid to hoist it out of
 	   the gcond it belonged to.  */
 	if (VECTOR_TYPE_P (TREE_TYPE (gimple_cond_lhs (cond))))
@@ -2320,10 +2319,17 @@ execute_sm (class loop *loop, im_mem_ref *ref,
   fmt_data.orig_loop = loop;
   for_each_index (&ref->mem.ref, force_move_till, &fmt_data);
 
-  bool always_stored = ref_always_accessed_p (loop, ref, true);
+  bool always_stored = ref_always_stored_p (loop, ref);
   if (maybe_mt
       && (bb_in_transaction (loop_preheader_edge (loop)->src)
-	  || (ref_can_have_store_data_races (ref->mem.ref) && ! always_stored)))
+	  || (ref_can_have_store_data_races (ref->mem.ref) && ! always_stored)
+	  /* Do not speculate a load/store when that's not a noop, either
+	     because the mode cannot be transferred or because there's
+	     UB involved for out-of-bound values.  */
+	  || !mode_can_transfer_bits (TYPE_MODE (TREE_TYPE (ref->mem.ref)))
+	  || TREE_CODE (TREE_TYPE (ref->mem.ref)) == BOOLEAN_TYPE
+	  || (TREE_CODE (ref->mem.ref) == COMPONENT_REF
+	      && DECL_BIT_FIELD (TREE_OPERAND (ref->mem.ref, 1)))))
     multi_threaded_model_p = true;
 
   if (multi_threaded_model_p && !use_other_flag_var)
@@ -2410,7 +2416,7 @@ execute_sm_exit (class loop *loop, edge ex, vec<seq_entry> &seq,
 	      tree lhs = gimple_assign_lhs (ref->accesses_in_loop[0].stmt);
 	      if (dump_file && (dump_flags & TDF_DETAILS))
 		{
-		  fprintf (dump_file, "Re-issueing dependent ");
+		  fprintf (dump_file, "Re-issuing dependent ");
 		  print_generic_expr (dump_file, unshare_expr (seq[i-1].from));
 		  fprintf (dump_file, " of ");
 		  print_generic_expr (dump_file, lhs);
@@ -2425,7 +2431,7 @@ execute_sm_exit (class loop *loop, edge ex, vec<seq_entry> &seq,
 	    {
 	      if (dump_file && (dump_flags & TDF_DETAILS))
 		{
-		  fprintf (dump_file, "Re-issueing dependent store of ");
+		  fprintf (dump_file, "Re-issuing dependent store of ");
 		  print_generic_expr (dump_file, ref->mem.ref);
 		  fprintf (dump_file, " from loop %d on exit %d -> %d\n",
 			   loop->num, ex->src->index, ex->dest->index);
@@ -2456,7 +2462,7 @@ execute_sm_exit (class loop *loop, edge ex, vec<seq_entry> &seq,
 
 /* Push the SM candidate at index PTR in the sequence SEQ down until
    we hit the next SM candidate.  Return true if that went OK and
-   false if we could not disambiguate agains another unrelated ref.
+   false if we could not disambiguate against another unrelated ref.
    Update *AT to the index where the candidate now resides.  */
 
 static bool
@@ -2772,7 +2778,7 @@ hoist_memory_references (class loop *loop, bitmap mem_refs,
   bitmap_iterator bi;
 
   /* There's a special case we can use ordered re-materialization for
-     conditionally excuted stores which is when all stores in the loop
+     conditionally executed stores which is when all stores in the loop
      happen in the same basic-block.  In that case we know we'll reach
      all stores and thus can simply process that BB and emit a single
      conditional block of ordered materializations.  See PR102436.  */
@@ -3098,36 +3104,29 @@ hoist_memory_references (class loop *loop, bitmap mem_refs,
     delete (*iter).second;
 }
 
-class ref_always_accessed
+class ref_always_stored
 {
 public:
-  ref_always_accessed (class loop *loop_, bool stored_p_)
-      : loop (loop_), stored_p (stored_p_) {}
+  ref_always_stored (class loop *loop_)
+      : loop (loop_) {}
   bool operator () (mem_ref_loc *loc);
   class loop *loop;
-  bool stored_p;
 };
 
 bool
-ref_always_accessed::operator () (mem_ref_loc *loc)
+ref_always_stored::operator () (mem_ref_loc *loc)
 {
-  class loop *must_exec;
+  /* Make sure the statement is a store.  */
+  tree lhs = gimple_get_lhs (loc->stmt);
+  if (!lhs
+      || !(DECL_P (lhs) || REFERENCE_CLASS_P (lhs)))
+    return false;
 
   struct lim_aux_data *lim_data = get_lim_data (loc->stmt);
   if (!lim_data)
     return false;
 
-  /* If we require an always executed store make sure the statement
-     is a store.  */
-  if (stored_p)
-    {
-      tree lhs = gimple_get_lhs (loc->stmt);
-      if (!lhs
-	  || !(DECL_P (lhs) || REFERENCE_CLASS_P (lhs)))
-	return false;
-    }
-
-  must_exec = lim_data->always_executed_in;
+  class loop *must_exec = lim_data->always_executed_in;
   if (!must_exec)
     return false;
 
@@ -3138,14 +3137,12 @@ ref_always_accessed::operator () (mem_ref_loc *loc)
   return false;
 }
 
-/* Returns true if REF is always accessed in LOOP.  If STORED_P is true
-   make sure REF is always stored to in LOOP.  */
+/* Returns true if REF is always stored in LOOP.  */
 
 static bool
-ref_always_accessed_p (class loop *loop, im_mem_ref *ref, bool stored_p)
+ref_always_stored_p (class loop *loop, im_mem_ref *ref)
 {
-  return for_all_locs_in_loop (loop, ref,
-			       ref_always_accessed (loop, stored_p));
+  return for_all_locs_in_loop (loop, ref, ref_always_stored (loop));
 }
 
 /* Returns true if LOAD_REF and STORE_REF form a "self write" pattern
@@ -3378,7 +3375,7 @@ can_sm_ref_p (class loop *loop, im_mem_ref *ref)
 	 stored to later anyway.  So this would only guard
 	 the load we need to emit.  Thus when the ref is not
 	 loaded we can elide this completely?  */
-      && !ref_always_accessed_p (loop, ref, true))
+      && !ref_always_stored_p (loop, ref))
     return false;
 
   /* Verify all loads of ref can be hoisted.  */

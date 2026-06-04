@@ -254,15 +254,15 @@
 
 (define_predicate "aarch64_shift_imm_si"
   (and (match_code "const_int")
-       (match_test "(unsigned HOST_WIDE_INT) INTVAL (op) < 32")))
+       (match_test "UINTVAL (op) < 32")))
 
 (define_predicate "aarch64_shift_imm_di"
   (and (match_code "const_int")
-       (match_test "(unsigned HOST_WIDE_INT) INTVAL (op) < 64")))
+       (match_test "UINTVAL (op) < 64")))
 
 (define_predicate "aarch64_shift_imm64_di"
   (and (match_code "const_int")
-       (match_test "(unsigned HOST_WIDE_INT) INTVAL (op) <= 64")))
+       (match_test "UINTVAL (op) <= 64")))
 
 (define_predicate "aarch64_reg_or_shift_imm_si"
   (ior (match_operand 0 "register_operand")
@@ -276,7 +276,7 @@
 ;; range 0..4.
 (define_predicate "aarch64_imm3"
   (and (match_code "const_int")
-       (match_test "(unsigned HOST_WIDE_INT) INTVAL (op) <= 4")))
+       (match_test "UINTVAL (op) <= 4")))
 
 ;; The imm2 field is a 2-bit field that only accepts immediates in the
 ;; range 0..3.
@@ -644,6 +644,15 @@
        (ior (match_operand 0 "register_operand")
 	    (match_test "op == const0_rtx")
 	    (match_operand 0 "aarch64_simd_or_scalar_imm_zero"))))
+
+;; Same as above, but a zero const_vector is only allowed when a
+;; corresponding single-insn (i.e. not involving MOVPRFX) alternative is
+;; enabled.  Used for zeroing predication forms of some SVE2.2
+;; instructions.
+(define_predicate "aarch64_simd_reg_or_direct_zero"
+  (ior (and (match_test "TARGET_SVE2p2_OR_SME2p2")
+	    (match_operand 0 "aarch64_simd_reg_or_zero"))
+       (match_operand 0 "register_operand")))
 
 (define_predicate "aarch64_simd_reg_or_minus_one"
   (ior (match_operand 0 "register_operand")

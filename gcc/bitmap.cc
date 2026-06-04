@@ -414,14 +414,14 @@ bitmap_list_find_element (bitmap head, unsigned int indx)
 
 /* Splay-tree view of bitmaps.
 
-   This is an almost one-to-one the implementatin of the simple top-down
+   This is an almost one-to-one the implementation of the simple top-down
    splay tree in Sleator and Tarjan's "Self-adjusting Binary Search Trees".
    It is probably not the most efficient form of splay trees, but it should
    be good enough to experiment with this idea of bitmaps-as-trees.
 
    For all functions below, the variable or function argument "t" is a node
    in the tree, and "e" is a temporary or new node in the tree.  The rest
-   is sufficiently straigh-forward (and very well explained in the paper)
+   is sufficiently straight-forward (and very well explained in the paper)
    that comment would only clutter things.  */
 
 static inline void
@@ -1308,13 +1308,13 @@ bitmap_clear_first_set_bit (bitmap a)
   return bitmap_first_set_bit_worker (a, true);
 }
 
-/* Return the bit number of the first set bit in the bitmap.  The
-   bitmap must be non-empty.  */
+/* Return the bit number of the last set bit in the bitmap.  The bitmap
+   must be non-empty.  When CLEAR is true, also clear the bit.  */
 
-unsigned
-bitmap_last_set_bit (const_bitmap a)
+static unsigned
+bitmap_last_set_bit_worker (bitmap a, bool clear)
 {
-  const bitmap_element *elt;
+  bitmap_element *elt;
   unsigned bit_no;
   BITMAP_WORD word;
   int ix;
@@ -1329,13 +1329,13 @@ bitmap_last_set_bit (const_bitmap a)
     elt = elt->next;
 
   bit_no = elt->indx * BITMAP_ELEMENT_ALL_BITS;
-  for (ix = BITMAP_ELEMENT_WORDS - 1; ix >= 1; ix--)
+  for (ix = BITMAP_ELEMENT_WORDS - 1; ix >= 0; ix--)
     {
       word = elt->bits[ix];
       if (word)
 	goto found_bit;
     }
-  gcc_assert (elt->bits[ix] != 0);
+  gcc_unreachable ();
  found_bit:
   bit_no += ix * BITMAP_WORD_BITS;
 #if GCC_VERSION >= 3004
@@ -1355,8 +1355,41 @@ bitmap_last_set_bit (const_bitmap a)
   bit_no += bitmap_popcount (x) - 1;
 #endif
 
-  return bit_no;
+ if (clear)
+   {
+     elt->bits[ix] &= ~((BITMAP_WORD) 1 << (bit_no % BITMAP_WORD_BITS));
+     /* If we cleared the entire word, free up the element.  */
+     if (!elt->bits[ix]
+	 && bitmap_element_zerop (elt))
+       {
+	 if (!a->tree_form)
+	   bitmap_list_unlink_element (a, elt);
+	 else
+	   bitmap_tree_unlink_element (a, elt);
+       }
+   }
+
+ return bit_no;
 }
+
+/* Return the bit number of the last set bit in the bitmap.
+   The bitmap must be non-empty.  */
+
+unsigned
+bitmap_last_set_bit (const_bitmap a)
+{
+  return bitmap_last_set_bit_worker (const_cast<bitmap> (a), false);
+}
+
+/* Return and clear the bit number of the last set bit in the bitmap.
+   The bitmap must be non-empty.  */
+
+unsigned
+bitmap_clear_last_set_bit (bitmap a)
+{
+  return bitmap_last_set_bit_worker (a, true);
+}
+
 
 
 /* DST = A & B.  */

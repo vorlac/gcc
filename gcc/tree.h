@@ -617,6 +617,13 @@ extern void omp_clause_range_check_failed (const_tree, const char *, int,
    || TREE_CODE (TYPE) == INTEGER_TYPE \
    || TREE_CODE (TYPE) == BITINT_TYPE)
 
+/* Nonzero if TYPE represents an integral type (non-boolean).  */
+
+#define INTEGRAL_NB_TYPE_P(TYPE)  \
+  (TREE_CODE (TYPE) == ENUMERAL_TYPE  \
+   || TREE_CODE (TYPE) == INTEGER_TYPE \
+   || TREE_CODE (TYPE) == BITINT_TYPE)
+
 /* Nonzero if TYPE represents an integral type, including complex
    and vector integer types.  */
 
@@ -626,9 +633,14 @@ extern void omp_clause_range_check_failed (const_tree, const char *, int,
         || VECTOR_TYPE_P (TYPE))		\
        && INTEGRAL_TYPE_P (TREE_TYPE (TYPE))))
 
-/* Nonzero if TYPE is bit-precise integer type.  */
+/* Nonzero if TYPE is bit-precise integer type or enumeral type
+   with bit-precise integer type as underlying type.  */
 
-#define BITINT_TYPE_P(TYPE) (TREE_CODE (TYPE) == BITINT_TYPE)
+#define BITINT_TYPE_P(TYPE) \
+  (TREE_CODE (TYPE) == BITINT_TYPE			\
+   || (TREE_CODE (TYPE) == ENUMERAL_TYPE		\
+       && TREE_TYPE (TYPE)				\
+       && TREE_CODE (TREE_TYPE (TYPE)) == BITINT_TYPE))
 
 /* Nonzero if TYPE represents a non-saturating fixed-point type.  */
 
@@ -3682,7 +3694,7 @@ extern vec<tree, va_gc> **decl_debug_args_insert (tree);
    (FUNCTION_DECL_CHECK (NODE)->function_decl.versioned_function)
 
 /* In FUNCTION_DECL, this is set if this function is a C++ constructor.
-   Devirtualization machinery uses this knowledge for determing type of the
+   Devirtualization machinery uses this knowledge for determining type of the
    object constructed.  Also we assume that constructor address is not
    important.  */
 #define DECL_CXX_CONSTRUCTOR_P(NODE)\
@@ -5171,7 +5183,7 @@ strip_pointer_types (const_tree type)
   return type;
 }
 
-/* Desription of the reason why the argument of valid_constant_size_p
+/* Description of the reason why the argument of valid_constant_size_p
    is not a valid size.  */
 enum cst_size_error {
   cst_size_ok,
@@ -7196,5 +7208,14 @@ extern auto_vec<string_slice> get_clone_attr_versions
 extern bool disjoint_version_decls (tree, tree);
 /* Checks if two overlapping decls are not mergeable.  */
 extern bool diagnose_versioned_decls (tree, tree);
+
+/* Unshare tree if needed.  */
+extern tree unshare_expr (tree);
+
+/* Unshare tree if needed.
+   Removing the locations if an expr.  */
+extern tree unshare_expr_without_location (tree);
+
+extern void copy_if_shared (tree *, void * = NULL);
 
 #endif  /* GCC_TREE_H  */

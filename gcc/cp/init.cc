@@ -445,6 +445,14 @@ build_value_init_noctor (tree type, tsubst_flags_t complain)
 		  && integer_zerop (DECL_SIZE (field)))
 		continue;
 
+	      /* Zero-initialize anonymous union and struct members.  The
+		 default constructor doesn't exist for those and if NSDMIs
+		 are used, the containing type's default constructor is
+		 non-trivial.  */
+	      if (ANON_AGGR_TYPE_P (ftype))
+		value = build_zero_init (ftype, NULL_TREE,
+					 /*static_storage_p=*/false);
+
 	      /* We could skip vfields and fields of types with
 		 user-defined constructors, but I think that won't improve
 		 performance at all; it should be simpler in general just
@@ -455,13 +463,16 @@ build_value_init_noctor (tree type, tsubst_flags_t complain)
 		 corresponding to base classes as well.  Thus, iterating
 		 over TYPE_FIELDs will result in correct initialization of
 		 all of the subobjects.  */
-	      value = build_value_init (ftype, complain);
-	      value = maybe_constant_init (value);
+	      else
+		{
+		  value = build_value_init (ftype, complain);
+		  value = maybe_constant_init (value);
+		}
 
 	      if (value == error_mark_node)
 		return error_mark_node;
 
-	      CONSTRUCTOR_APPEND_ELT(v, field, value);
+	      CONSTRUCTOR_APPEND_ELT (v, field, value);
 
 	      /* We shouldn't have gotten here for anything that would need
 		 non-trivial initialization, and gimplify_init_ctor_preeval
@@ -2601,7 +2612,7 @@ constant_value_1 (tree decl, bool strict_p, bool return_aggregate_cst_ok_p,
 	init = TREE_VALUE (init);
       /* Instantiate a non-dependent initializer for user variables.  We
 	 mustn't do this for the temporary for an array compound literal;
-	 trying to instatiate the initializer will keep creating new
+	 trying to instantiate the initializer will keep creating new
 	 temporaries until we crash.  Probably it's not useful to do it for
 	 other artificial variables, either.  */
       if (!DECL_ARTIFICIAL (decl))
@@ -3959,6 +3970,12 @@ build_new_1 (vec<tree, va_gc> **placement, tree type, tree nelts,
     rval = TARGET_EXPR_INITIAL (alloc_expr);
   else
     {
+      /* Skip the null-check when rval == data_addr: the resulting conditional
+	 would be "alloc_node != nullptr ? alloc_node : alloc_node", triggering
+	 -Wduplicated-branches (PR125422).  */
+      if (rval == data_addr)
+	check_new = 0;
+
       if (check_new)
 	{
 	  tree ifexp = cp_build_binary_op (input_location,
@@ -4087,7 +4104,7 @@ build_new (location_t loc, vec<tree, va_gc> **placement, tree type,
       /* The expression in a noptr-new-declarator is erroneous if it's of
 	 non-class type and its value before converting to std::size_t is
 	 less than zero. ... If the expression is a constant expression,
-	 the program is ill-fomed.  */
+	 the program is ill-formed.  */
       if (TREE_CODE (cst_nelts) == INTEGER_CST
 	  && !valid_array_size_p (nelts_loc, cst_nelts, NULL_TREE,
 				  complain & tf_error))

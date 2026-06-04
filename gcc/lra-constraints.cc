@@ -1140,10 +1140,10 @@ match_reload (signed char out, signed char *ins, signed char *outs,
 		   4. asm ("" : "=r" (subreg:si(t:di,4)) : "0" (t:di))
 		   5. i:si = subreg:si(t:di,4);
 		 If we assign hard reg of x to t, dead code elimination
-		 will remove insn #2 and we will use unitialized hard reg.
+		 will remove insn #2 and we will use uninitialized hard reg.
 		 So exclude the hard reg of x for t.  We could ignore this
 		 problem for non-empty asm using all x value but it is hard to
-		 check that the asm are expanded into insn realy using x
+		 check that the asm are expanded into insn really using x
 		 and setting r.  */
 	      CLEAR_HARD_REG_SET (temp_hard_reg_set);
 	      if (exclude_start_hard_regs != NULL)
@@ -1251,8 +1251,6 @@ match_reload (signed char out, signed char *ins, signed char *outs,
 	= (! early_clobber_p && ins[1] < 0 && REG_P (in_rtx)
 	   && (int) REGNO (in_rtx) < lra_new_regno_start
 	   && find_regno_note (curr_insn, REG_DEAD, REGNO (in_rtx))
-	   && (! early_clobber_p
-	       || check_conflict_input_operands (REGNO (in_rtx), ins))
 	   && (out < 0
 	       || regno_val_use_in (REGNO (in_rtx), out_rtx) == NULL_RTX)
 	   && !out_conflict
@@ -2312,7 +2310,7 @@ process_alt_operands (int only_alternative)
 		     ->operand_alternative[nalt * n_operands + nop].reject);
 	  if (lra_dump_file != NULL && inc != 0)
 	    fprintf (lra_dump_file,
-		     "            Staticly defined alt reject+=%d\n", inc);
+		     "            Statically defined alt reject+=%d\n", inc);
 	  static_reject += inc;
 	  matching_early_clobber[nop] = 0;
 	}
@@ -2822,7 +2820,7 @@ process_alt_operands (int only_alternative)
 		  else
 		    {
 		      /* Prefer won reg to spilled pseudo under other
-			 equal conditions for possibe inheritance.  */
+			 equal conditions for possible inheritance.  */
 		      if (! scratch_p)
 			{
 			  if (lra_dump_file != NULL)
@@ -3150,7 +3148,7 @@ process_alt_operands (int only_alternative)
 		      if (lra_dump_file != NULL)
 			fprintf
 			  (lra_dump_file,
-			   "            %d Non-prefered reload: reject+=%d\n",
+			   "            %d Non-preferred reload: reject+=%d\n",
 			   nop, LRA_MAX_REJECT);
 		      reject += LRA_MAX_REJECT;
 		    }
@@ -4149,7 +4147,7 @@ process_address_1 (int nop, bool check_only_p,
       Index part of address may become invalid.  For example, we
       changed pseudo on the equivalent memory and a subreg of the
       pseudo onto the memory of different mode for which the scale is
-      prohibitted.  */
+      prohibited.  */
       new_reg = index_part_to_reg (&ad, index_cl);
       *ad.inner = simplify_gen_binary (PLUS, GET_MODE (new_reg),
 				       *ad.base_term, new_reg);
@@ -4717,7 +4715,7 @@ curr_insn_transform (bool check_only_p)
 	char c;
 	rtx op = *curr_id->operand_loc[i];
 	rtx subreg = NULL_RTX;
-	machine_mode mode = curr_operand_mode[i];
+	machine_mode op_mode = curr_operand_mode[i], mode = op_mode;
 
 	if (GET_CODE (op) == SUBREG)
 	  {
@@ -4735,7 +4733,7 @@ curr_insn_transform (bool check_only_p)
 
 	    change_p = true;
 	    if (subreg != NULL_RTX)
-	      tem = gen_rtx_SUBREG (mode, tem, SUBREG_BYTE (subreg));
+	      tem = gen_rtx_SUBREG (op_mode, tem, SUBREG_BYTE (subreg));
 
 	    *curr_id->operand_loc[i] = tem;
 	    lra_update_dup (curr_id, i);
@@ -5583,7 +5581,7 @@ lra_constraints (bool first_p)
     check_and_force_assignment_correctness_p = true;
   new_insn_uid_start = get_max_uid ();
   new_regno_start = first_p ? lra_constraint_new_regno_start : max_reg_num ();
-  /* Mark used hard regs for target stack size calulations.  */
+  /* Mark used hard regs for target stack size calculations.  */
   for (i = FIRST_PSEUDO_REGISTER; i < new_regno_start; i++)
     if (lra_reg_info[i].nrefs != 0
 	&& (hard_regno = lra_get_regno_hard_regno (i)) >= 0)
@@ -7481,7 +7479,7 @@ inherit_in_ebb (rtx_insn *head, rtx_insn *tail)
 	  || BLOCK_FOR_INSN (prev_insn) != curr_bb)
 	{
 	  /* We reached the beginning of the current block -- do
-	     rest of spliting in the current BB.  */
+	     rest of splitting in the current BB.  */
 	  to_process = df_get_live_in (curr_bb);
 	  if (BLOCK_FOR_INSN (head) != curr_bb)
 	    {
@@ -7969,9 +7967,9 @@ undo_optional_reloads (void)
 		 we remove the inheritance pseudo and the optional
 		 reload.  */
 	    }
-	  if (GET_CODE (PATTERN (insn)) == CLOBBER
-	      && REG_P (SET_DEST (insn))
-	      && get_regno (SET_DEST (insn)) == (int) regno)
+	  rtx pat = PATTERN (insn);
+	  if (GET_CODE (pat) == CLOBBER && REG_P (SET_DEST (pat))
+	      && get_regno (SET_DEST (pat)) == (int) regno)
 	    /* Refuse to remap clobbers to preexisting pseudos.  */
 	    gcc_unreachable ();
 	  lra_substitute_pseudo_within_insn

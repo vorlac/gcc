@@ -710,7 +710,7 @@ add_to_conflicts (ira_object_t obj1, ira_object_t obj2)
       if (OBJECT_CONFLICT_ARRAY_SIZE (obj1) < num * sizeof (ira_object_t))
 	{
 	  ira_object_t *newvec;
-	  size = (3 * num / 2 + 1) * sizeof (ira_allocno_t);
+	  size = (3 * num / 2 + 1) * sizeof (ira_object_t);
 	  newvec = (ira_object_t *) ira_allocate (size);
 	  memcpy (newvec, vec, curr_num * sizeof (ira_object_t));
 	  ira_free (vec);
@@ -1854,7 +1854,7 @@ create_insn_allocnos (rtx x, rtx outer, bool output_p)
 	    a = ira_create_allocno (regno, false, ira_curr_loop_tree_node);
 
 	  /* This used to only trigger at allocno creation which seems
-	     wrong.  We care about the WMODE propery across all the uses.  */
+	     wrong.  We care about the WMODE property across all the uses.  */
 	  if (outer != NULL && GET_CODE (outer) == SUBREG)
 	    {
 	      machine_mode wmode = GET_MODE (outer);

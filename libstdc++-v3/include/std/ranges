@@ -56,6 +56,7 @@
 #include <bits/refwrap.h>
 
 #define __glibcxx_want_algorithm_default_value_type
+#define __glibcxx_want_hardened_view_interface
 #define __glibcxx_want_ranges
 #define __glibcxx_want_ranges_as_const
 #define __glibcxx_want_ranges_as_rvalue
@@ -900,10 +901,12 @@ namespace views
 
   struct _Iota
   {
+    // _GLIBCXX_RESOLVE_LIB_DEFECTS
+    // 4096. views::iota(views::iota(0)) should be rejected
     template<__detail::__can_iota_view _Tp>
-      constexpr auto
+      constexpr iota_view<decay_t<_Tp>>
       operator() [[nodiscard]] (_Tp&& __e) const
-      { return iota_view(std::forward<_Tp>(__e)); }
+      { return iota_view<decay_t<_Tp>>(std::forward<_Tp>(__e)); }
 
     template<typename _Tp, typename _Up>
       requires __detail::__can_iota_view<_Tp, _Up>
@@ -4353,8 +4356,15 @@ namespace views::__adaptor
   namespace __detail
   {
 #if __cpp_lib_tuple_like // >= C++23
+    // _GLIBCXX_RESOLVE_LIB_DEFECTS
+    // 3797. elements_view insufficiently constrained
     template<typename _Tp, size_t _Nm>
-    concept __has_tuple_element = __tuple_like<_Tp> && _Nm < tuple_size_v<_Tp>;
+    concept __has_tuple_element = __tuple_like<_Tp> && _Nm < tuple_size_v<_Tp>
+      && requires(_Tp __t)
+	 {
+	   { std::get<_Nm>(__t) }
+	     -> convertible_to<const tuple_element_t<_Nm, _Tp>&>;
+	 };
 #else
     template<typename _Tp, size_t _Nm>
     concept __has_tuple_element = requires(_Tp __t)
@@ -5859,8 +5869,11 @@ namespace views::__adaptor
     template<size_t _Nm>
       struct _Adjacent : __adaptor::_RangeAdaptorClosure<_Adjacent<_Nm>>
       {
+	// _GLIBCXX_RESOLVE_LIB_DEFECTS
+	// 4098. views::adjacent<0> should reject non-forward ranges
 	template<viewable_range _Range>
-	  requires (_Nm == 0) || __detail::__can_adjacent_view<_Nm, _Range>
+	  requires ((_Nm == 0) && forward_range<_Range>)
+		   || __detail::__can_adjacent_view<_Nm, _Range>
 	  constexpr auto
 	  operator() [[nodiscard]] (_Range&& __r) const
 	  {
@@ -6197,8 +6210,11 @@ namespace views::__adaptor
     template<size_t _Nm>
       struct _AdjacentTransform : __adaptor::_RangeAdaptor<_AdjacentTransform<_Nm>>
       {
+	// _GLIBCXX_RESOLVE_LIB_DEFECTS
+	// 4098. views::adjacent<0> should reject non-forward ranges
 	template<viewable_range _Range, typename _Fp>
-	  requires (_Nm == 0) || __detail::__can_adjacent_transform_view<_Nm, _Range, _Fp>
+	  requires ((_Nm == 0) && forward_range<_Range>)
+		   || __detail::__can_adjacent_transform_view<_Nm, _Range, _Fp>
 	  constexpr auto
 	  operator() [[nodiscard]] (_Range&& __r, _Fp&& __f) const
 	  {
@@ -9093,6 +9109,9 @@ namespace views::__adaptor
 	constexpr auto
 	operator() [[nodiscard]] (_Range&& __r) const
 	{
+	  // _GLIBCXX_RESOLVE_LIB_DEFECTS
+	  // 4083. views::as_rvalue should reject non-input ranges
+	  // input_range<_Range> is implied by __detail::__can_as_rvalue_view<_Range>
 	  if constexpr (same_as<range_rvalue_reference_t<_Range>,
 				range_reference_t<_Range>>)
 	    return views::all(std::forward<_Range>(__r));

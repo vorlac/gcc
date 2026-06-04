@@ -595,6 +595,10 @@ Wconditionally-supported
 C++ ObjC++ Var(warn_conditionally_supported) Warning
 Warn for conditionally-supported constructs.
 
+Wconstant-logical-operand
+C ObjC C++ ObjC++ Var(warn_constant_logical_operand) Warning LangEnabledBy(C ObjC C++ ObjC++,Wall)
+Warn for constant operands of logical operators other than 0 or 1.
+
 Wconversion
 C ObjC C++ ObjC++ Var(warn_conversion) Warning
 Warn for implicit type conversions that may change a value.
@@ -1438,10 +1442,6 @@ according to the level of -fstrict-flex-arrays.
 Wstrict-null-sentinel
 C++ ObjC++ Warning Var(warn_strict_null_sentinel)
 Warn about uncasted NULL used as sentinel.
-
-Wstrict-overflow=
-C ObjC C++ ObjC++ LangEnabledBy(C ObjC C++ ObjC++,Wall, 1, 0) IntegerRange(0, 5)
-;
 
 Wstrict-prototypes
 C ObjC Var(warn_strict_prototypes) Warning

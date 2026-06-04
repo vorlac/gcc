@@ -1,3 +1,78 @@
+2026-05-30  Dhruv Chawla  <dhruvc@nvidia.com>
+
+	* Makefile.def: Fix typos.
+	* Makefile.in: Likewise.
+	* Makefile.tpl: Likewise.
+
+2026-05-27  Richard Earnshaw  <rearnsha@arm.com>
+
+	* MAINTAINERS (Contributing under the DCO): Secondary sort
+	by email address.
+
+2026-05-27  Richard Earnshaw  <rearnsha@arm.com>
+
+	* MAINTAINERS (Write After Approval): Secondary sort by email.
+
+2026-05-27  Richard Earnshaw  <rearnsha@arm.com>
+
+	* MAINTAINERS (Reviewers): Sort entries.
+
+2026-05-27  Richard Earnshaw  <rearnsha@arm.com>
+
+	* MAINTAINERS (Various Maintainers): Sort entries.
+
+2026-05-27  Richard Earnshaw  <rearnsha@arm.com>
+
+	* MAINTAINERS (Language Front Ends Maintainers): Sort entries.
+
+2026-05-27  Richard Earnshaw  <rearnsha@arm.com>
+
+	* MAINTAINERS (OS Port Maintainers): Sort entries.
+
+2026-05-27  Richard Earnshaw  <rearnsha@arm.com>
+
+	* MAINTAINERS (CPU Maintainers): Sort by CPU and then user.
+
+2026-05-27  Evgeny Karpov  <evgeny.karpov@arm.com>
+
+	* MAINTAINERS: Update my email address.
+
+2026-05-15  Karl Meakin  <karl.meakin@arm.com>
+
+	* .editorconfig (COMMIT_EDITMSG): New section.
+
+2026-05-13  Zhongyao Chen  <chen.zhongyao@zte.com.cn>
+
+	* MAINTAINERS (Write After Approval): Add myself.
+	(Contributing under the DCO): Add myself.
+
+2026-05-11  Naveen  <naveen.siddegowda@oss.qualcomm.com>
+
+	* MAINTAINERS: Update my email and add myself to the DCO
+	section.
+
+2026-05-04  Vijay Shankar  <vijay@linux.ibm.com>
+
+	* MAINTAINERS: Add myself to write after approval.
+
+2026-05-01  Manuel Jacob  <me@manueljacob.de>
+
+	* configure.ac: Set default for CPP_FOR_BUILD environment variable in all cases.
+	* configure: Regenerate.
+
+2026-05-01  Manuel Jacob  <me@manueljacob.de>
+
+	* configure.ac: Preserve *_FOR_BUILD environment variables in all cases.
+	* configure: Regenerate.
+
+2026-04-30  Christopher Bazley  <chris.bazley@arm.com>
+
+	* MAINTAINERS: Add myself to write after approval.
+
+2026-04-28  Bohan Lei  <garthlei@linux.alibaba.com>
+
+	* MAINTAINERS: Add myself to write after approval and DCO.
+
 2026-04-01  David Faust  <david.faust@oracle.com>
 
 	* MAINTAINERS: Add my bugzilla account.

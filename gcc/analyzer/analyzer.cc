@@ -29,6 +29,16 @@ along with GCC; see the file COPYING3.  If not see
 
 namespace ana {
 
+bool
+printable_expr_p (const_tree expr)
+{
+  if (TREE_CODE (expr) == SSA_NAME
+      && !SSA_NAME_VAR (expr))
+    return false;
+
+  return true;
+}
+
 /* Workaround for missing location information for some stmts,
    which ultimately should be solved by fixing the frontends
    to provide the locations (TODO).  */
@@ -60,7 +70,7 @@ get_stmt_location (const gimple *stmt, function *fun)
 static tree
 fixup_tree_for_diagnostic_1 (tree expr, hash_set<tree> *visited);
 
-/* Attemp to generate a tree for the LHS of ASSIGN_STMT.
+/* Attempt to generate a tree for the LHS of ASSIGN_STMT.
    VISITED must be non-NULL; it is used to ensure termination.  */
 
 static tree
@@ -228,7 +238,7 @@ tree_to_json (tree node)
 
 /* Generate a JSON value for EVENT_ID.
    This is intended for debugging the analyzer rather than serialization and
-   thus is a string matching those seen in event messags (or null,
+   thus is a string matching those seen in event messages (or null,
    for unknown).  */
 
 std::unique_ptr<json::value>
@@ -418,35 +428,6 @@ is_std_named_call_p (const_tree fndecl, const char *funcname,
     return false;
 
   return true;
-}
-
-/* Return true if stmt is a setjmp or sigsetjmp call.  */
-
-bool
-is_setjmp_call_p (const gcall &call)
-{
-  if (is_special_named_call_p (call, "setjmp", 1)
-      || is_special_named_call_p (call, "sigsetjmp", 2))
-    /* region_model::on_setjmp requires a pointer.  */
-    if (POINTER_TYPE_P (TREE_TYPE (gimple_call_arg (&call, 0))))
-      return true;
-
-  return false;
-}
-
-/* Return true if stmt is a longjmp or siglongjmp call.  */
-
-bool
-is_longjmp_call_p (const gcall &call)
-{
-  if (is_special_named_call_p (call, "longjmp", 2)
-      || is_special_named_call_p (call, "siglongjmp", 2))
-    /* exploded_node::on_longjmp requires a pointer for the initial
-       argument.  */
-    if (POINTER_TYPE_P (TREE_TYPE (gimple_call_arg (&call, 0))))
-      return true;
-
-  return false;
 }
 
 bool

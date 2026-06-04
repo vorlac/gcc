@@ -1570,7 +1570,10 @@ gfc_assignment_finalizer_call (gfc_se *lse, gfc_expr *expr1, bool init_flag)
 	  gfc_init_se (&se, NULL);
 	  if (expr1->rank)
 	    {
-	      gfc_conv_expr_descriptor (&se, expr1);
+	      /* Avoid calling trans-array.cc(set_factored_descriptor_value) by
+		 not using gfc_conv_expr_descriptor.  */
+	      se.descriptor_only = 1;
+	      gfc_conv_expr (&se, expr1);
 	      ptr = gfc_conv_descriptor_data_get (se.expr);
 	    }
 	  else
@@ -1621,7 +1624,7 @@ gfc_finalize_tree_expr (gfc_se *se, gfc_symbol *derived,
     return;
 
   /* Derived type function results with components that have defined
-     assignements are handled in resolve.cc(generate_component_assignments),
+     assignments are handled in resolve.cc(generate_component_assignments),
      unless the assignment was replaced by a subroutine call to the
      subroutine associated with the assignment operator. */
   if ( ! is_assign_call

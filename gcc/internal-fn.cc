@@ -1131,7 +1131,7 @@ static void
 expand_ubsan_result_store (tree lhs, rtx target, scalar_int_mode mode,
 			   rtx res, rtx_code_label *do_error)
 {
-  if (TREE_CODE (TREE_TYPE (lhs)) == BITINT_TYPE
+  if (BITINT_TYPE_P (TREE_TYPE (lhs))
       && TYPE_PRECISION (TREE_TYPE (lhs)) < GET_MODE_PRECISION (mode))
     {
       int uns = TYPE_UNSIGNED (TREE_TYPE (lhs));
@@ -4216,8 +4216,7 @@ expand_crc_optab_fn (internal_fn fn, gcall *stmt, convert_optab optab)
       else
 	/* If it's IFN_CRC_REV generate bit-reversed CRC.  */
 	expand_reversed_crc_table_based (dest, crc, data, polynomial,
-					 TYPE_MODE (data_type),
-					 generate_reflecting_code_standard);
+					 TYPE_MODE (data_type));
 
       /* Now get the return value where it needs to be, taking care to
 	 ensure it's promoted appropriately if the ABI demands it.

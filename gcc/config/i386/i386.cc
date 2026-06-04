@@ -235,7 +235,7 @@ unsigned int const debugger64_register_map[FIRST_PSEUDO_REGISTER] =
   75, 76, 77, 78, 79, 80, 81, 82,
   /* Mask registers */
   118, 119, 120, 121, 122, 123, 124, 125,
-  /* rex2 extend interger registers */
+  /* rex2 extend integer registers */
   130, 131, 132, 133, 134, 135, 136, 137,
   138, 139, 140, 141, 142, 143, 144, 145
 };
@@ -343,9 +343,9 @@ static int const x86_64_preserve_none_int_parameter_registers[6] =
   R12_REG, R13_REG, R14_REG, R15_REG, DI_REG, SI_REG
 };
 
-static int const x86_64_int_return_registers[4] =
+static int const x86_64_int_return_registers[2] =
 {
-  AX_REG, DX_REG, DI_REG, SI_REG
+  AX_REG, DX_REG
 };
 
 /* Define the structure for the machine field in struct function.  */
@@ -684,7 +684,7 @@ ix86_can_inline_p (tree caller, tree callee)
     ret = false;
 
   else if (caller_opts->x_ix86_fpmath != callee_opts->x_ix86_fpmath
-	   /* If the calle doesn't use FP expressions differences in
+	   /* If the callee doesn't use FP expressions differences in
 	      ix86_fpmath can be ignored.  We are called from FEs
 	      for multi-versioning call optimization, so beware of
 	      ipa_fn_summaries not available.  */
@@ -1320,7 +1320,7 @@ ix86_function_regparm (const_tree type, const_tree decl)
 
 	      /* Each fixed register usage increases register pressure,
 		 so less registers should be used for argument passing.
-		 This functionality can be overriden by an explicit
+		 This functionality can be overridden by an explicit
 		 regparm value.  */
 	      for (regno = AX_REG; regno <= DI_REG; regno++)
 		if (fixed_regs[regno])
@@ -1343,7 +1343,7 @@ ix86_function_regparm (const_tree type, const_tree decl)
    indicated TYPE and DECL.  DECL may be NULL when calling function
    indirectly or considering a libcall.  Return -1 if any FP parameter
    should be rejected by error.  This is used in siutation we imply SSE
-   calling convetion but the function is called from another function with
+   calling convention but the function is called from another function with
    SSE disabled. Otherwise return 0.  */
 
 static int
@@ -2272,7 +2272,7 @@ classify_argument (machine_mode mode, const_tree type,
     }
 
   if (type && (AGGREGATE_TYPE_P (type)
-	       || (TREE_CODE (type) == BITINT_TYPE && words > 1)))
+	       || (BITINT_TYPE_P (type) && words > 1)))
     {
       int i;
       tree field;
@@ -2422,6 +2422,7 @@ classify_argument (machine_mode mode, const_tree type,
 	  break;
 
 	case BITINT_TYPE:
+	case ENUMERAL_TYPE:
 	  /* _BitInt(N) for N > 64 is passed as structure containing
 	     (N + 63) / 64 64-bit elements.  */
 	  if (words > 2)
@@ -2745,7 +2746,7 @@ classify_argument (machine_mode mode, const_tree type,
    class.  Return true iff parameter should be passed in memory.  */
 
 static bool
-examine_argument (machine_mode mode, const_tree type, int in_return,
+examine_argument (machine_mode mode, const_tree type, bool in_return,
 		  int *int_nregs, int *sse_nregs)
 {
   enum x86_64_reg_class regclass[MAX_CLASSES];
@@ -2790,8 +2791,8 @@ examine_argument (machine_mode mode, const_tree type, int in_return,
 
 static rtx
 construct_container (machine_mode mode, machine_mode orig_mode,
-		     const_tree type, int in_return, int nintregs, int nsseregs,
-		     const int *intreg, int sse_regno)
+		     const_tree type, bool in_return, int nintregs,
+		     int nsseregs, const int *intreg, int sse_regno)
 {
   /* The following variables hold the static issued_error state.  */
   static bool issued_sse_arg_error;
@@ -2809,12 +2810,10 @@ construct_container (machine_mode mode, machine_mode orig_mode,
   rtx exp[MAX_CLASSES];
   rtx ret;
 
-  n = classify_argument (mode, type, regclass, 0);
-  if (!n)
-    return NULL;
   if (examine_argument (mode, type, in_return, &needed_intregs,
 			&needed_sseregs))
     return NULL;
+
   if (needed_intregs > nintregs || needed_sseregs > nsseregs)
     return NULL;
 
@@ -2848,6 +2847,9 @@ construct_container (machine_mode mode, machine_mode orig_mode,
 	}
       return NULL;
     }
+
+  n = classify_argument (mode, type, regclass, 0);
+  gcc_assert (n);
 
   /* Likewise, error if the ABI requires us to return values in the
      x87 registers and the user specified -mno-80387.  */
@@ -3065,7 +3067,7 @@ construct_container (machine_mode mode, machine_mode orig_mode,
    and data type TYPE.  (TYPE is null for libcalls where that information
    may not be available.)
 
-   Return a number of integer regsiters advanced over.  */
+   Return a number of integer registers advanced over.  */
 
 static int
 function_arg_advance_32 (CUMULATIVE_ARGS *cum, machine_mode mode,
@@ -3211,7 +3213,7 @@ function_arg_advance_64 (CUMULATIVE_ARGS *cum, machine_mode mode,
 		 || VALID_AVX256_REG_MODE (mode)))
     return 0;
 
-  if (!examine_argument (mode, type, 0, &int_nregs, &sse_nregs)
+  if (!examine_argument (mode, type, false, &int_nregs, &sse_nregs)
       && sse_nregs <= cum->sse_nregs && int_nregs <= cum->nregs)
     {
       cum->nregs -= int_nregs;
@@ -3491,8 +3493,8 @@ function_arg_64 (const CUMULATIVE_ARGS *cum, machine_mode mode,
   else
     parm_regs = x86_64_int_parameter_registers;
 
-  return construct_container (mode, orig_mode, type, 0, cum->nregs,
-			      cum->sse_nregs,
+  return construct_container (mode, orig_mode, type, false,
+			      cum->nregs, cum->sse_nregs,
 			      &parm_regs[cum->regno],
 			      cum->sse_regno);
 }
@@ -3869,9 +3871,6 @@ ix86_function_value_regno_p (const unsigned int regno)
       return true;
     case DX_REG:
       return (!TARGET_64BIT || ix86_cfun_abi () != MS_ABI);
-    case DI_REG:
-    case SI_REG:
-      return TARGET_64BIT && ix86_cfun_abi () != MS_ABI;
 
       /* Complex values are returned in %st(0)/%st(1) pair.  */
     case ST0_REG:
@@ -4308,8 +4307,9 @@ function_value_64 (machine_mode orig_mode, machine_mode mode,
       mode = word_mode;
     }
 
-  ret = construct_container (mode, orig_mode, valtype, 1,
-			     X86_64_REGPARM_MAX, X86_64_SSE_REGPARM_MAX,
+  ret = construct_container (mode, orig_mode, valtype, true,
+			     X86_64_MAX_RETURN_NREGS,
+			     X86_64_MAX_SSE_RETURN_NREGS,
 			     x86_64_int_return_registers, 0);
 
   /* For zero sized structures, construct_container returns NULL, but we
@@ -4347,9 +4347,17 @@ function_value_ms_64 (machine_mode orig_mode, machine_mode mode,
 
   if (TARGET_SSE)
     {
-      switch (GET_MODE_SIZE (mode))
+      unsigned int mode_size = GET_MODE_SIZE (mode);
+
+      switch (mode_size)
 	{
 	case 16:
+	case 32:
+	case 64:
+	  if (mode_size == 32 && !TARGET_AVX)
+	    break;
+	  if (mode_size == 64 && !TARGET_AVX512F)
+	    break;
 	  if (valtype != NULL_TREE
 	      && !VECTOR_INTEGER_TYPE_P (valtype)
 	      && !INTEGRAL_TYPE_P (valtype)
@@ -4459,13 +4467,17 @@ ix86_return_in_memory (const_tree type, const_tree fntype ATTRIBUTE_UNUSED)
 	{
 	  size = int_size_in_bytes (type);
 
-	  /* __m128 is returned in xmm0.  */
+	  /* __m128 is returned in xmm0.  256/512-bit vector values are
+	     returned in ymm0/zmm0 when AVX/AVX512 is enabled.  */
 	  if ((!type || VECTOR_INTEGER_TYPE_P (type)
 	       || INTEGRAL_TYPE_P (type)
 	       || VECTOR_FLOAT_TYPE_P (type))
 	      && (SCALAR_INT_MODE_P (mode) || VECTOR_MODE_P (mode))
 	      && !COMPLEX_MODE_P (mode)
-	      && (GET_MODE_SIZE (mode) == 16 || size == 16))
+	      && ((GET_MODE_SIZE (mode) == 16 || size == 16)
+		  || (TARGET_AVX && (GET_MODE_SIZE (mode) == 32 || size == 32))
+		  || (TARGET_AVX512F
+		      && (GET_MODE_SIZE (mode) == 64 || size == 64))))
 	    return false;
 
 	  /* Otherwise, the size must be exactly in [1248]. */
@@ -4475,7 +4487,7 @@ ix86_return_in_memory (const_tree type, const_tree fntype ATTRIBUTE_UNUSED)
 	{
 	  int needed_intregs, needed_sseregs;
 
-	  return examine_argument (mode, type, 1,
+	  return examine_argument (mode, type, true,
 				   &needed_intregs, &needed_sseregs);
 	}
     }
@@ -4500,7 +4512,7 @@ ix86_return_in_memory (const_tree type, const_tree fntype ATTRIBUTE_UNUSED)
 	  if (size < 8)
 	    return false;
 
-	  /* Unless ABI prescibes otherwise,
+	  /* Unless ABI prescribes otherwise,
 	     MMX/3dNow values are returned in MM0 if available.  */
 
 	  if (size == 8)
@@ -5005,9 +5017,8 @@ ix86_gimplify_va_arg (tree valist, tree type, gimple_seq *pre_p,
 
     default:
       container = construct_container (nat_mode, TYPE_MODE (type),
-				       type, 0, X86_64_REGPARM_MAX,
-				       X86_64_SSE_REGPARM_MAX, intreg,
-				       0);
+				       type, false, X86_64_REGPARM_MAX,
+				       X86_64_SSE_REGPARM_MAX, intreg, 0);
       break;
     }
 
@@ -5025,7 +5036,8 @@ ix86_gimplify_va_arg (tree valist, tree type, gimple_seq *pre_p,
       lab_false = create_artificial_label (UNKNOWN_LOCATION);
       lab_over = create_artificial_label (UNKNOWN_LOCATION);
 
-      examine_argument (nat_mode, type, 0, &needed_intregs, &needed_sseregs);
+      examine_argument (nat_mode, type, false,
+			&needed_intregs, &needed_sseregs);
 
       bool container_in_reg = false;
       if (REG_P (container))
@@ -6335,7 +6347,7 @@ output_indirect_thunk (unsigned int regno)
     fputs ("\tint3\n", asm_out_file);
 }
 
-/* Output a funtion with a call and return thunk for indirect branch.
+/* Output a function with a call and return thunk for indirect branch.
    If REGNO != INVALID_REGNUM, the function address is in REGNO.
    Otherwise, the function address is on the top of stack.  Thunk is
    used for function return if RET_P is true.  */
@@ -6777,6 +6789,13 @@ ix86_save_reg (unsigned int regno, bool maybe_eh_return, bool ignore_outlined)
 {
   rtx reg;
 
+  /* Save and restore DRAP register between prologue and epilogue so
+     that stack pointer can be restored.  */
+  if (crtl->drap_reg
+      && regno == REGNO (crtl->drap_reg)
+      && !cfun->machine->no_drap_save_restore)
+    return true;
+
   switch (cfun->machine->call_saved_registers)
     {
     case TYPE_DEFAULT_CALL_SAVED_REGISTERS:
@@ -6851,11 +6870,6 @@ ix86_save_reg (unsigned int regno, bool maybe_eh_return, bool ignore_outlined)
       if (xlogue_layout::is_stub_managed_reg (regno, count))
 	return false;
     }
-
-  if (crtl->drap_reg
-      && regno == REGNO (crtl->drap_reg)
-      && !cfun->machine->no_drap_save_restore)
-    return true;
 
   return (df_regs_ever_live_p (regno)
 	  && !call_used_or_fixed_reg_p (regno)
@@ -7065,8 +7079,8 @@ ix86_compute_frame_layout (void)
   frame->nsseregs = ix86_nsaved_sseregs ();
 
   /* 64-bit MS ABI seem to require stack alignment to be always 16,
-     except for function prologues, leaf functions and when the defult
-     incoming stack boundary is overriden at command line or via
+     except for function prologues, leaf functions and when the default
+     incoming stack boundary is overridden at command line or via
      force_align_arg_pointer attribute.
 
      Darwin's ABI specifies 128b alignment for both 32 and  64 bit variants
@@ -7095,7 +7109,7 @@ ix86_compute_frame_layout (void)
   gcc_assert (preferred_alignment <= stack_alignment_needed);
 
   /* The only ABI saving SSE regs should be 64-bit ms_abi or with
-     no_caller_saved_registers attribue.  */
+     no_caller_saved_registers attribute.  */
   gcc_assert (TARGET_64BIT
 	      || (cfun->machine->call_saved_registers
 		  == TYPE_NO_CALLER_SAVED_REGISTERS)
@@ -7541,7 +7555,7 @@ choose_basereg (HOST_WIDE_INT cfa_offset, rtx &base_reg,
 /* Return an RTX that points to CFA_OFFSET within the stack frame and
    the alignment of address.  If ALIGN is non-null, it should point to
    an alignment value (in bits) that is preferred or zero and will
-   recieve the alignment of the base register that was selected,
+   receive the alignment of the base register that was selected,
    irrespective of rather or not CFA_OFFSET is a multiple of that
    alignment value.  If it is possible for the base register offset to be
    non-immediate then SCRATCH_REGNO should specify a scratch register to
@@ -7691,7 +7705,7 @@ ix86_emit_save_reg_using_mov (machine_mode mode, unsigned int regno,
   addr = choose_baseaddr (cfa_offset, &align);
   mem = gen_frame_mem (mode, addr);
 
-  /* The location aligment depends upon the base register.  */
+  /* The location alignment depends upon the base register.  */
   align = MIN (GET_MODE_ALIGNMENT (mode), align);
   gcc_assert (! (cfa_offset & (align / BITS_PER_UNIT - 1)));
   set_mem_align (mem, align);
@@ -7928,7 +7942,7 @@ pro_epilogue_adjust_stack (rtx dest, rtx src, rtx offset,
 }
 
 /* Find an available register to be used as dynamic realign argument
-   pointer regsiter.  Such a register will be written in prologue and
+   pointer register.  Such a register will be written in prologue and
    used in begin of body, so it must not be
 	1. parameter passing register.
 	2. GOT pointer.
@@ -7947,6 +7961,11 @@ find_drap_reg (void)
      registers.  */
   if (TARGET_64BIT)
     {
+      /* In preserve_none functions, any register can be used for DRAP,
+	 except AX, R12–R15, DI, SI (argument registers), SP, and BP.  */
+      if (cfun->machine->call_saved_registers == TYPE_PRESERVE_NONE)
+	return R11_REG;
+
       /* Use R13 for nested function or function need static chain.
 	 Since function with tail call may use any caller-saved
 	 registers in epilogue, DRAP must not use caller-saved
@@ -9785,7 +9804,7 @@ ix86_expand_prologue (void)
     }
   gcc_assert (m->fs.sp_offset == frame.stack_pointer_offset);
 
-  /* If we havn't already set up the frame pointer, do so now.  */
+  /* If we haven't already set up the frame pointer, do so now.  */
   if (frame_pointer_needed && !m->fs.fp_valid)
     {
       insn = gen_add3_insn (hard_frame_pointer_rtx, stack_pointer_rtx,
@@ -9817,7 +9836,7 @@ ix86_expand_prologue (void)
       RTX_FRAME_RELATED_P (insn) = 1;
       add_reg_note (insn, REG_CFA_FLUSH_QUEUE, NULL_RTX);
       emit_insn (gen_prologue_use (pic));
-      /* Deleting already emmitted SET_GOT if exist and allocated to
+      /* Deleting already emitted SET_GOT if exist and allocated to
 	 REAL_PIC_OFFSET_TABLE_REGNUM.  */
       ix86_elim_entry_set_got (pic);
     }
@@ -10132,7 +10151,7 @@ ix86_emit_restore_sse_regs_using_mov (HOST_WIDE_INT cfa_offset,
 	mem = choose_baseaddr (cfa_offset, &align);
 	mem = gen_rtx_MEM (V4SFmode, mem);
 
-	/* The location aligment depends upon the base register.  */
+	/* The location alignment depends upon the base register.  */
 	align = MIN (GET_MODE_ALIGNMENT (V4SFmode), align);
 	gcc_assert (! (cfa_offset & (align / BITS_PER_UNIT - 1)));
 	set_mem_align (mem, align);
@@ -11477,6 +11496,10 @@ ix86_decompose_address (rtx addr, struct ix86_address *out)
       std::swap (base_reg, index_reg);
     }
 
+  /* Special case: rewrite index*1+disp into base+disp.  */
+  if (!base && index && scale == 1)
+    base = index, base_reg = index_reg, index = index_reg = NULL_RTX;
+
   /* Special case: %ebp cannot be encoded as a base without a displacement.
      Similarly %r13.  */
   if (!disp && base_reg
@@ -12072,7 +12095,7 @@ ix86_memory_address_reg_class (rtx_insn* insn)
   /* Update recog_data for processing of alternatives.  */
   extract_insn_cached (insn);
 
-  /* If current alternative is not set, loop throught enabled
+  /* If current alternative is not set, loop through enabled
      alternatives and get the most limited register class.  */
   if (saved_alternative == -1)
     {
@@ -12315,7 +12338,7 @@ ix86_legitimate_address_p (machine_mode, rtx addr, bool strict,
 #if TARGET_MACHO
 	  else if (MACHO_DYNAMIC_NO_PIC_P
 		   && !ix86_legitimate_constant_p (Pmode, disp))
-	    /* displacment must be referenced via non_lazy_pointer */
+	    /* displacement must be referenced via non_lazy_pointer */
 	    return false;
 #endif
 
@@ -15728,7 +15751,7 @@ ix86_avx_u128_mode_after (int mode, rtx_insn *insn)
       if (avx_upper_reg_found)
 	return AVX_U128_DIRTY;
 
-      /* If the function desn't clobber any sse registers or only clobber
+      /* If the function doesn't clobber any sse registers or only clobber
 	 128-bit part, Then vzeroupper isn't issued before the function exit.
 	 the status not CLEAN but ANY after the function.  */
       const function_abi &abi = insn_callee_abi (insn);
@@ -16135,7 +16158,7 @@ ix86_output_addr_diff_elt (FILE *file, int value, int rel)
 /* Increase given DISTANCE in half-cycles according to
    dependencies between PREV and NEXT instructions.
    Add 1 half-cycle if there is no dependency and
-   go to next cycle if there is some dependecy.  */
+   go to next cycle if there is some dependency.  */
 
 static unsigned int
 increase_distance (rtx_insn *prev, rtx_insn *next, unsigned int distance)
@@ -16502,7 +16525,7 @@ ix86_lea_outperforms (rtx_insn *insn, unsigned int regno0, unsigned int regno1,
      lea priority.  */
   dist_define += split_cost + IX86_LEA_PRIORITY;
 
-  /* If there is no use in memory addess then we just check
+  /* If there is no use in memory address then we just check
      that split cost exceeds AGU stall.  */
   if (dist_use < 0)
     return dist_define > LEA_MAX_STALL;
@@ -16628,7 +16651,7 @@ ix86_avoid_lea_for_addr (rtx_insn *insn, rtx operands[])
      if split lea into a sequence of instructions.  */
   if (parts.base || parts.index)
     {
-      /* Have to use mov instruction if non desctructive
+      /* Have to use mov instruction if non destructive
 	 destination form is used.  */
       if (regno1 != regno0 && regno2 != regno0)
 	split_cost += 1;
@@ -17240,7 +17263,7 @@ ix86_cc_modes_compatible (machine_mode m1, machine_mode m2)
 }
 
 /* Return strategy to use for floating-point.  We assume that fcomi is always
-   preferrable where available, since that is also true when looking at size
+   preferable where available, since that is also true when looking at size
    (2 bytes, vs. 3 for fnstsw+sahf and at least 5 for fnstsw+test).  */
 
 enum ix86_fpcmp_strategy
@@ -18278,7 +18301,7 @@ add_parameter_dependencies (rtx_insn *call, rtx_insn *head)
 	}
       if (insn_is_function_arg (insn, &is_spilled))
 	{
-	  /* Add output depdendence between two function arguments if chain
+	  /* Add output dependence between two function arguments if chain
 	     of output arguments contains likely spilled HW registers.  */
 	  if (is_spilled)
 	    add_dependence (first_arg, insn, REG_DEP_OUTPUT);
@@ -18681,7 +18704,7 @@ ix86_data_alignment (tree type, unsigned int align, bool opt)
   return align;
 }
 
-/* Implememnt TARGET_LOWER_LOCAL_DECL_ALIGNMENT.  */
+/* Implement TARGET_LOWER_LOCAL_DECL_ALIGNMENT.  */
 static void
 ix86_lower_local_decl_alignment (tree decl)
 {
@@ -20178,7 +20201,7 @@ ix86_gimple_fold_builtin (gimple_stmt_iterator *gsi)
 	    {
 	      unsigned sel_idx;
 	      /* Imm[1:0](if VL > 128, then use Imm[3:2],Imm[5:4],Imm[7:6])
-		 provide 2 select constrols for each element of the
+		 provide 2 select controls for each element of the
 		 destination.  */
 	      if (imode == E_DFmode)
 		sel_idx = (i & 1) * elems + (i & ~1)
@@ -21848,19 +21871,6 @@ ix86_hard_regno_mode_ok (unsigned int regno, machine_mode mode)
   return false;
 }
 
-/* Implement TARGET_INSN_CALLEE_ABI.  */
-
-const predefined_function_abi &
-ix86_insn_callee_abi (const rtx_insn *insn)
-{
-  unsigned int abi_id = 0;
-  rtx pat = PATTERN (insn);
-  if (vzeroupper_pattern (pat, VOIDmode))
-    abi_id = ABI_VZEROUPPER;
-
-  return function_abis[abi_id];
-}
-
 /* Initialize function_abis with corresponding abi_id,
    currently only handle vzeroupper.  */
 void
@@ -21882,6 +21892,7 @@ ix86_expand_avx_vzeroupper (void)
   /* Initialize vzeroupper_abi here.  */
   ix86_initialize_callee_abi (ABI_VZEROUPPER);
   rtx_insn *insn = emit_call_insn (gen_avx_vzeroupper_callee_abi ());
+  CALL_INSN_ABI_ID (insn) = ABI_VZEROUPPER;
   /* Return false for non-local goto in can_nonlocal_goto.  */
   make_reg_eh_region_note (insn, 0, INT_MIN);
   /* Flag used for call_insn indicates it's a fake call.  */
@@ -25525,6 +25536,14 @@ ix86_stack_protect_guard (void)
   return default_stack_protect_guard ();
 }
 
+/* Implement TARGET_STACK_PROTECT_GUARD_SYMBOL_P.  */
+
+static bool
+ix86_stack_protect_guard_symbol_p (void)
+{
+  return TARGET_SSP_GLOBAL_GUARD;
+}
+
 static bool
 ix86_stack_protect_runtime_enabled_p (void)
 {
@@ -25822,7 +25841,10 @@ ix86_reassociation_width (unsigned int op, machine_mode mode)
       /* Znver1-4 Integer vector instructions execute in FP unit
 	 and can execute 3 additions and one multiplication per cycle.  */
       if ((ix86_tune == PROCESSOR_ZNVER1 || ix86_tune == PROCESSOR_ZNVER2
-	   || ix86_tune == PROCESSOR_ZNVER3 || ix86_tune == PROCESSOR_ZNVER4)
+	   || ix86_tune == PROCESSOR_ZNVER3 || ix86_tune == PROCESSOR_ZNVER4
+	   || ix86_tune == PROCESSOR_C86_4G_M4
+	   || ix86_tune == PROCESSOR_C86_4G_M6
+	   || ix86_tune == PROCESSOR_C86_4G_M7)
    	  && INTEGRAL_MODE_P (mode) && op != PLUS && op != MINUS)
 	return 1;
       /* Znver5 can do 2 integer multiplications per cycle with latency
@@ -25980,7 +26002,7 @@ ix86_autovectorize_vector_modes (vector_modes *modes, bool all)
   return ix86_vect_compare_costs ? VECT_COMPARE_COSTS : 0;
 }
 
-/* Implemenation of targetm.vectorize.get_mask_mode.  */
+/* Implementation of targetm.vectorize.get_mask_mode.  */
 
 static opt_machine_mode
 ix86_get_mask_mode (machine_mode data_mode)
@@ -26054,7 +26076,7 @@ ix86_max_noce_ifcvt_seq_cost (edge e)
   /* For modern machines with deeper pipeline, the penalty for branch
      misprediction could be higher than before to reset the pipeline
      slots. Add parameter br_mispredict_scale as a factor to describe
-     the impact of reseting the pipeline.  */
+     the impact of resetting the pipeline.  */
 
   return BRANCH_COST (true, predictable_p)
 	 * ix86_tune_cost->br_mispredict_scale;
@@ -26124,6 +26146,9 @@ public:
 			      tree vectype, int misalign,
 			      vect_cost_model_location where) override;
   void finish_cost (const vector_costs *) override;
+  bool better_main_loop_than_p (const vector_costs *) const override;
+  bool better_epilogue_loop_than_p (const vector_costs *other,
+				    loop_vec_info main_loop) const;
 
 private:
 
@@ -26137,6 +26162,8 @@ private:
   unsigned m_num_sse_needed[3];
   /* Number of 256-bit vector permutation.  */
   unsigned m_num_avx256_vec_perm[3];
+  /* Number of 512-bit vector permutation.  */
+  unsigned m_num_avx512_vec_perm[3];
   /* Number of reductions for FMA/DOT_PROD_EXPR/SAD_EXPR  */
   unsigned m_num_reduc[X86_REDUC_LAST];
   /* Don't do unroll if m_prefer_unroll is false, default is true.  */
@@ -26148,6 +26175,7 @@ ix86_vector_costs::ix86_vector_costs (vec_info* vinfo, bool costing_for_scalar)
     m_num_gpr_needed (),
     m_num_sse_needed (),
     m_num_avx256_vec_perm (),
+    m_num_avx512_vec_perm (),
     m_num_reduc (),
     m_prefer_unroll (true)
 {}
@@ -26158,6 +26186,47 @@ static vector_costs *
 ix86_vectorize_create_costs (vec_info *vinfo, bool costing_for_scalar)
 {
   return new ix86_vector_costs (vinfo, costing_for_scalar);
+}
+
+/* Return true if a vec_perm should be counted as a cross-lane vector
+   permutation for a vector with NUNITS elements.  */
+static bool
+ix86_count_cross_lane_perm_p (vec_info *vinfo, slp_tree node, unsigned nunits)
+{
+  /* TODO: For loop vectorization with no SLP load-permutation
+     information, conservatively treat these perms as cross-lane.
+     Repeated-index cases such as {0, 0, 0, 0} are emitted as
+     separate vec_perm_exprs for each index, so we cannot reliably
+     separate false positives from real cross-lane shuffles yet.  */
+  if (!node
+      || !SLP_TREE_LOAD_PERMUTATION (node).exists ()
+      || !is_a<bb_vec_info> (vinfo))
+    return true;
+
+  unsigned half = nunits / 2;
+  bool allsame = true;
+  unsigned first = SLP_TREE_LOAD_PERMUTATION (node)[0];
+  bool cross_lane_p = false;
+
+  for (unsigned i = 0; i != SLP_TREE_LANES (node); i++)
+    {
+      unsigned tmp = SLP_TREE_LOAD_PERMUTATION (node)[i];
+      /* allsame is just a broadcast.  */
+      if (tmp != first)
+	allsame = false;
+
+      /* The load permutation can cover multiple vectors, so compare
+	 source and destination lanes modulo NUNITS.  */
+      tmp = tmp & (nunits - 1);
+      unsigned index = i & (nunits - 1);
+      if ((index < half && tmp >= half) || (index >= half && tmp < half))
+	cross_lane_p = true;
+
+      if (!allsame && cross_lane_p)
+	return true;
+    }
+
+  return false;
 }
 
 unsigned
@@ -26317,7 +26386,7 @@ ix86_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
 		 p = a < b
 		 c = p ? x : y
 	       and we will account first statement as setcc.  Exception is when
-	       p is loaded from memory as bool and then we will not acocunt
+	       p is loaded from memory as bool and then we will not account
 	       the compare, but there is no way to check for this.  */
 
 	    int ninsns = TARGET_SSE4_1 ? 1 : 3;
@@ -26578,20 +26647,32 @@ ix86_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
   if ((kind == vector_stmt || kind == scalar_stmt)
       && stmt_info
       && stmt_info->stmt
-      && (cfn = gimple_call_combined_fn (stmt_info->stmt)) != CFN_LAST)
-    switch (cfn)
-      {
-      case CFN_FMA:
-	stmt_cost = ix86_vec_cost (mode,
-				   mode == SFmode ? ix86_cost->fmass
-				   : ix86_cost->fmasd);
-	break;
-      case CFN_MULH:
-	stmt_cost = ix86_multiplication_cost (ix86_cost, mode);
-	break;
-      default:
-	break;
-      }
+      && is_gimple_call (stmt_info->stmt))
+    {
+      tree fndecl = gimple_call_fndecl (stmt_info->stmt);
+      cgraph_node *node;
+      if ((fndecl
+	   && (node = cgraph_node::get (fndecl))
+	   && node->simd_clones)
+	  || gimple_call_internal_p (stmt_info->stmt, IFN_MASK_CALL))
+	stmt_cost = 10 * ix86_vec_cost (mode,
+					mode == SFmode ? ix86_cost->fmass
+					: ix86_cost->fmasd);
+      else if ((cfn = gimple_call_combined_fn (stmt_info->stmt)) != CFN_LAST)
+	switch (cfn)
+	  {
+	  case CFN_FMA:
+	    stmt_cost = ix86_vec_cost (mode,
+				       mode == SFmode ? ix86_cost->fmass
+				       : ix86_cost->fmasd);
+	    break;
+	  case CFN_MULH:
+	    stmt_cost = ix86_multiplication_cost (ix86_cost, mode);
+	    break;
+	  default:
+	    break;
+	  }
+    }
 
   if (kind == vec_promote_demote)
     {
@@ -26713,58 +26794,25 @@ ix86_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
   if (stmt_cost == -1)
     stmt_cost = ix86_default_vector_cost (kind, mode);
 
-  if (kind == vec_perm && vectype
-      && GET_MODE_SIZE (TYPE_MODE (vectype)) == 32
-      /* BIT_FIELD_REF <vect_**, 64, 0> 0 times vec_perm costs 0 in body.  */
-      && count != 0)
+  /* BIT_FIELD_REF <vect_**, 64, 0> with count 0 costs 0 in body.  */
+  if (kind == vec_perm && vectype && count != 0)
     {
-      bool real_perm = true;
+      unsigned vec_size = GET_MODE_SIZE (TYPE_MODE (vectype));
       unsigned nunits = TYPE_VECTOR_SUBPARTS (vectype);
+      unsigned *num_vec_perm = NULL;
 
-      if (node
-	  && SLP_TREE_LOAD_PERMUTATION (node).exists ()
-	  /* Loop vectorization will have 4 times vec_perm
-	     with index as {0, 0, 0, 0}.
-	     But it actually generates
-	     vec_perm_expr <vect, vect, 0, 0, 0, 0>
-	     vec_perm_expr <vect, vect, 1, 1, 1, 1>
-	     vec_perm_expr <vect, vect, 2, 2, 2, 2>
-	     Need to be handled separately.  */
-	  && is_a <bb_vec_info> (m_vinfo))
+      if (vec_size == 32)
+	num_vec_perm = m_num_avx256_vec_perm;
+      else if (vec_size == 64)
+	num_vec_perm = m_num_avx512_vec_perm;
+
+      if (num_vec_perm && ix86_count_cross_lane_perm_p (m_vinfo, node, nunits))
 	{
-	  unsigned half = nunits / 2;
-	  unsigned i = 0;
-	  bool allsame = true;
-	  unsigned first = SLP_TREE_LOAD_PERMUTATION (node)[0];
-	  bool cross_lane_p = false;
-	  for (i = 0 ; i != SLP_TREE_LANES (node); i++)
-	    {
-	      unsigned tmp = SLP_TREE_LOAD_PERMUTATION (node)[i];
-	      /* allsame is just a broadcast.  */
-	      if (tmp != first)
-		allsame = false;
-
-	      /* 4 times vec_perm with number of lanes multiple of nunits.  */
-	      tmp = tmp & (nunits - 1);
-	      unsigned index = i & (nunits - 1);
-	      if ((index < half && tmp >= half)
-		  || (index >= half && tmp < half))
-		cross_lane_p = true;
-
-	      if (!allsame && cross_lane_p)
-		break;
-	    }
-
-	  if (i == SLP_TREE_LANES (node))
-	    real_perm = false;
-	}
-
-      if (real_perm)
-	{
-	  m_num_avx256_vec_perm[where] += count;
+	  num_vec_perm[where] += count;
 	  if (dump_file && (dump_flags & TDF_DETAILS))
 	    {
-	      fprintf (dump_file, "Detected avx256 cross-lane permutation: ");
+	      fprintf (dump_file,
+		       "Detected avx%u cross-lane permutation: ", vec_size * 8);
 	      if (stmt_info)
 		print_gimple_expr (dump_file, stmt_info->stmt, 0, TDF_SLIM);
 	      fprintf (dump_file, " \n");
@@ -26825,7 +26873,7 @@ ix86_vector_costs::finish_cost (const vector_costs *scalar_costs)
     {
       /* We are currently not asking the vectorizer to compare costs
 	 between different vector mode sizes.  When using predication
-	 that will end up always choosing the prefered mode size even
+	 that will end up always choosing the preferred mode size even
 	 if there's a smaller mode covering all lanes.  Test for this
 	 situation and artificially reject the larger mode attempt.
 	 ???  We currently lack masked ops for sub-SSE sized modes,
@@ -26885,6 +26933,10 @@ ix86_vector_costs::finish_cost (const vector_costs *scalar_costs)
   for (int i = 0; i != 3; i++)
     if (m_num_avx256_vec_perm[i]
 	&& TARGET_AVX256_AVOID_VEC_PERM)
+      m_costs[i] = INT_MAX;
+
+  for (int i = 0; i != 3; i++)
+    if (m_num_avx512_vec_perm[i] && TARGET_AVX512_AVOID_VEC_PERM)
       m_costs[i] = INT_MAX;
 
   /* When X86_TUNE_AVX512_TWO_EPILOGUES is enabled arrange for both
@@ -26981,6 +27033,47 @@ ix86_vector_costs::finish_cost (const vector_costs *scalar_costs)
     }
 
   vector_costs::finish_cost (scalar_costs);
+}
+
+/* Return true if THIS should be preferred over OTHER as main vector loop.  */
+
+bool
+ix86_vector_costs::better_main_loop_than_p (const vector_costs *other) const
+{
+  loop_vec_info this_loop_vinfo = as_a<loop_vec_info> (this->vinfo ());
+  loop_vec_info other_loop_vinfo = as_a<loop_vec_info> (other->vinfo ());
+
+  /* If the other loop is masked it does not need an epilog.  Prefer that
+     if the current loop cannot be vectorized fully with a vector
+     epilogs with at most one scalar iteration left.  */
+  if (LOOP_VINFO_NITERS_KNOWN_P (this_loop_vinfo)
+      && LOOP_VINFO_USING_PARTIAL_VECTORS_P (other_loop_vinfo)
+      && known_gt (LOOP_VINFO_VECT_FACTOR (other_loop_vinfo),
+		   LOOP_VINFO_INT_NITERS (this_loop_vinfo))
+      && (popcount_hwi (LOOP_VINFO_INT_NITERS (this_loop_vinfo) & ~1)
+	  > (param_vect_epilogues_nomask != 0)))
+    return false;
+
+  return vector_costs::better_main_loop_than_p (other);
+}
+
+/* Return true if THIS should be preferred over OTHER as epilog vector
+   loop when vectorizing MAIN_LOOP.  */
+
+bool
+ix86_vector_costs::better_epilogue_loop_than_p (const vector_costs *other,
+						loop_vec_info main_loop) const
+{
+  loop_vec_info this_loop_info = as_a <loop_vec_info> (this->vinfo ());
+  /* The x86 target allows for multiple vector epilogues, if THIS is
+     the suggested epilog mode of OTHER then keep the latter unless
+     THIS has a VF of one which means no further epilog needed.  */
+  int tem;
+  if (known_gt (LOOP_VINFO_VECT_FACTOR (this_loop_info), 1U)
+      && (GET_MODE_SIZE (other->suggested_epilogue_mode (tem))
+	  == GET_MODE_SIZE (this_loop_info->vector_mode)))
+    return false;
+  return vector_costs::better_epilogue_loop_than_p (other, main_loop);
 }
 
 /* Validate target specific memory model bits in VAL. */
@@ -27612,7 +27705,7 @@ ix86_optab_supported_p (int op, machine_mode mode1, machine_mode,
    to use %fs and %gs segment prefixes.  Therefore:
 
     (a) All address spaces have the same modes,
-    (b) All address spaces have the same addresss forms,
+    (b) All address spaces have the same address forms,
     (c) While %fs and %gs are technically subsets of the generic
         address space, they are probably not subsets of each other.
     (d) Since we have no access to the segment base register values
@@ -27764,7 +27857,7 @@ ix86_push_rounding (poly_int64 bytes)
 }
 
 /* Use 8 bits metadata start from bit48 for LAM_U48,
-   6 bits metadat start from bit57 for LAM_U57.  */
+   6 bits metadata start from bit57 for LAM_U57.  */
 #define IX86_HWASAN_SHIFT (ix86_lam_type == lam_u48		\
 			   ? 48					\
 			   : (ix86_lam_type == lam_u57 ? 57 : 0))
@@ -28493,6 +28586,10 @@ ix86_libgcc_floating_mode_supported_p
 #undef TARGET_STACK_PROTECT_GUARD
 #define TARGET_STACK_PROTECT_GUARD ix86_stack_protect_guard
 
+#undef TARGET_STACK_PROTECT_GUARD_SYMBOL_P
+#define TARGET_STACK_PROTECT_GUARD_SYMBOL_P \
+  ix86_stack_protect_guard_symbol_p
+
 #undef TARGET_STACK_PROTECT_RUNTIME_ENABLED_P
 #define TARGET_STACK_PROTECT_RUNTIME_ENABLED_P \
   ix86_stack_protect_runtime_enabled_p
@@ -28708,9 +28805,6 @@ ix86_libgcc_floating_mode_supported_p
 #undef TARGET_HARD_REGNO_CALL_PART_CLOBBERED
 #define TARGET_HARD_REGNO_CALL_PART_CLOBBERED \
   ix86_hard_regno_call_part_clobbered
-
-#undef TARGET_INSN_CALLEE_ABI
-#define TARGET_INSN_CALLEE_ABI ix86_insn_callee_abi
 
 #undef TARGET_CAN_CHANGE_MODE_CLASS
 #define TARGET_CAN_CHANGE_MODE_CLASS ix86_can_change_mode_class

@@ -158,6 +158,10 @@
 @tab 1.0
 @tab Atomic compare-and-swap instructions extension
 
+@item @samp{zalasr}
+@tab 1.0
+@tab Atomic load-acquire and store-release extension
+
 @item @samp{zalrsc}
 @tab 1.0
 @tab Load-reserved/store-conditional subset of the A extension
@@ -333,6 +337,10 @@
 @item @samp{zvfbfmin}
 @tab 1.0
 @tab Vector BF16 converts extension
+
+@item @samp{zvfofp8min}
+@tab 0.2
+@tab Vector FP8 minimum extension
 
 @item @samp{zvfbfwma}
 @tab 1.0
@@ -724,7 +732,7 @@
 
 @item @samp{xandesperf}
 @tab 5.0
-@tab Andes performace extension
+@tab Andes performance extension
 
 @item @samp{xandesbfhcvt}
 @tab 5.0

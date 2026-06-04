@@ -322,10 +322,6 @@ private:
 public:
   /* The index of this exploded_node.  */
   const int m_index;
-
-  /* The number of stmts that were processed when process_node was
-     called on this enode.  */
-  unsigned m_num_processed_stmts;
 };
 
 /* An edge within the exploded graph.
@@ -381,9 +377,9 @@ private:
 class interprocedural_call : public custom_edge_info
 {
 public:
-  interprocedural_call (const gcall &call_stmt,
+  interprocedural_call (const call_and_return_op &op,
 			function &callee_fun)
-  : m_call_stmt (call_stmt),
+  : m_op (op),
     m_callee_fun (callee_fun)
   {}
 
@@ -402,10 +398,16 @@ public:
 
   void add_events_to_path (checker_path *emission_path,
 			   const exploded_edge &eedge,
-			   pending_diagnostic &pd) const final override;
+			   pending_diagnostic &pd,
+			   const state_transition *state_trans) const final override;
+
+  bool
+  try_to_rewind_data_flow (rewind_context &) const final override;
+
+  const gcall &get_gcall () const;
 
 private:
-  const gcall &m_call_stmt;
+  const call_and_return_op &m_op;
   function &m_callee_fun;
 };
 
@@ -434,7 +436,11 @@ public:
 
   void add_events_to_path (checker_path *emission_path,
 			   const exploded_edge &eedge,
-			   pending_diagnostic &pd) const final override;
+			   pending_diagnostic &pd,
+			   const state_transition *state_trans) const final override;
+
+  bool
+  try_to_rewind_data_flow (rewind_context &) const final override;
 
 private:
   const gcall &m_call_stmt;
@@ -463,7 +469,8 @@ public:
 
   void add_events_to_path (checker_path *emission_path,
 			   const exploded_edge &eedge,
-			   pending_diagnostic &pd) const final override;
+			   pending_diagnostic &pd,
+			   const state_transition *state_trans) const final override;
 
   program_point
   get_point_before_setjmp () const
@@ -926,34 +933,6 @@ private:
   hash_set<function *> m_functions_with_enodes;
 };
 
-/* A path within an exploded_graph: a sequence of edges.  */
-
-class exploded_path
-{
-public:
-  exploded_path () : m_edges () {}
-  exploded_path (const exploded_path &other);
-
-  unsigned length () const { return m_edges.length (); }
-
-  bool find_stmt_backwards (const gimple *search_stmt,
-			    int *out_idx) const;
-
-  exploded_node *get_final_enode () const;
-
-  void dump_to_pp (pretty_printer *pp,
-		   const extrinsic_state *ext_state) const;
-  void dump (FILE *fp, const extrinsic_state *ext_state) const;
-  void dump (const extrinsic_state *ext_state = nullptr) const;
-  void dump_to_file (const char *filename,
-		     const extrinsic_state &ext_state) const;
-
-  bool feasible_p (logger *logger, std::unique_ptr<feasibility_problem> *out,
-		    engine *eng, const exploded_graph *eg) const;
-
-  auto_vec<const exploded_edge *> m_edges;
-};
-
 /* A reason why a particular exploded_path is infeasible.  */
 
 class feasibility_problem
@@ -1003,10 +982,6 @@ private:
   region_model m_model;
   auto_sbitmap m_snodes_visited;
 };
-
-/* Finding the shortest exploded_path within an exploded_graph.  */
-
-typedef shortest_paths<eg_traits, exploded_path> shortest_exploded_paths;
 
 // TODO: split the above up?
 

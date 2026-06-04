@@ -852,9 +852,8 @@ promote_function_mode (const_tree type, machine_mode mode, int *punsignedp,
 	return mode;
     }
 
-  switch (TREE_CODE (type))
+  if (BITINT_TYPE_P (type))
     {
-    case BITINT_TYPE:
       if (TYPE_MODE (type) == BLKmode)
 	return mode;
 
@@ -865,10 +864,12 @@ promote_function_mode (const_tree type, machine_mode mode, int *punsignedp,
 
       if (!info.extended)
 	return mode;
-      /* FALLTHRU */
+    }
+  switch (TREE_CODE (type))
+    {
     case INTEGER_TYPE:   case ENUMERAL_TYPE:   case BOOLEAN_TYPE:
     case REAL_TYPE:      case OFFSET_TYPE:     case FIXED_POINT_TYPE:
-    case POINTER_TYPE:   case REFERENCE_TYPE:
+    case POINTER_TYPE:   case REFERENCE_TYPE:  case BITINT_TYPE:
       return targetm.calls.promote_function_mode (type, mode, punsignedp, funtype,
 						  for_return);
 
@@ -898,14 +899,13 @@ promote_mode (const_tree type ATTRIBUTE_UNUSED, machine_mode mode,
 
   /* FIXME: this is the same logic that was there until GCC 4.4, but we
      probably want to test POINTERS_EXTEND_UNSIGNED even if PROMOTE_MODE
-     is not defined.  The affected targets are M32C, S390, SPARC.  */
+     is not defined.  The affected targets are S390, SPARC.  */
 #ifdef PROMOTE_MODE
   code = TREE_CODE (type);
   unsignedp = *punsignedp;
 
-  switch (code)
+  if (BITINT_TYPE_P (type))
     {
-    case BITINT_TYPE:
       if (TYPE_MODE (type) == BLKmode)
 	return mode;
 
@@ -916,9 +916,12 @@ promote_mode (const_tree type ATTRIBUTE_UNUSED, machine_mode mode,
 
       if (!info.extended)
 	return mode;
-      /* FALLTHRU */
+    }
+  switch (code)
+    {
     case INTEGER_TYPE:   case ENUMERAL_TYPE:   case BOOLEAN_TYPE:
     case REAL_TYPE:      case OFFSET_TYPE:     case FIXED_POINT_TYPE:
+    case BITINT_TYPE:
       /* Values of these types always have scalar mode.  */
       smode = as_a <scalar_mode> (mode);
       PROMOTE_MODE (smode, unsignedp, type);
@@ -2202,7 +2205,7 @@ anti_adjust_stack_and_probe (rtx size, bool adjust_back)
 {
   /* We skip the probe for the first interval + a small dope of 4 words and
      probe that many bytes past the specified size to maintain a protection
-     area at the botton of the stack.  */
+     area at the bottom of the stack.  */
   const int dope = 4 * UNITS_PER_WORD;
 
   /* First ensure SIZE is Pmode.  */

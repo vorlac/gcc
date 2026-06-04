@@ -46,11 +46,15 @@ particular CPU name.  Permissible values for this option are:
 
 @samp{xt-c920v2},
 
+@samp{xt-c9501fdvt},
+
 @samp{xiangshan-nanhu},
 
 @samp{xiangshan-kunminghu},
 
 @samp{spacemit-x60},
+
+@samp{arc-v-rhx-100-series},
 
 @samp{generic-ooo},
 
@@ -63,5 +67,7 @@ particular CPU name.  Permissible values for this option are:
 @samp{andes-23-series},
 
 @samp{andes-45-series},
+
+@samp{arc-v-rmx-100-series},
 
 and all valid options for @option{-mcpu=}.

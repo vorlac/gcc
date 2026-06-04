@@ -37,7 +37,6 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-ssa-dse.h"
 #include "builtins.h"
 #include "gimple-fold.h"
-#include "gimplify.h"
 #include "tree-eh.h"
 #include "cfganal.h"
 #include "cgraph.h"
@@ -103,7 +102,7 @@ static bitmap need_ab_cleanup;
 
    Return TRUE if the statement was analyzed, FALSE otherwise.
 
-   It is always safe to return FALSE.  But typically better optimziation
+   It is always safe to return FALSE.  But typically better optimization
    can be achieved by analyzing more statements.  */
 
 static bool

@@ -756,16 +756,6 @@ gfc_finish_var_decl (tree decl, gfc_symbol * sym)
 		&& sym->attr.codimension && !sym->attr.allocatable)))
     TREE_STATIC (decl) = 1;
 
-  /* If derived-type variables with DTIO procedures are not made static
-     some bits of code referencing them get optimized away.
-     TODO Understand why this is so and fix it.  */
-  if (!sym->attr.use_assoc
-      && ((sym->ts.type == BT_DERIVED
-           && sym->ts.u.derived->attr.has_dtio_procs)
-	  || (sym->ts.type == BT_CLASS
-	      && CLASS_DATA (sym)->ts.u.derived->attr.has_dtio_procs)))
-    TREE_STATIC (decl) = 1;
-
   /* Treat asynchronous variables the same as volatile, for now.  */
   if (sym->attr.volatile_ || sym->attr.asynchronous)
     {
@@ -1717,14 +1707,14 @@ gfc_get_symbol_decl (gfc_symbol * sym)
       && (gfc_current_ns == sym->ns
 	  || (gfc_current_ns == sym->ns->parent
 	      && gfc_current_ns->proc_name->attr.flavor != FL_MODULE))
-      && !(sym->attr.use_assoc || sym->attr.dummy))
+      && !(sym->attr.use_assoc || sym->attr.dummy || sym->attr.result))
     gfc_defer_symbol_init (sym);
 
   if ((sym->ts.type == BT_DERIVED && sym->ts.u.derived->attr.pdt_comp)
       && (gfc_current_ns == sym->ns
 	  || (gfc_current_ns == sym->ns->parent
 	      && gfc_current_ns->proc_name->attr.flavor != FL_MODULE))
-      && !(sym->attr.use_assoc || sym->attr.dummy))
+      && !(sym->attr.use_assoc || sym->attr.dummy || sym->attr.result))
     gfc_defer_symbol_init (sym);
 
   /* Dummy PDT 'len' parameters should be checked when they are explicit.  */
@@ -2222,7 +2212,12 @@ get_proc_pointer_decl (gfc_symbol *sym)
 
   if ((sym->ns->proc_name
       && sym->ns->proc_name->backend_decl == current_function_decl)
-      || sym->attr.contained)
+      || sym->attr.contained
+      || (sym->ns->proc_name
+	  && sym->ns->proc_name->attr.flavor == FL_LABEL))
+    /* The last condition handles BLOCK constructs: the proc_name has
+       FL_LABEL flavor and its backend_decl is not set, but the proc pointer
+       belongs to the enclosing function (current_function_decl).  */
     gfc_add_decl_to_function (decl);
   else if (sym->ns->proc_name->attr.flavor != FL_MODULE)
     gfc_add_decl_to_parent_function (decl);
@@ -2585,11 +2580,27 @@ build_function_decl (gfc_symbol * sym, bool global)
 	      && flag_module_private)))
     sym->attr.access = ACCESS_PRIVATE;
 
+  bool in_module_contains = sym->module && sym->ns->proc_name
+			     && sym->ns->proc_name->attr.flavor == FL_MODULE;
+
   if (!current_function_decl
       && !sym->attr.entry_master && !sym->attr.is_main_program
       && (sym->attr.access != ACCESS_PRIVATE || sym->binding_label
-	  || sym->attr.public_used))
-    TREE_PUBLIC (fndecl) = 1;
+	  || sym->attr.public_used || in_module_contains))
+    {
+      TREE_PUBLIC (fndecl) = 1;
+
+      /* Mirror the variable treatment (see gfc_finish_var_decl): PRIVATE
+	 module procedures get global linkage but hidden visibility so the
+	 symbol is reachable from submodules in the same link without being
+	 exported to external DSOs.  */
+      if (in_module_contains && sym->attr.access == ACCESS_PRIVATE
+	  && !sym->attr.public_used)
+	{
+	  DECL_VISIBILITY (fndecl) = VISIBILITY_HIDDEN;
+	  DECL_VISIBILITY_SPECIFIED (fndecl) = true;
+	}
+    }
 
   if (sym->attr.referenced || sym->attr.entry_master)
     TREE_USED (fndecl) = 1;
@@ -2661,6 +2672,16 @@ build_function_decl (gfc_symbol * sym, bool global)
   /* Mark noinline functions.  */
   if (attr.ext_attr & (1 << EXT_ATTR_NOINLINE))
     DECL_UNINLINABLE (fndecl) = 1;
+
+  /* Mark inline functions.  Fortran has no 'inline' keyword, so both INLINE
+     and ALWAYS_INLINE set DECL_DECLARED_INLINE_P explicitly.  ALWAYS_INLINE
+     additionally disregards the inliner's size limits.  Setting only that
+     would make the middle-end warn that the always-inline function "might
+     not be inlinable".  */
+  if (attr.ext_attr & ((1 << EXT_ATTR_INLINE) | (1 << EXT_ATTR_ALWAYS_INLINE)))
+    DECL_DECLARED_INLINE_P (fndecl) = 1;
+  if (attr.ext_attr & (1 << EXT_ATTR_ALWAYS_INLINE))
+    DECL_DISREGARD_INLINE_LIMITS (fndecl) = 1;
 
   /* Mark noreturn functions.  */
   if (attr.ext_attr & (1 << EXT_ATTR_NORETURN))
@@ -5532,7 +5553,7 @@ gfc_trans_deferred_vars (gfc_symbol * proc_sym, gfc_wrapped_block * block)
 	      input_location = gfc_get_location (&n->u2.allocator->where);
 	      gfc_conv_expr (&se, n->u2.allocator);
 	    }
-	  /* We need to evalulate non-constants - also to find the location
+	  /* We need to evaluate non-constants - also to find the location
 	     after which the GOMP_alloc has to be added to - also as BLOCK
 	     does not yield a new BIND_EXPR_BODY.  */
 	  if (n->u2.allocator
@@ -7897,7 +7918,7 @@ done:
   gfc_init_block (&block);
 
   /* For bind(C), Fortran does not permit mixing 'pointer' with 'contiguous' (or
-     len=*). Thus, when copy out is needed, the bounds ofthe descriptor remain
+     len=*). Thus, when copy out is needed, the bounds of the descriptor remain
      unchanged.  */
   if (do_copy_inout)
     {
@@ -8300,7 +8321,16 @@ gfc_generate_function_code (gfc_namespace * ns)
 
   finish_oacc_declare (ns, sym, false);
 
-  tmp = gfc_trans_code (ns->code);
+  if (gfc_current_ns != ns)
+    {
+      gfc_namespace *old_current_ns = gfc_current_ns;
+      gfc_current_ns = ns;
+      tmp = gfc_trans_code (ns->code);
+      gfc_current_ns = old_current_ns;
+    }
+  else
+    tmp = gfc_trans_code (ns->code);
+
   gfc_add_expr_to_block (&body, tmp);
 
   /* This permits the return value to be correctly initialized, even when the

@@ -4403,6 +4403,8 @@ register_local_var_uses (tree *stmt, int *do_subtree, void *d)
 	 identify them in the coroutine frame.  */
       tree lvname = DECL_NAME (lvar);
       char *buf = NULL;
+      if (name_independent_decl_p (lvar))
+	lvname = NULL_TREE;
 
       /* The outermost bind scope contains the artificial variables that
 	 we inject to implement the coro state machine.  We want to be able
@@ -5057,7 +5059,7 @@ cp_coroutine_transform::build_ramp_function ()
     = build_coroutine_frame_alloc_expr (promise_type, orig_fn_decl, fn_start,
 					grooaf, &param_uses, frame_size);
 
-  /* We must have a useable allocator to proceed.  */
+  /* We must have a usable allocator to proceed.  */
   if (!new_fn_call || new_fn_call == error_mark_node)
     return false;
 
@@ -5356,7 +5358,7 @@ cp_coroutine_transform::build_ramp_function ()
   else
     {
       /* Per CWG2563, we keep the result of promise.get_return_object () in
-	 a temp which is then used to intialize the return object, including
+	 a temp which is then used to initialize the return object, including
 	 NVRO.  */
 
       coro_gro

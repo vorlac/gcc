@@ -107,7 +107,7 @@ enum vect_reduction_type {
        for (int i = 0; i < VF; ++i)
 	 res = res OP val[i];
 
-     (with no reassocation).  */
+     (with no reassociation).  */
   FOLD_LEFT_REDUCTION
 };
 
@@ -328,6 +328,10 @@ struct _slp_tree {
   vec<stmt_vec_info> stmts;
   /* A group of scalar operands to be vectorized together.  */
   vec<tree> ops;
+  /* A set of lane indices that are live and to be code-generated from
+     this SLP node.  */
+  vec<unsigned> live_lanes;
+
   /* The representative that should be used for analysis and
      code generation.  */
   stmt_vec_info representative;
@@ -457,6 +461,7 @@ public:
 #define SLP_TREE_CHILDREN(S)                     (S)->children
 #define SLP_TREE_SCALAR_STMTS(S)                 (S)->stmts
 #define SLP_TREE_SCALAR_OPS(S)                   (S)->ops
+#define SLP_TREE_LIVE_LANES(S)			 (S)->live_lanes
 #define SLP_TREE_REF_COUNT(S)                    (S)->refcnt
 #define SLP_TREE_VEC_DEFS(S)                     (S)->vec_defs
 #define SLP_TREE_LOAD_PERMUTATION(S)             (S)->load_permutation
@@ -1213,7 +1218,7 @@ public:
   _loop_vec_info *main_loop_info;
 
   /* For loops being epilogues of already vectorized loops
-     this points to the preceeding vectorized (possibly epilogue) loop.
+     this points to the preceding vectorized (possibly epilogue) loop.
      Otherwise NULL.  */
   _loop_vec_info *orig_loop_info;
 
@@ -1236,6 +1241,10 @@ public:
      For counted loops, this IV controls the natural exits of the loop.  */
   edge scalar_loop_main_exit;
 
+  /* Indicate if the multiple exit loop has any side-effects that require it to
+     have a scalar epilogue.  */
+  bool early_break_needs_epilogue;
+
   /* Used to store the list of stores needing to be moved if doing early
      break vectorization as they would violate the scalar loop semantics if
      vectorized in their current location.  These are stored in order that they
@@ -1251,7 +1260,7 @@ public:
   auto_vec<gimple*> early_break_vuses;
 
   /* The IV adjustment value for inductions that needs to be materialized
-     inside the relavent exit blocks in order to adjust for early break.  */
+     inside the relevant exit blocks in order to adjust for early break.  */
   tree early_break_niters_var;
 
   /* The type of the variable to be used to create the scalar IV for early break
@@ -1320,6 +1329,7 @@ public:
 #define LOOP_VINFO_PEELING_FOR_GAPS(L)     (L)->peeling_for_gaps
 #define LOOP_VINFO_PEELING_FOR_NITER(L)    (L)->peeling_for_niter
 #define LOOP_VINFO_EARLY_BREAKS(L)         (L)->early_breaks
+#define LOOP_VINFO_EARLY_BRK_NEEDS_EPILOG(L) (L)->early_break_needs_epilogue
 #define LOOP_VINFO_EARLY_BRK_STORES(L)     (L)->early_break_stores
 #define LOOP_VINFO_EARLY_BREAKS_VECT_PEELED(L)  \
   ((single_pred ((L)->loop->latch) != (L)->vec_loop_main_exit->src) \
@@ -1646,10 +1656,6 @@ public:
 
   /* True if this is only suitable for SLP vectorization.  */
   bool slp_vect_only_p;
-
-  /* True if this is a pattern that can only be handled by SLP
-     vectorization.  */
-  bool slp_vect_pattern_only_p;
 };
 
 /* Information about a gather/scatter call.  */
@@ -1728,7 +1734,6 @@ struct gather_scatter_info {
 #define STMT_VINFO_REDUC_CODE(S)	(S)->reduc_code
 #define STMT_VINFO_REDUC_DEF(S)		(S)->reduc_def
 #define STMT_VINFO_SLP_VECT_ONLY(S)     (S)->slp_vect_only_p
-#define STMT_VINFO_SLP_VECT_ONLY_PATTERN(S) (S)->slp_vect_pattern_only_p
 #define STMT_VINFO_REDUC_VECTYPE_IN(S)  (S)->reduc_vectype_in
 
 #define DR_GROUP_FIRST_ELEMENT(S) \
@@ -1777,6 +1782,11 @@ public:
 				      tree vectype, int misalign,
 				      vect_cost_model_location where);
 
+  /* Update the costs in response to adding costs in V which are all from
+     vectorizing NODE to the respective part.  */
+  virtual unsigned int add_slp_cost (slp_tree node,
+				     const array_slice<stmt_info_for_cost> &v);
+
   /* Finish calculating the cost of the code.  The results can be
      read back using the functions below.
 
@@ -1804,8 +1814,11 @@ public:
   unsigned int epilogue_cost () const;
   unsigned int outside_cost () const;
   unsigned int total_cost () const;
+
   unsigned int suggested_unroll_factor () const;
   machine_mode suggested_epilogue_mode (int &masked) const;
+
+  vec_info *vinfo () const { return m_vinfo; }
   bool costing_for_scalar () const { return m_costing_for_scalar; }
 
 protected:
@@ -2478,7 +2491,8 @@ class loop *slpeel_tree_duplicate_loop_to_edge_cfg (class loop *, edge,
 						    class loop *, edge,
 						    edge, edge *, bool = true,
 						    vec<basic_block> * = NULL,
-						    bool = false, bool = false);
+						    bool = false, bool = false,
+						    bool = true);
 class loop *vect_loop_versioning (loop_vec_info, gimple *);
 extern class loop *vect_do_peeling (loop_vec_info, tree, tree,
 				    tree *, tree *, tree *, int, bool, bool,
@@ -2730,10 +2744,7 @@ extern bool vectorizable_early_exit (loop_vec_info, stmt_vec_info,
 extern bool vect_emulated_vector_p (tree);
 extern bool vect_can_vectorize_without_simd_p (tree_code);
 extern bool vect_can_vectorize_without_simd_p (code_helper);
-extern int vect_get_known_peeling_cost (loop_vec_info, int, int *,
-					stmt_vector_for_cost *,
-					stmt_vector_for_cost *,
-					stmt_vector_for_cost *);
+extern int vect_get_known_peeling_cost (loop_vec_info, int);
 extern tree cse_and_gimplify_to_preheader (loop_vec_info, tree);
 
 /* Nonlinear induction.  */
@@ -2776,7 +2787,7 @@ extern int vect_get_place_in_interleaving_chain (stmt_vec_info, stmt_vec_info);
 extern slp_tree vect_create_new_slp_node (unsigned, tree_code);
 extern void vect_free_slp_tree (slp_tree);
 extern bool compatible_calls_p (gcall *, gcall *, bool);
-extern int vect_slp_child_index_for_operand (const gimple *, int op, bool);
+extern int vect_slp_child_index_for_operand (const stmt_vec_info, int op);
 
 extern tree prepare_vec_mask (loop_vec_info, tree, tree, tree,
 			      gimple_stmt_iterator *);
@@ -2889,7 +2900,7 @@ extern size_t num__slp_patterns;
    The following routines are provided to simplify costing decisions in
    target code.  Please add more as needed.  */
 
-/* Return true if an operaton of kind KIND for STMT_INFO represents
+/* Return true if an operation of kind KIND for STMT_INFO represents
    the extraction of an element from a vector in preparation for
    storing the element to memory.  */
 inline bool

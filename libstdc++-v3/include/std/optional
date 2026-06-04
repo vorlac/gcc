@@ -39,6 +39,7 @@
 #define __glibcxx_want_optional_range_support
 #define __glibcxx_want_constrained_equality
 #define __glibcxx_want_constexpr_exceptions
+#define __glibcxx_want_hardened_optional
 #include <bits/version.h>
 
 #ifdef __cpp_lib_optional // C++ >= 17
@@ -60,9 +61,11 @@
 # include <concepts>
 #endif
 #ifdef __cpp_lib_optional_range_support // C++ >= 26
-# include <bits/formatfwd.h>
+# if _GLIBCXX_HOSTED
+#  include <bits/formatfwd.h>
+# endif
 # include <bits/ranges_base.h>
-# include <bits/stl_iterator.h>
+# include <bits/range_access.h>
 #endif
 
 namespace std _GLIBCXX_VISIBILITY(default)
@@ -2285,9 +2288,11 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
     ranges::enable_borrowed_range<optional<_Tp&>> = true;
 #endif
 
+#if _GLIBCXX_HOSTED
   template<typename _Tp>
     inline constexpr range_format
       format_kind<optional<_Tp>> = range_format::disabled;
+#endif
 #endif // __cpp_lib_optional_range_support
 
 #undef _GLIBCXX_USE_CONSTRAINTS_FOR_OPTIONAL

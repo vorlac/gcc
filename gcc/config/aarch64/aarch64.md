@@ -400,6 +400,7 @@
     UNSPEC_SVE_PREFETCH
     UNSPEC_SVE_PREFETCH_GATHER
     UNSPEC_SVE_COMPACT
+    UNSPEC_SVE_EXPAND
     UNSPEC_SVE_SPLICE
     UNSPEC_GEN_TAG		; Generate a 4-bit MTE tag.
     UNSPEC_GEN_TAG_RND		; Generate a random 4-bit MTE tag.
@@ -502,7 +503,7 @@
 ;; Q registers and is equivalent to "simd".
 
 (define_enum "arches" [any rcpc8_4 fp fp_q base_simd nobase_simd
-		       simd nosimd sve fp16 sme cssc])
+		       simd nosimd sve fp16 sme cssc sve2p2_or_sme2p2])
 
 (define_enum_attr "arch" "arches" (const_string "any"))
 
@@ -581,7 +582,10 @@
 	     (match_test "TARGET_SVE"))
 
 	(and (eq_attr "arch" "sme")
-	     (match_test "TARGET_SME"))))
+	     (match_test "TARGET_SME"))
+
+	(and (eq_attr "arch" "sve2p2_or_sme2p2")
+	     (match_test "TARGET_SVE2p2_OR_SME2p2"))))
     (const_string "yes")
     (const_string "no")))
 
@@ -1819,7 +1823,7 @@
      [r, r   ; mov_reg  , *   , 4] mov\t%x0, %x1
      [k, r   ; mov_reg  , *   , 4] mov\t%0, %x1
      [r, k   ; mov_reg  , *   , 4] mov\t%x0, %1
-     [r, O   ; mov_imm  , *   , 4] << aarch64_is_mov_xn_imm (INTVAL (operands[1])) ? "mov\t%x0, %1" : "mov\t%w0, %1";
+     [r, O   ; mov_imm  , *   , 4] << aarch64_output_move_imm (operands[1]);
      [r, n   ; mov_imm  , *   ,16] #
      /* The "mov_imm" type for CNT is just a placeholder.  */
      [r, Usv ; mov_imm  , sve , 4] << aarch64_output_sve_cnt_immediate ("cnt", "%x0", operands[1]);
@@ -2055,7 +2059,7 @@
      [ r        , m   ; load_8      , *     ] ldr\t%x0, %1
      [ m        , rY  ; store_8     , *     ] str\t%x1, %0
      [ r        , r   ; mov_reg     , *     ] mov\t%x0, %x1
-     [ r        , O   ; fconstd     , *     ] << aarch64_is_mov_xn_imm (INTVAL (operands[1])) ? "mov\t%x0, %1" : "mov\t%w0, %1";
+     [ r        , O   ; fconstd     , *     ] << aarch64_output_move_imm (operands[1]);
   }
 )
 
@@ -4534,7 +4538,7 @@
 
 ;; umax (a, add (a, b)) => [sum, ovf] = adds (a, b); !ovf ? sum : a
 ;; umin (a, add (a, b)) => [sum, ovf] = adds (a, b); !ovf ? a : sum
-;; ... and the commutated versions:
+;; ... and the commuted versions:
 ;; umax (a, add (b, a)) => [sum, ovf] = adds (b, a); !ovf ? sum : a
 ;; umin (a, add (b, a)) => [sum, ovf] = adds (b, a); !ovf ? a : sum
 (define_insn_and_split "*aarch64_plus_within_<optab><mode>3_<ovf_commutate>"
@@ -4988,8 +4992,7 @@
     else
       /* Otherwise, generate table-based CRC.  */
       expand_reversed_crc_table_based (operands[0], operands[1], operands[2],
-				       operands[3], <ALLI:MODE>mode,
-				       generate_reflecting_code_standard);
+				       operands[3], <ALLI:MODE>mode);
     DONE;
   }
 )
@@ -5784,6 +5787,11 @@
   ""
   "rbit\\t%<w>0, %<w>1"
   [(set_attr "type" "rbit")]
+)
+
+(define_expand "bitreverse<mode>2"
+  [(set (match_operand:GPI 0 "register_operand")
+	(bitreverse:GPI (match_operand:GPI 1 "register_operand")))]
 )
 
 (define_expand "ffs<mode>2"
@@ -8125,11 +8133,10 @@
   {
     if (TARGET_SVE)
       {
-	rtx abi = aarch64_gen_callee_cookie (AARCH64_ISA_MODE,
-					     aarch64_tlsdesc_abi_id (),
-					     false);
+	rtx abi = aarch64_gen_callee_cookie (AARCH64_ISA_MODE, false);
 	rtx_insn *call
 	  = emit_call_insn (gen_tlsdesc_small_sve_<mode> (operands[0], abi));
+	CALL_INSN_ABI_ID (call) = aarch64_tlsdesc_abi_id ();
 	RTL_CONST_CALL_P (call) = 1;
       }
     else

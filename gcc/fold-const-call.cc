@@ -1055,7 +1055,7 @@ fold_const_call_ss (wide_int *result, combined_fn fn, const wide_int_ref &arg,
 	int tmp;
 	if (wi::ne_p (arg, 0))
 	  tmp = wi::clz (arg);
-	else if (TREE_CODE (arg_type) == BITINT_TYPE)
+	else if (BITINT_TYPE_P (arg_type))
 	  tmp = TYPE_PRECISION (arg_type);
 	else if (!CLZ_DEFINED_VALUE_AT_ZERO (SCALAR_INT_TYPE_MODE (arg_type),
 					     tmp))
@@ -1070,7 +1070,7 @@ fold_const_call_ss (wide_int *result, combined_fn fn, const wide_int_ref &arg,
 	int tmp;
 	if (wi::ne_p (arg, 0))
 	  tmp = wi::ctz (arg);
-	else if (TREE_CODE (arg_type) == BITINT_TYPE)
+	else if (BITINT_TYPE_P (arg_type))
 	  tmp = TYPE_PRECISION (arg_type);
 	else if (!CTZ_DEFINED_VALUE_AT_ZERO (SCALAR_INT_TYPE_MODE (arg_type),
 					     tmp))
@@ -1100,6 +1100,15 @@ fold_const_call_ss (wide_int *result, combined_fn fn, const wide_int_ref &arg,
     case CFN_BUILT_IN_BSWAP128:
       *result = wi::bswap (wide_int::from (arg, precision,
 					   TYPE_SIGN (arg_type)));
+      return true;
+
+    case CFN_BUILT_IN_BITREVERSE8:
+    case CFN_BUILT_IN_BITREVERSE16:
+    case CFN_BUILT_IN_BITREVERSE32:
+    case CFN_BUILT_IN_BITREVERSE64:
+    case CFN_BUILT_IN_BITREVERSE128:
+      *result = wi::bitreverse (wide_int::from (arg, precision,
+						TYPE_SIGN (arg_type)));
       return true;
 
     default:
@@ -1475,6 +1484,38 @@ fold_const_vec_extract (tree, tree arg0, tree)
     return elem;
 
   return NULL_TREE;
+}
+
+/* Try to fold scalar integer IFN_SAT_ADD with operands OP0 and OP1.  */
+
+static tree
+fold_internal_fn_sat_add (tree type, tree op0, tree op1)
+{
+  if (!INTEGRAL_NB_TYPE_P (type))
+    return NULL_TREE;
+
+  if (TREE_CODE (op0) != INTEGER_CST
+      || TREE_CODE (op1) != INTEGER_CST)
+    return NULL_TREE;
+
+  wi::overflow_type overflow;
+  unsigned int prec = TYPE_PRECISION (type);
+  wide_int result = wi::add (wi::to_wide (op0), wi::to_wide (op1),
+			     TYPE_SIGN (type), &overflow);
+
+  if (overflow != wi::OVF_NONE)
+    {
+      if (TYPE_UNSIGNED (type))
+	result = wi::max_value (prec, UNSIGNED);
+      else if (overflow == wi::OVF_OVERFLOW)
+	result = wi::max_value (prec, SIGNED);
+      else if (overflow == wi::OVF_UNDERFLOW)
+	result = wi::min_value (prec, SIGNED);
+      else
+	return NULL_TREE;
+    }
+
+  return wide_int_to_tree (type, result);
 }
 
 /* Try to evaluate:
@@ -1885,6 +1926,9 @@ fold_const_call (combined_fn fn, tree type, tree arg0, tree arg1)
 
     case CFN_VEC_EXTRACT:
       return fold_const_vec_extract (type, arg0, arg1);
+
+    case CFN_SAT_ADD:
+      return fold_internal_fn_sat_add (type, arg0, arg1);
 
     case CFN_UBSAN_CHECK_ADD:
     case CFN_ADD_OVERFLOW:

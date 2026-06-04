@@ -360,9 +360,27 @@ extern bool can_move_by_pieces (unsigned HOST_WIDE_INT, unsigned int);
 
 extern unsigned HOST_WIDE_INT highest_pow2_factor (const_tree);
 
+struct ctor_completeness
+{
+  /* True if the type being constructed has padding that definitely needs to be
+     zero-initialized, or some element of the constructor does not have a
+     complete initializer, or both.  */
+  bool sparse : 1;
+  /* True if the type being constructed is padded (or contains elements that are
+     padded), that padding is not part of a union, and the constructor had not
+     yet been categorized as sparse when all of this was discovered.
+   */
+  bool padded_non_union : 1;
+  /* True if the type being constructed is padded (or contains elements that are
+     padded), that padding is part of a union, and the constructor had not yet
+     been categorized as sparse when all of this was discovered.
+   */
+  bool padded_union : 1;
+};
+
 extern bool categorize_ctor_elements (const_tree, HOST_WIDE_INT *,
 				      HOST_WIDE_INT *, HOST_WIDE_INT *,
-				      int *);
+				      ctor_completeness *);
 extern bool type_has_padding_at_level_p (tree);
 extern bool immediate_const_ctor_p (const_tree, unsigned int words = 1);
 extern void store_constructor (tree, rtx, int, poly_int64, bool);
@@ -386,8 +404,7 @@ gf2n_poly_long_div_quotient (unsigned HOST_WIDE_INT, unsigned short);
 /* Generate table-based CRC.  */
 extern void generate_reflecting_code_standard (rtx *);
 extern void expand_crc_table_based (rtx, rtx, rtx, rtx, machine_mode);
-extern void expand_reversed_crc_table_based (rtx, rtx, rtx, rtx, machine_mode,
-					     void (*) (rtx *));
+extern void expand_reversed_crc_table_based (rtx, rtx, rtx, rtx, machine_mode);
 
 /* Cache of the "extended" flag in the target's _BitInt description
    for use during expand.  */

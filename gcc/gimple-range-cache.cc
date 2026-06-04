@@ -185,7 +185,7 @@ sbr_vector::bb_range_p (const_basic_block bb)
   return false;
 }
 
-// Like an sbr_vector, except it uses a bitmap to manage whetehr  vale is set
+// Like an sbr_vector, except it uses a bitmap to manage whether value is set
 // or not rather than cleared memory.
 
 class sbr_lazy_vector : public sbr_vector
@@ -404,7 +404,7 @@ block_range_cache::set_bb_range (tree name, const_basic_block bb,
 	}
       else if (last_basic_block_for_fn (cfun) < param_vrp_vector_threshold)
 	{
-	  // For small CFGs use the basic vector implemntation.
+	  // For small CFGs use the basic vector implementation.
 	  void *r = m_range_allocator->alloc (sizeof (sbr_vector));
 	  m_ssa_ranges[v] = new (r) sbr_vector (TREE_TYPE (name),
 						m_range_allocator);
@@ -1019,10 +1019,12 @@ ranger_cache::ranger_cache (int not_executable_flag, bool use_imm_uses)
 	gori_ssa ()->exports (bb);
     }
   m_update = new update_list ();
+  m_stale = BITMAP_ALLOC (NULL);
 }
 
 ranger_cache::~ranger_cache ()
 {
+  BITMAP_FREE (m_stale);
   delete m_update;
   destroy_infer_oracle ();
   destroy_relation_oracle ();
@@ -1064,6 +1066,17 @@ ranger_cache::get_global_range (vrange &r, tree name) const
   return false;
 }
 
+// Mark NAME as stale.  The next query of NAME forces a recalculation.
+
+void
+ranger_cache::mark_stale (tree name)
+{
+  // Only mark it as stale if it has been processed. If it has no range
+  // it will be calculated at the next request anyway.
+  if (m_globals.has_range (name))
+    bitmap_set_bit (m_stale, SSA_NAME_VERSION (name));
+}
+
 // Get the global range for NAME, and return in R.  Return false if the
 // global range is not set, and R will contain the legacy global value.
 // CURRENT_P is set to true if the value was in cache and not stale.
@@ -1100,6 +1113,13 @@ ranger_cache::get_global_range (vrange &r, tree name, bool &current_p)
 	    }
 	}
       m_globals.set_range (name, r);
+    }
+
+  // If NAME is out of date, clear the bit and mark as not current.
+  if (bitmap_bit_p (m_stale, SSA_NAME_VERSION (name)))
+    {
+      bitmap_clear_bit (m_stale, SSA_NAME_VERSION (name));
+      current_p = false;
     }
 
   // If the existing value was not current, mark it as always current.
@@ -1254,19 +1274,21 @@ bool
 ranger_cache::range_of_expr (vrange &r, tree name, gimple *stmt)
 {
   if (!gimple_range_ssa_p (name))
-    {
-      get_tree_range (r, name, stmt);
-      return true;
-    }
-
-  basic_block bb = gimple_bb (stmt);
-  gimple *def_stmt = SSA_NAME_DEF_STMT (name);
-  basic_block def_bb = gimple_bb (def_stmt);
-
-  if (bb == def_bb)
-    range_of_def (r, name, bb);
+    get_tree_range (r, name, stmt);
+  /* If no context is provided, pick up the global value.  */
+  else if (!stmt)
+    get_global_range (r, name);
   else
-    entry_range (r, name, bb, RFD_NONE);
+    {
+      basic_block bb = gimple_bb (stmt);
+      gimple *def_stmt = SSA_NAME_DEF_STMT (name);
+      basic_block def_bb = gimple_bb (def_stmt);
+
+      if (bb == def_bb)
+	range_of_def (r, name, bb);
+      else
+	entry_range (r, name, bb, RFD_NONE);
+    }
   return true;
 }
 

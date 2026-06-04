@@ -32,6 +32,7 @@
 
 #pragma GCC system_header
 
+#define __glibcxx_want_hardened_inplace_vector
 #define __glibcxx_want_inplace_vector
 #include <bits/version.h>
 
@@ -41,7 +42,7 @@
 #include <optional>
 #include <bits/stdexcept_throw.h>
 #include <bits/range_access.h>
-#include <bits/ranges_base.h> // borrowed_iterator_t, __detail::__container_compatible_range
+#include <bits/ranges_base.h> // borrowed_iterator_t, __detail::__container_compatible_range, __static_sized_range
 #include <bits/ranges_util.h> // subrange
 #include <bits/ranges_uninitialized.h>
 #include <bits/stl_construct.h>
@@ -120,7 +121,14 @@ _GLIBCXX_BEGIN_NAMESPACE_CONTAINER
 	constexpr
 	inplace_vector(from_range_t, _Rg&& __rg)
 	: inplace_vector()
-	{ append_range(__rg); }
+	{ 
+	  // _GLIBCXX_RESOLVE_LIB_DEFECTS
+	  // 4396. Improve inplace_vector(from_range_t, R&& rg)
+	  if constexpr (ranges::__static_sized_range<_Rg>)
+	    static_assert(ranges::size(__rg) <= _Nm);
+
+	  append_range(__rg);
+	}
 
       constexpr
       inplace_vector(initializer_list<_Tp> __il)
@@ -248,9 +256,11 @@ _GLIBCXX_BEGIN_NAMESPACE_CONTAINER
 	{
 	  if constexpr (ranges::forward_range<_Rg> || ranges::sized_range<_Rg>)
 	    {
-	      const auto __sz = ranges::distance(__rg);
-	      if (__sz > _Nm)
+	      const auto __len = ranges::distance(__rg);
+	      if (__len > _Nm)
 		__throw_bad_alloc();
+
+	      const size_t __sz = size_t(__len);
 	      if (__sz <= size())
 		{
 		  ranges::copy_n(ranges::begin(__rg), __sz, data());
@@ -523,9 +533,11 @@ _GLIBCXX_BEGIN_NAMESPACE_CONTAINER
 	{
 	  if constexpr (ranges::forward_range<_Rg> || ranges::sized_range<_Rg>)
 	    {
-	      const auto __sz = ranges::distance(__rg);
-	      if (__sz > (_Nm - size()))
+	      const auto __len = ranges::distance(__rg);
+	      if (__len > (_Nm - size()))
 		__throw_bad_alloc();
+
+	      const size_t __sz = size_t(__len);
 	      // Bounded on output range due PR121143
 	      ranges::uninitialized_copy(
 		ranges::begin(__rg), unreachable_sentinel,
@@ -930,6 +942,11 @@ _GLIBCXX_BEGIN_NAMESPACE_CONTAINER
 	constexpr
 	inplace_vector(from_range_t, _Rg&& __rg)
 	{
+	  // _GLIBCXX_RESOLVE_LIB_DEFECTS
+	  // 4396. Improve inplace_vector(from_range_t, R&& rg)
+	  if constexpr (ranges::__static_sized_range<_Rg>)
+	    static_assert(ranges::size(__rg) == 0);
+
 	  if (ranges::begin(__rg) != ranges::end(__rg))
 	    __throw_bad_alloc();
 	}

@@ -37,7 +37,7 @@ extern ALLOC_POOL_ID_TYPE last_id;
 class pool_usage: public mem_usage
 {
 public:
-  /* Default contructor.  */
+  /* Default constructor.  */
   pool_usage (): m_element_size (0), m_pool_name ("") {}
   /* Constructor.  */
   pool_usage (size_t allocated, size_t times, size_t peak,
@@ -499,10 +499,11 @@ public:
 
   /* Allocate memory for instance of type T and call a default constructor.  */
 
-  inline T *
-  allocate () ATTRIBUTE_MALLOC
+  template<typename... Ts>
+  inline ATTRIBUTE_MALLOC T *
+  allocate (Ts... args)
   {
-    return ::new (m_allocator.allocate ()) T;
+    return ::new (m_allocator.allocate ()) T (std::forward<Ts> (args)...);
   }
 
   /* Allocate memory for instance of type T and return void * that

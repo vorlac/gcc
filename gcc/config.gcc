@@ -283,7 +283,7 @@ esac
 # Obsolete configurations.
 case ${target} in
      ia64*-*-hpux* | ia64*-*-*vms* | ia64*-*-elf*	\
-   | m32c*-*-* | epiphany*-*-* | rl78*-*-*		\
+   | epiphany*-*-* | rl78*-*-*		\
  )
     if test "x$enable_obsolete" != xyes; then
       echo "*** Configuration ${target} is obsolete." >&2
@@ -359,11 +359,6 @@ tm_p_file=
 cpu_type=`echo ${target} | sed 's/-.*$//'`
 cpu_is_64bit=
 case ${target} in
-m32c*-*-*)
-        cpu_type=m32c
-	tmake_file=m32c/t-m32c
-	target_has_targetm_common=no
-        ;;
 aarch64*-*-*)
 	cpu_type=aarch64
 	extra_headers="arm_fp16.h arm_neon.h arm_bf16.h arm_acle.h arm_sve.h arm_sme.h arm_neon_sve_bridge.h arm_private_fp8.h arm_private_neon_types.h"
@@ -555,7 +550,7 @@ powerpc*-*-*)
 	extra_headers="${extra_headers} ppu_intrinsics.h spu2vmx.h vec_types.h si2vmx.h"
 	extra_headers="${extra_headers} amo.h"
 	case x$with_cpu in
-	    xpowerpc64|xdefault64|x6[23]0|x970|xG5|xpower[3456789]|xpower1[01]|xpower6x|xrs64a|xcell|xa2|xe500mc64|xe5500|xe6500)
+	    xpowerpc64|xdefault64|x6[23]0|x970|xG5|xpower[3456789]|xpower1[01]|xfuture|xpower6x|xrs64a|xcell|xa2|xe500mc64|xe5500|xe6500)
 		cpu_is_64bit=yes
 		;;
 	esac
@@ -572,7 +567,7 @@ riscv*)
 	extra_objs="riscv-builtins.o riscv-c.o riscv-sr.o riscv-shorten-memrefs.o riscv-selftests.o riscv-string.o"
 	extra_objs="${extra_objs} riscv-v.o riscv-vsetvl.o riscv-vector-costs.o riscv-avlprop.o riscv-vect-permconst.o"
 	extra_objs="${extra_objs} riscv-vector-builtins.o riscv-vector-builtins-shapes.o riscv-vector-builtins-bases.o sifive-vector-builtins-bases.o andes-vector-builtins-bases.o"
-	extra_objs="${extra_objs} thead.o riscv-target-attr.o riscv-zicfilp.o riscv-bclr-lowest-set-bit.o riscv-opt-popretz.o"
+	extra_objs="${extra_objs} thead.o riscv-target-attr.o riscv-zicfilp.o riscv-bclr-lowest-set-bit.o riscv-opt-popretz.o riscv-fusion.o"
 	d_target_objs="riscv-d.o"
 	extra_headers="riscv_vector.h riscv_crypto.h riscv_bitmanip.h riscv_th_vector.h sifive_vector.h andes_vector.h"
 	target_gtfiles="$target_gtfiles \$(srcdir)/config/riscv/riscv-vector-builtins.cc"
@@ -768,7 +763,7 @@ sapphirerapids alderlake rocketlake eden-x2 nano nano-1000 nano-2000 nano-3000 \
 nano-x2 eden-x4 nano-x4 lujiazui yongfeng shijidadao x86-64 x86-64-v2 \
 x86-64-v3 x86-64-v4 sierraforest graniterapids graniterapids-d grandridge \
 arrowlake arrowlake-s clearwaterforest pantherlake diamondrapids novalake \
-native"
+c86-4g-m4 c86-4g-m6 c86-4g-m7 native"
 
 # Additional x86 processors supported by --with-cpu=.  Each processor
 # MUST be separated by exactly one space.
@@ -1331,6 +1326,15 @@ aarch64*-*-gnu*)
 aarch64-*-mingw*)
 	tm_file="${tm_file} aarch64/aarch64-abi-ms.h"
 	tm_file="${tm_file} aarch64/aarch64-coff.h"
+	case ${enable_threads} in
+	  "" | yes | win32)
+	    thread_file='win32'
+	    ;;
+	  posix)
+	    thread_file='posix'
+	    tm_file="${tm_file} mingw/mingw-pthread.h"
+	    ;;
+	esac
 	tm_file="${tm_file} aarch64/cygming.h"
 	tm_file="${tm_file} mingw/mingw32.h"
 	tm_file="${tm_file} mingw/mingw-stdint.h"
@@ -1347,21 +1351,13 @@ aarch64-*-mingw*)
 	cxx_target_objs="${cxx_target_objs} msformat-c.o"
 	d_target_objs="${d_target_objs} winnt-d.o"
 	tmake_file="${tmake_file} mingw/t-cygming"
-	case ${enable_threads} in
-	  "" | yes | win32)
-	    thread_file='win32'
-	    ;;
-	  posix)
-	    thread_file='posix'
-	    ;;
-	esac
 	default_use_cxa_atexit=yes
 	use_gcc_stdint=wrap
 	user_headers_inc_next_post="${user_headers_inc_next_post} float.h"
 	tm_defines="${tm_defines} TARGET_AARCH64_MS_ABI=1"
 	;;
 aarch64*-wrs-vxworks*)
-        tm_file="${tm_file} elfos.h aarch64/aarch64-elf.h"
+        tm_file="${tm_file} elfos.h aarch64/aarch64-elf.h aarch64/aarch64-errata.h"
         tm_file="${tm_file} vx-common.h vxworks.h aarch64/aarch64-vxworks.h"
         tmake_file="${tmake_file} aarch64/t-aarch64 aarch64/t-aarch64-vxworks"
         ;;
@@ -2300,7 +2296,7 @@ i[34567]86-*-mingw* | x86_64-*-mingw*)
 			;;
 	esac
 	if test x$enable_threads = xposix ; then
-		tm_file="${tm_file} i386/mingw-pthread.h"
+		tm_file="${tm_file} mingw/mingw-pthread.h"
 	fi
 	if test x$enable_threads = xmcf ; then
 		tm_file="${tm_file} i386/mingw-mcfgthread.h"
@@ -3711,11 +3707,6 @@ am33_2.0-*-linux*)
 	gas=yes gnu_ld=yes
 	use_collect2=no
 	;;
-m32c-*-elf*)
-	tm_file="elfos.h newlib-stdint.h ${tm_file}"
-	c_target_objs="m32c-pragma.o"
-	cxx_target_objs="m32c-pragma.o"
- 	;;
 *)
 	echo "*** Configuration ${target} not supported" 1>&2
 	exit 1
@@ -4013,6 +4004,18 @@ case ${target} in
 	cpu=pentiumpro
 	arch_without_sse2=yes
 	;;
+      c86_4g_m4-*)
+	arch=c86-4g-m4
+	cpu=c86-4g-m4
+	;;
+      c86_4g_m6-*)
+	arch=c86-4g-m6
+	cpu=c86-4g-m6
+	;;
+      c86_4g_m7-*)
+	arch=c86-4g-m7
+	cpu=c86-4g-m7
+	;;
       *)
 	arch=pentiumpro
 	cpu=generic
@@ -4114,6 +4117,18 @@ case ${target} in
       corei7-*)
 	arch=corei7
 	cpu=corei7
+	;;
+      c86_4g_m4-*)
+	arch=c86-4g-m4
+	cpu=c86-4g-m4
+	;;
+      c86_4g_m6-*)
+	arch=c86-4g-m6
+	cpu=c86-4g-m6
+	;;
+      c86_4g_m7-*)
+	arch=c86-4g-m7
+	cpu=c86-4g-m7
 	;;
       *)
 	arch=x86-64
@@ -5853,7 +5868,7 @@ case "${target}" in
 				eval "with_$which=405"
 				;;
 			"" | common | native \
-			| power[3456789] | power1[01] | power5+ | power6x \
+			| power[3456789] | power1[01] | future | power5+ | power6x \
 			| powerpc | powerpc64 | powerpc64le \
 			| rs64 \
 			| 401 | 403 | 405 | 405fp | 440 | 440fp | 464 | 464fp \

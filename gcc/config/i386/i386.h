@@ -401,7 +401,6 @@ extern unsigned char ix86_tune_features[X86_TUNE_LAST];
 	ix86_tune_features[X86_TUNE_PROLOGUE_USING_MOVE]
 #define TARGET_EPILOGUE_USING_MOVE \
 	ix86_tune_features[X86_TUNE_EPILOGUE_USING_MOVE]
-#define TARGET_SHIFT1		ix86_tune_features[X86_TUNE_SHIFT1]
 #define TARGET_USE_FFREEP	ix86_tune_features[X86_TUNE_USE_FFREEP]
 #define TARGET_INTER_UNIT_MOVES_TO_VEC \
 	ix86_tune_features[X86_TUNE_INTER_UNIT_MOVES_TO_VEC]
@@ -481,6 +480,8 @@ extern unsigned char ix86_tune_features[X86_TUNE_LAST];
 	ix86_tune_features[X86_TUNE_AVX256_AVOID_VEC_PERM]
 #define TARGET_AVX512_SPLIT_REGS \
 	ix86_tune_features[X86_TUNE_AVX512_SPLIT_REGS]
+#define TARGET_AVX512_AVOID_VEC_PERM \
+	ix86_tune_features[X86_TUNE_AVX512_AVOID_VEC_PERM]
 #define TARGET_GENERAL_REGS_SSE_SPILL \
 	ix86_tune_features[X86_TUNE_GENERAL_REGS_SSE_SPILL]
 #define TARGET_AVOID_MEM_OPND_FOR_CMOVE \
@@ -512,7 +513,10 @@ extern unsigned char ix86_tune_features[X86_TUNE_LAST];
 	ix86_tune_features[X86_TUNE_ALIGN_TIGHT_LOOPS]
 #define TARGET_SSE_REDUCTION_PREFER_PSHUF \
 	ix86_tune_features[X86_TUNE_SSE_REDUCTION_PREFER_PSHUF]
-
+#define TARGET_DISABLE_SETZUCC \
+	ix86_tune_features[X86_TUNE_DISABLE_SETZUCC]
+#define TARGET_ENABLE_NDD_MEM \
+	ix86_tune_features[X86_TUNE_ENABLE_NDD_MEM]
 
 /* Feature tests against the various architecture variations.  */
 enum ix86_arch_indices {
@@ -792,7 +796,7 @@ extern const char *host_detect_local_cpu (int argc, const char **argv);
 
 /* 1 if -mstackrealign should be turned on by default.  It will
    generate an alternate prologue and epilogue that realigns the
-   runtime stack if nessary.  This supports mixing codes that keep a
+   runtime stack if necessary.  This supports mixing codes that keep a
    4-byte aligned stack, as specified by i386 psABI, with codes that
    need a 16-byte aligned stack, as required by SSE instructions.  */
 #define STACK_REALIGN_DEFAULT 0
@@ -803,7 +807,7 @@ extern const char *host_detect_local_cpu (int argc, const char **argv);
 /* According to Windows x64 software convention, the maximum stack allocatable
    in the prologue is 4G - 8 bytes.  Furthermore, there is a limited set of
    instructions allowed to adjust the stack pointer in the epilog, forcing the
-   use of frame pointer for frames larger than 2 GB.  This theorical limit
+   use of frame pointer for frames larger than 2 GB.  This theoretical limit
    is reduced by 256, an over-estimated upper bound for the stack use by the
    prologue.
    We define only one threshold for both the prolog and the epilog.  When the
@@ -1629,7 +1633,7 @@ enum reg_class
 
    FIXME: Unlike earlier implementations, the size of unwind info seems to
    actually grow with accumulation.  Is that because accumulated args
-   unwind info became unnecesarily bloated?
+   unwind info became unnecessarily bloated?
 
    With the 64-bit MS ABI, we can generate correct code with or without
    accumulated args, but because of OUTGOING_REG_PARM_STACK_SPACE the code
@@ -1877,6 +1881,11 @@ typedef struct ix86_args {
 /* Abi specific values for REGPARM_MAX and SSE_REGPARM_MAX */
 #define X86_64_REGPARM_MAX 6
 #define X86_64_MS_REGPARM_MAX 4
+
+/* Maximum numbers of registers used in return values according to x86-64
+   psABI.  */
+#define X86_64_MAX_RETURN_NREGS 2
+#define X86_64_MAX_SSE_RETURN_NREGS 2
 
 #define X86_32_REGPARM_MAX 3
 
@@ -2384,6 +2393,9 @@ enum processor_type
   PROCESSOR_ZNVER4,
   PROCESSOR_ZNVER5,
   PROCESSOR_ZNVER6,
+  PROCESSOR_C86_4G_M4,
+  PROCESSOR_C86_4G_M6,
+  PROCESSOR_C86_4G_M7,
   PROCESSOR_max
 };
 
@@ -2546,6 +2558,21 @@ constexpr wide_int_bitmask PTA_LUJIAZUI = PTA_64BIT | PTA_MMX | PTA_SSE
   | PTA_RDRND | PTA_MOVBE | PTA_ADX | PTA_RDSEED;
 constexpr wide_int_bitmask PTA_YONGFENG = PTA_LUJIAZUI | PTA_AVX | PTA_AVX2
   | PTA_F16C | PTA_FMA | PTA_SHA;
+
+constexpr wide_int_bitmask PTA_C86_4G_M4 = PTA_64BIT | PTA_MMX | PTA_SSE
+  | PTA_SSE2 | PTA_SSE3 | PTA_SSE4A | PTA_CX16 | PTA_ABM | PTA_SSSE3
+  | PTA_SSE4_1 | PTA_SSE4_2 | PTA_AES | PTA_PCLMUL | PTA_AVX | PTA_AVX2
+  | PTA_BMI | PTA_BMI2 | PTA_F16C | PTA_FMA | PTA_PRFCHW | PTA_FXSR | PTA_XSAVE
+  | PTA_XSAVEOPT | PTA_FSGSBASE | PTA_RDRND | PTA_MOVBE | PTA_MWAITX | PTA_ADX
+  | PTA_RDSEED | PTA_CLZERO | PTA_CLFLUSHOPT | PTA_XSAVEC | PTA_XSAVES
+  | PTA_SHA | PTA_LZCNT | PTA_POPCNT;
+constexpr wide_int_bitmask PTA_C86_4G_M6 = PTA_C86_4G_M4;
+constexpr wide_int_bitmask PTA_C86_4G_M7 = PTA_C86_4G_M4 | PTA_AVX512F
+  | PTA_AVX512DQ | PTA_AVX512IFMA | PTA_AVX512CD | PTA_AVX512BW | PTA_AVX512VL
+  | PTA_AVX512BF16 | PTA_AVX512VBMI | PTA_AVX512VBMI2 | PTA_GFNI
+  | PTA_AVX512VNNI | PTA_AVX512BITALG | PTA_AVX512VPOPCNTDQ
+  | PTA_AVX512VP2INTERSECT | PTA_VAES | PTA_AVXVNNI | PTA_VPCLMULQDQ
+  | PTA_WBNOINVD | PTA_CLWB;
 
 #ifndef GENERATOR_FILE
 

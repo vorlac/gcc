@@ -1,3 +1,38 @@
+2026-05-29  Kevin Buettner  <kevinb@redhat.com>
+
+	* dg-extract-results.py: Show warnings instead of erroring out
+	when encountering an unparseable file.
+
+2026-05-27  Richard Earnshaw  <rearnsha@arm.com>
+
+	* check-MAINTAINERS.py (get_surname): Rename to ...
+	(get_name_for_sort): ... this.  Add the forenames after the
+	surname.
+	(check_group): match against regexs and support additional
+	fields for secondary sorting.
+	(sections): Rework to use regexs, add rules for the other
+	sections in the MAINTAINERS file.
+
+2026-05-12  Léo Hardt  <leom.hardt@inf.ufrgs.br>
+
+	* texi2pod.pl: Remove rule to parse the defunct @gol macro.
+
+2026-05-11  Andrew Pinski  <andrew.pinski@oss.qualcomm.com>
+
+	PR other/125275
+	* check_GNU_style_lib.py (LineLengthCheck.check): Ignore
+	filenames that end with .opt.
+	(FunctionParenthesisCheck.check): Likewise.
+
+2026-05-04  Iain Buclaw  <ibuclaw@gdcproject.org>
+
+	* compare-all-tests: Remove references to m32c.
+	* config-list.mk: Likewise.
+
+2026-04-30  Jakub Jelinek  <jakub@redhat.com>
+
+	* gennews (files): Add files for GCC 16.
+
 2026-04-22  Jakub Jelinek  <jakub@redhat.com>
 
 	* gcc-changelog/git_update_version.py (active_refs): Add
