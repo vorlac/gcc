@@ -42,6 +42,11 @@
 #define TARGET_AARCH64_MS_ABI 0
 #endif
 
+/* Not a Mach-O (Darwin) target unless the subtarget header says so.  */
+#ifndef TARGET_MACHO
+#define TARGET_MACHO 0
+#endif
+
 static void
 aarch64_def_or_undef (bool def_p, const char *macro, cpp_reader *pfile)
 {
@@ -167,6 +172,13 @@ aarch64_update_cpp_builtins (cpp_reader *pfile)
 
   aarch64_def_or_undef (TARGET_SIMD, "__ARM_FEATURE_NUMERIC_MAXMIN", pfile);
   aarch64_def_or_undef (TARGET_SIMD, "__ARM_NEON", pfile);
+
+  /* Legacy NEON predefines: __ARM_NEON_FP (= __ARM_FP) on all AArch64 with
+     SIMD; __ARM_NEON__ is the Apple/legacy spelling, Mach-O only.  */
+  cpp_undef (pfile, "__ARM_NEON_FP");
+  if (TARGET_SIMD)
+    builtin_define_with_int_value ("__ARM_NEON_FP", 0x0E);
+  aarch64_def_or_undef (TARGET_MACHO ? TARGET_SIMD : false, "__ARM_NEON__", pfile);
 
 
   aarch64_def_or_undef (TARGET_CRC32, "__ARM_FEATURE_CRC32", pfile);
@@ -481,4 +493,8 @@ aarch64_register_pragmas (void)
   targetm.check_builtin_call = aarch64_check_builtin_call;
 
   c_register_pragma ("GCC", "aarch64", aarch64_pragma_aarch64);
+
+#ifdef REGISTER_SUBTARGET_PRAGMAS
+  REGISTER_SUBTARGET_PRAGMAS ();
+#endif
 }

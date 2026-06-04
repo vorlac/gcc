@@ -182,6 +182,77 @@
     return "caspal\t%0, %R0, %2, %R2, %1";
 })
 
+;; ---- 16-byte (TImode) atomics built on the LSE casp CAS ----
+;; These make __atomic_{load,store,exchange,fetch_*}_16 inline (no libatomic)
+;; on any LSE target by looping the existing 128-bit casp compare-and-swap.
+;; When !TARGET_LSE the expander condition is false, the pattern is absent, and
+;; the middle-end emits the libcall exactly as before (non-LSE unchanged).
+
+(define_expand "atomic_loadti"
+  [(match_operand:TI 0 "register_operand")
+   (match_operand:TI 1 "aarch64_sync_memory_operand")
+   (match_operand:SI 2 "const_int_operand")]
+  "TARGET_LSE"
+  {
+    aarch64_expand_atomic_ti (AARCH64_ATOMIC_LOAD, operands[0], operands[1],
+			      NULL_RTX, UNKNOWN, operands[2]);
+    DONE;
+  }
+)
+
+(define_expand "atomic_storeti"
+  [(match_operand:TI 0 "aarch64_sync_memory_operand")
+   (match_operand:TI 1 "register_operand")
+   (match_operand:SI 2 "const_int_operand")]
+  "TARGET_LSE"
+  {
+    aarch64_expand_atomic_ti (AARCH64_ATOMIC_STORE, NULL_RTX, operands[0],
+			      operands[1], UNKNOWN, operands[2]);
+    DONE;
+  }
+)
+
+(define_expand "atomic_exchangeti"
+  [(match_operand:TI 0 "register_operand")
+   (match_operand:TI 1 "aarch64_sync_memory_operand")
+   (match_operand:TI 2 "register_operand")
+   (match_operand:SI 3 "const_int_operand")]
+  "TARGET_LSE"
+  {
+    aarch64_expand_atomic_ti (AARCH64_ATOMIC_EXCHANGE, operands[0],
+			      operands[1], operands[2], UNKNOWN, operands[3]);
+    DONE;
+  }
+)
+
+(define_expand "atomic_fetch_<atomic_optab>ti"
+  [(match_operand:TI 0 "register_operand")
+   (match_operand:TI 1 "aarch64_sync_memory_operand")
+   (atomic_op:TI
+    (match_operand:TI 2 "register_operand")
+    (match_operand:SI 3 "const_int_operand"))]
+  "TARGET_LSE"
+  {
+    aarch64_expand_atomic_ti (AARCH64_ATOMIC_FETCH_OP, operands[0],
+			      operands[1], operands[2], <CODE>, operands[3]);
+    DONE;
+  }
+)
+
+(define_expand "atomic_<atomic_optab>_fetchti"
+  [(match_operand:TI 0 "register_operand")
+   (atomic_op:TI
+    (match_operand:TI 1 "aarch64_sync_memory_operand")
+    (match_operand:TI 2 "register_operand"))
+   (match_operand:SI 3 "const_int_operand")]
+  "TARGET_LSE"
+  {
+    aarch64_expand_atomic_ti (AARCH64_ATOMIC_OP_FETCH, operands[0],
+			      operands[1], operands[2], <CODE>, operands[3]);
+    DONE;
+  }
+)
+
 (define_expand "atomic_exchange<mode>"
  [(match_operand:ALLI 0 "register_operand")
   (match_operand:ALLI 1 "aarch64_sync_memory_operand")

@@ -28,6 +28,26 @@
 #undef  DARWIN_AARCH64
 #define DARWIN_AARCH64 1
 
+/* Apple's arm64 ABI uses a 64-bit 'long double' that is identical to
+   'double' (DFmode, 53-bit mantissa), matching clang.  aarch64.h defaults
+   TARGET_LONG_DOUBLE_128 to 1 (TFmode/binary128); we turn it off here.
+   Setting this to 0 drives every consumer through one knob:
+     - aarch64_c_mode_for_floating_type (aarch64.cc) returns DFmode for
+       TI_LONG_DOUBLE_TYPE instead of TFmode, so sizeof(long double)==8 and
+       __LDBL_MANT_DIG__==53 (the precision/size flow from the mode in
+       tree.cc:build_common_tree_nodes and c-family/c-cppbuiltin.cc);
+     - aarch64_scalar_mode_supported_p returns false for TFmode, which also
+       disables _Float128/__float128 -- this is correct, clang has NO 128-bit
+       float on arm64-darwin.
+   C++ mangling of 'long double' stays 'e' (cp/mangle.cc matches by type
+   identity, not by mode), matching clang.  This mirrors how the in-tree
+   aarch64 Windows MS ABI sub-port does it (aarch64-abi-ms.h).  aarch64/darwin.h
+   is the last tm_file header, so #undef + #define wins over aarch64.h.
+   HARD COUPLING: requires rebuilding libgcc and libstdc++ so their long
+   double routines/typeinfo match the new 64-bit ABI.  */
+#undef  TARGET_LONG_DOUBLE_128
+#define TARGET_LONG_DOUBLE_128 0
+
 /* AArch64 is always 64-bit.  darwin.cc uses TARGET_64BIT from x86.  */
 #ifndef TARGET_64BIT
 #define TARGET_64BIT 1
@@ -67,6 +87,15 @@
 
 #undef WCHAR_TYPE_SIZE
 #define WCHAR_TYPE_SIZE 32
+
+/* Unlike the AArch64 ELF/AAPCS64 ABI (which makes plain char unsigned, see
+   aarch64.h DEFAULT_SIGNED_CHAR 0), the Apple/Darwin ABI makes plain char
+   SIGNED on every architecture, for consistency across Darwin targets and to
+   match Apple clang.  This mirrors rs6000/darwin.h (which overrides the
+   PowerPC unsigned default) and i386 (where DEFAULT_SIGNED_CHAR is already 1,
+   so x86_64-apple-darwin inherits signed char).  */
+#undef DEFAULT_SIGNED_CHAR
+#define DEFAULT_SIGNED_CHAR 1
 
 /* We want -fPIC by default on Darwin, unless building a kernel.
    Also disable section anchors: TARGET_ASM_OUTPUT_ANCHOR is NULL (from
@@ -111,6 +140,44 @@
 #undef MAIN_STACK_BOUNDARY
 #define MAIN_STACK_BOUNDARY 128
 
+/* Static chain / nested-function trampoline register on Darwin.
+
+   The generic aarch64 backend uses x18 as the static chain register
+   (aarch64.h: STATIC_CHAIN_REGNUM == R18_REGNUM).  Two things make x18
+   wrong on Apple targets:
+
+     - x18 is reserved by the OS on Apple Silicon (the kernel may use
+       and clobber it), exactly as on Windows.  clang never allocates
+       x18 on Darwin/arm64.
+
+     - The libgcc heap trampoline (the default trampoline on Darwin, see
+       AARCH64_CUSTOM_FUNCTION_TEST below) delivers the static chain in
+       x16 on Apple: libgcc/config/aarch64/heap-trampoline.c emits
+       `ldr x16, .+24` (chain) / `ldr x17, .+20` (func) / `br x17` in its
+       __APPLE__ instruction sequence, whereas the Linux sequence uses
+       x18 for the chain.  The compiler must therefore read the incoming
+       static chain from x16 to match the runtime.
+
+   We override STATIC_CHAIN_REGNUM to R16_REGNUM (x16 == IP0) and reserve
+   x18.  This mirrors aarch64-abi-ms.h, which overrides STATIC_CHAIN_REGNUM
+   to R17 and sets FIXED_X18/CALL_USED_X18 because x18 is reserved on
+   Windows, and aarch64-vxworks.h, which moves the chain off x18 because
+   VxWorks uses it as the TCB.  We do NOT define TARGET_OS_USES_R18: that
+   path (aarch64_conditional_register_usage) sets call_used_regs[R18]=1,
+   which contradicts reserving x18 as a fixed, untouched register; the
+   FIXED_X18/CALL_USED_X18 redefinition below is the canonical Darwin/
+   Windows mechanism and reaches FIXED_REGISTERS/CALL_REALLY_USED_REGISTERS
+   via macro indirection because aarch64/darwin.h is included after
+   aarch64.h.  */
+#undef  STATIC_CHAIN_REGNUM
+#define STATIC_CHAIN_REGNUM R16_REGNUM
+
+#undef  FIXED_X18
+#define FIXED_X18 1
+
+#undef  CALL_USED_X18
+#define CALL_USED_X18 0
+
 /* Jump tables go in the text section on Darwin (required for Mach-O PIC).  */
 #undef JUMP_TABLES_IN_TEXT_SECTION
 #define JUMP_TABLES_IN_TEXT_SECTION 1
@@ -145,12 +212,21 @@
 
 /* Include both Darwin driver self specs and aarch64-specific ones.
    Apple Silicon always has LSE atomics, so disable outline atomics
-   (which would require ELF-syntax lse.S runtime stubs).  */
+   (which would require ELF-syntax lse.S runtime stubs).
+
+   Default to -mcpu=apple-m1 when the user gives neither -mcpu nor -march:
+   every Apple-silicon Mac is M1 (Armv8.5-A) or newer, and this is what Apple
+   clang effectively targets.  It enables FEAT_LSE, which is what makes the
+   16-byte (TImode) casp atomics fire by default (TARGET_LSE) so that
+   std::atomic<16-byte> / __int128 atomics are inline and lock-free instead of
+   falling back to libatomic.  The user can still override with any
+   -mcpu=/-march=.  */
 #undef DRIVER_SELF_SPECS
 #define DRIVER_SELF_SPECS			\
   "%{!mlittle-endian:-mlittle-endian} "		\
   "%{!mabi=*:-mabi=lp64} "			\
   "%{!mno-outline-atomics:-mno-outline-atomics} " \
+  "%{!mcpu=*:%{!march=*:-mcpu=apple-m1}} "	\
   MCPU_MTUNE_NATIVE_SPECS			\
   SUBTARGET_DRIVER_SELF_SPECS
 
@@ -233,12 +309,57 @@
    ? (DW_EH_PE_pcrel | DW_EH_PE_indirect | DW_EH_PE_sdata4) : \
      DW_EH_PE_pcrel)
 
+/* Do NOT pass -no_compact_unwind on arm64.
+
+   The generic darwin.h defines DARWIN_NOCOMPACT_UNWIND to add
+   -no_compact_unwind to the link line for macOS >= 10.6 (a workaround for
+   PR41260 on old x86_64/ppc toolchains that could not turn GCC's DWARF
+   __eh_frame into valid Apple compact unwind).  That workaround is harmful
+   on Apple Silicon:
+
+     - Apple arm64 objects produced by clang/LLVM are compact-unwind-only:
+       they contain a __compact_unwind section and NO __eh_frame.
+     - On arm64 the system unwinder reads the linker-synthesized
+       __unwind_info index first.
+     - -no_compact_unwind makes ld64 discard input __compact_unwind sections
+       and skip synthesizing __unwind_info, leaving clang functions with no
+       unwind data at all.  C++ exceptions thrown across such objects then
+       reach std::terminate.
+
+   GCC's own arm64 EH is unaffected by dropping the flag: GCC still emits
+   DWARF __eh_frame (DWARF2_UNWIND_INFO is 1 above), ld64 synthesizes
+   __unwind_info from it, and __eh_frame remains as a fallback.  This lets
+   exceptions propagate correctly through both GCC- and clang-compiled
+   objects, matching the Apple arm64 ABI as implemented by clang.
+
+   We override the macro to empty rather than editing the generic
+   LINK_COMMAND_SPEC so that x86_64-apple-darwin and *-apple-darwin (ppc)
+   keep their existing PR41260 behavior unchanged.  config.gcc includes
+   the generic darwin.h before this header, and gcc.cc expands
+   LINK_COMMAND_SPEC (which references DARWIN_NOCOMPACT_UNWIND by name)
+   after all target headers, so this redefinition is the value used for
+   arm64 only.  */
+#undef DARWIN_NOCOMPACT_UNWIND
+#define DARWIN_NOCOMPACT_UNWIND ""
+
 /* The ENDFILE_SPEC for Darwin aarch64.  */
 #undef ENDFILE_SPEC
 #define ENDFILE_SPEC \
   "%{Ofast|ffast-math|funsafe-math-optimizations:" \
   "%{!shared:%{!mno-daz-ftz:crtfastmath.o%s}}} " \
   TM_DESTRUCTOR
+
+/* NOTE on 16-byte (TImode) atomics: the upstream aarch64 backend has no inline
+   TImode atomic expander, so std::atomic<16-byte> / __int128 atomics lower to
+   __atomic_*_16 libcalls that live in libatomic.  We deliberately do NOT force
+   -latomic into the default link sequence here: forcing it deadlocks the
+   bootstrap (libatomic, libstdc++ and libgomp configure-time link tests run
+   before libatomic exists, since they carry no all-target-libatomic dependency
+   in Makefile.def), and the supported x86_64-apple-darwin port never forces it
+   either (x86 inlines via CMPXCHG16B).  The correct, bootstrap-safe fix is a
+   TImode casp/caspal expander in the aarch64 backend (clang inlines via LSE);
+   that is a separate upstream-level enhancement.  Users needing 16-byte atomics
+   today can link with -latomic explicitly.  */
 
 /* AArch64 Darwin uses the AAPCS64 ABI.  Aggregate passing matches
    the Apple arm64 ABI conventions which are the same as AAPCS64 for

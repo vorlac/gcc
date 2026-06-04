@@ -1125,6 +1125,20 @@ bool aarch64_maxmin_plus_const (rtx_code, rtx *, bool);
 rtx aarch64_load_tp (rtx);
 
 void aarch64_expand_compare_and_swap (rtx op[]);
+
+/* Kinds of 16-byte (TImode) atomic operation synthesised from casp.  Defined
+   here (not in aarch64.cc) so the by-value parameter of aarch64_expand_atomic_ti
+   sees a complete type.  */
+enum aarch64_atomic_ti_kind
+{
+  AARCH64_ATOMIC_LOAD,
+  AARCH64_ATOMIC_STORE,
+  AARCH64_ATOMIC_EXCHANGE,
+  AARCH64_ATOMIC_FETCH_OP,
+  AARCH64_ATOMIC_OP_FETCH
+};
+void aarch64_expand_atomic_ti (enum aarch64_atomic_ti_kind, rtx, rtx, rtx,
+			       enum rtx_code, rtx);
 void aarch64_split_compare_and_swap (rtx op[]);
 
 void aarch64_split_atomic_op (enum rtx_code, rtx, rtx, rtx, rtx, rtx, rtx);

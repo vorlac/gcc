@@ -20398,6 +20398,19 @@ initialize_aarch64_code_model (struct gcc_options *opts)
       if (opts->x_aarch64_abi == AARCH64_ABI_ILP32)
 	sorry ("code model %qs not supported in ilp32 mode", "large");
     }
+  if (TARGET_MACHO && aarch64_cmodel == AARCH64_CMODEL_TINY)
+    {
+      /* The tiny code model relies on ELF-only single-instruction PC-relative
+	 addressing (e.g. "ldr Xn, sym" / bare @PAGEOFF) and linker relaxation
+	 that have no Mach-O equivalent, so it was never ported to Darwin.
+	 Reject it cleanly here (as Apple clang does) rather than emitting
+	 assembly the Mach-O assembler cannot encode.  Fall back to the small
+	 code model so later option processing and code generation proceed
+	 sensibly after the error.  */
+      error ("code model %qs not supported on Darwin", "tiny");
+      aarch64_cmodel = AARCH64_CMODEL_SMALL;
+      opts->x_aarch64_cmodel_var = AARCH64_CMODEL_SMALL;
+    }
 }
 
 /* Implements TARGET_OPTION_RESTORE.  Restore the backend codegen decisions
@@ -22547,6 +22560,10 @@ aarch64_build_builtin_va_list (void)
   if (TARGET_AARCH64_MS_ABI)
     return aarch64_ms_variadic_abi_build_builtin_va_list ();
 
+#if TARGET_MACHO
+  return build_pointer_type (char_type_node);
+#endif
+
   tree va_list_name;
   tree f_stack, f_grtop, f_vrtop, f_groff, f_vroff;
 
@@ -22632,6 +22649,15 @@ aarch64_expand_builtin_va_start (tree valist, rtx nextarg)
 {
   if (TARGET_AARCH64_MS_ABI)
     return aarch64_ms_variadic_abi_expand_builtin_va_start (valist, nextarg);
+
+#if TARGET_MACHO
+  {
+    rtx va_r = expand_expr (valist, NULL_RTX, VOIDmode, EXPAND_WRITE);
+    HOST_WIDE_INT off = crtl->args.info.aapcs_stack_size * UNITS_PER_WORD;
+    convert_move (va_r, plus_constant (Pmode, virtual_incoming_args_rtx, off), 0);
+    return;
+  }
+#endif
 
   const CUMULATIVE_ARGS *cum;
   tree f_stack, f_grtop, f_vrtop, f_groff, f_vroff;
@@ -22732,6 +22758,37 @@ aarch64_gimplify_va_arg_expr (tree valist, tree type, gimple_seq *pre_p,
   tree stack, f_top, f_off, off, arg, roundup, on_stack;
   HOST_WIDE_INT size, rsize, adjust, align;
   tree t, u, cond1, cond2;
+
+#if TARGET_MACHO
+  {
+    unsigned HOST_WIDE_INT b;
+    indirect_p = pass_va_arg_by_reference (type);
+    if (indirect_p)
+      type = build_pointer_type (type);
+    b = aarch64_function_arg_boundary (TYPE_MODE (type), type) / BITS_PER_UNIT;
+    cond1 = get_initialized_tmp_var (valist, pre_p, NULL);
+    if (b > (unsigned) (PARM_BOUNDARY / BITS_PER_UNIT))
+      {
+        t = build2 (MODIFY_EXPR, TREE_TYPE (valist), cond1,
+                    fold_build_pointer_plus_hwi (cond1, b - 1));
+        gimplify_and_add (t, pre_p);
+        t = build2 (MODIFY_EXPR, TREE_TYPE (valist), cond1,
+                    fold_build2 (BIT_AND_EXPR, TREE_TYPE (valist), cond1,
+                                 build_int_cst (TREE_TYPE (valist),
+                                                -(HOST_WIDE_INT) b)));
+        gimplify_and_add (t, pre_p);
+      }
+    cond2 = cond1;
+    rsize = ROUND_UP (int_size_in_bytes (type), UNITS_PER_WORD);
+    t = fold_build_pointer_plus_hwi (cond1, rsize);
+    t = build2 (MODIFY_EXPR, TREE_TYPE (valist), valist, t);
+    gimplify_and_add (t, pre_p);
+    cond2 = fold_convert (build_pointer_type (type), cond2);
+    if (indirect_p)
+      cond2 = build_va_arg_indirect_ref (cond2);
+    return build_va_arg_indirect_ref (cond2);
+  }
+#endif
 
   indirect_p = pass_va_arg_by_reference (type);
   if (indirect_p)
@@ -23021,6 +23078,12 @@ aarch64_setup_incoming_varargs (cumulative_args_t cum_v,
   CUMULATIVE_ARGS local_cum;
   int gr_saved = cfun->va_list_gpr_size;
   int vr_saved = cfun->va_list_fpr_size;
+
+#if TARGET_MACHO
+  cfun->machine->frame.unaligned_saved_varargs_size = 0;
+  cfun->machine->frame.saved_varargs_size = 0;
+  return;
+#endif
 
   /* The caller has advanced CUM up to, but not beyond, the last named
      argument.  Advance a local copy of CUM past the last "real" named
@@ -23922,6 +23985,7 @@ aarch64_mangle_type (const_tree type)
      The Windows Arm64 ABI uses just an address of the first variadic
      argument.  */
   if (!TARGET_AARCH64_MS_ABI
+      && !TARGET_MACHO
       && lang_hooks.types_compatible_p (const_cast<tree> (type), va_list_type))
     return "St9__va_list";
 
@@ -26995,6 +27059,116 @@ aarch64_expand_compare_and_swap (rtx operands[])
   emit_insn (gen_rtx_SET (bval, x));
 }
 
+/* Run one 128-bit compare-and-swap of NEWVAL into MEM, expecting EXPECTED,
+   using the existing TImode casp CAS expander so that the even/odd register
+   pair allocation and the cas/caspa/caspl/caspal ordering variant are reused.
+   Returns the value read from MEM via *POLDVAL and the success boolean as the
+   returned rtx (nonzero == swap happened).  A weak CAS is requested; the caller
+   provides the retry loop.  MODEL is the success model; the failure model is
+   fixed at RELAXED (a failed casp only re-reads, then the loop retries).  */
+
+static rtx
+aarch64_ti_cas (rtx mem, rtx expected, rtx newval, rtx *poldval, rtx model)
+{
+  rtx bval = gen_reg_rtx (SImode);
+  rtx oldval = gen_reg_rtx (TImode);
+  rtx cas_ops[8];
+  cas_ops[0] = bval;				/* bool out  */
+  cas_ops[1] = oldval;				/* val out   */
+  cas_ops[2] = mem;				/* memory    */
+  cas_ops[3] = expected;			/* expected  */
+  cas_ops[4] = newval;				/* desired   */
+  cas_ops[5] = const1_rtx;			/* is_weak    */
+  cas_ops[6] = model;				/* mod_s      */
+  cas_ops[7] = GEN_INT (MEMMODEL_RELAXED);	/* mod_f      */
+  aarch64_expand_compare_and_swap (cas_ops);
+  *poldval = oldval;
+  return bval;
+}
+
+/* Expand a 16-byte atomic operation KIND on TImode MEM by looping the LSE
+   casp compare-and-swap.  OUT receives the result (old value for LOAD /
+   EXCHANGE / FETCH_OP, new value for OP_FETCH; unused for STORE).  VAL is the
+   stored/operand value (unused for LOAD).  CODE is the rtx_code of the
+   arithmetic for FETCH_OP / OP_FETCH (UNKNOWN otherwise).  MODEL_RTX is the
+   C/C++ memory model.  Ordering is delegated to aarch64_ti_cas.
+
+   NOTE (volatile/RO caveat, DEFECT C): the LOAD idiom issues a casp that
+   writes the read-back value, i.e. a pure load performs a store.  This is
+   harmless for normal _Atomic objects (never read-only mapped) and matches
+   Apple clang's pre-LSE2 lowering, but it is an architecturally-visible write
+   on the cache line.  This tree exposes no LSE2 macro, so an ldp fast-path is
+   not available here.  */
+
+void
+aarch64_expand_atomic_ti (enum aarch64_atomic_ti_kind kind, rtx out, rtx mem,
+			  rtx val, enum rtx_code code, rtx model_rtx)
+{
+  gcc_assert (TARGET_LSE && GET_MODE (mem) == TImode);
+
+  if (kind == AARCH64_ATOMIC_LOAD)
+    {
+      rtx oldval;
+      aarch64_ti_cas (mem, CONST0_RTX (TImode), CONST0_RTX (TImode),
+		      &oldval, model_rtx);
+      emit_move_insn (out, oldval);
+      return;
+    }
+
+  if (val != NULL_RTX)
+    val = force_reg (TImode, val);
+
+  /* Initial read of the current value via a weak 0/0 casp.  */
+  rtx cur = gen_reg_rtx (TImode);
+  {
+    rtx oldval;
+    aarch64_ti_cas (mem, CONST0_RTX (TImode), CONST0_RTX (TImode),
+		    &oldval, GEN_INT (MEMMODEL_RELAXED));
+    emit_move_insn (cur, oldval);
+  }
+
+  /* Stable pseudo holding the newval actually offered each iteration, so the
+     OP_FETCH result is exactly what was stored (DEFECT B hardening).  */
+  rtx last_newval = gen_reg_rtx (TImode);
+
+  rtx_code_label *loop = gen_label_rtx ();
+  emit_label (loop);
+
+  rtx newval;
+  switch (kind)
+    {
+    case AARCH64_ATOMIC_STORE:
+    case AARCH64_ATOMIC_EXCHANGE:
+      newval = val;
+      break;
+    case AARCH64_ATOMIC_FETCH_OP:
+    case AARCH64_ATOMIC_OP_FETCH:
+      newval = expand_simple_binop (TImode, code, cur, val, NULL_RTX, 1,
+				    OPTAB_DIRECT);
+      newval = force_reg (TImode, newval);
+      break;
+    default:
+      gcc_unreachable ();
+    }
+  emit_move_insn (last_newval, newval);
+
+  rtx oldval;
+  rtx bval = aarch64_ti_cas (mem, cur, last_newval, &oldval, model_rtx);
+
+  /* On failure OLDVAL holds the up-to-date memory value; retry with it.  */
+  emit_move_insn (cur, oldval);
+  rtx x = aarch64_gen_compare_zero_and_branch (EQ, bval, loop);
+  aarch64_emit_unlikely_jump (x);
+
+  /* CUR now equals the old (pre-op) memory value of the winning iteration.  */
+  if (kind == AARCH64_ATOMIC_EXCHANGE
+      || kind == AARCH64_ATOMIC_FETCH_OP)
+    emit_move_insn (out, cur);
+  else if (kind == AARCH64_ATOMIC_OP_FETCH)
+    emit_move_insn (out, last_newval);
+  /* STORE: nothing to return.  */
+}
+
 /* Emit a barrier, that is appropriate for memory model MODEL, at the end of a
    sequence implementing an atomic operation.  */
 
@@ -27219,7 +27393,14 @@ aarch64_init_libfuncs (void)
 static machine_mode
 aarch64_c_mode_for_suffix (char suffix)
 {
-  if (suffix == 'q')
+  /* The 'q'/'Q' suffix denotes __float128 (TFmode).  On targets that do not
+     support a 128-bit scalar float -- e.g. aarch64-apple-darwin, which uses a
+     64-bit long double and has no __float128/_Float128 (TARGET_LONG_DOUBLE_128
+     == 0) -- TFmode has no corresponding language type node, so advertising the
+     suffix here makes interpret_float() in c-family/c-lex.cc hit
+     gcc_assert (type) and ICE.  Only offer 'q' when TFmode is a supported
+     scalar type.  */
+  if (suffix == 'q' && TARGET_LONG_DOUBLE_128)
     return TFmode;
 
   return VOIDmode;
@@ -27340,18 +27521,31 @@ aarch64_output_simd_imm (rtx const_vector, unsigned width,
       mnemonic = info.insn == simd_immediate_info::MVN ? "mvni" : "movi";
       shift_op = (info.u.mov.modifier == simd_immediate_info::MSL
 		  ? "msl" : "lsl");
+     /* The movi/mvni immediate is a per-element value.  GNU as silently masks
+	    an over-wide immediate to the element width, but Apple's Mach-O
+	    assembler rejects e.g. "movi v0.16b, 0xffffffffffffff80" (it requires
+	    the byte immediate in [0,255]).  For TARGET_MACHO, mask the printed
+	    value to the element width so it is the canonical per-element immediate
+	    (0x80 here).  Non-Mach-O output is left byte-for-byte unchanged.  */
+      unsigned HOST_WIDE_INT mov_value = UINTVAL (info.u.mov.value);
+      if (TARGET_MACHO)
+	{
+	  unsigned int elt_bits = GET_MODE_BITSIZE (info.elt_mode);
+	  if (elt_bits < HOST_BITS_PER_WIDE_INT)
+	    mov_value &= (HOST_WIDE_INT_1U << elt_bits) - 1;
+	}
       if (lane_count == 1)
 	snprintf (templ, sizeof (templ), "%s\t%%d0, " HOST_WIDE_INT_PRINT_HEX,
-		  mnemonic, UINTVAL (info.u.mov.value));
+		  mnemonic, mov_value);
       else if (info.u.mov.shift)
 	snprintf (templ, sizeof (templ), "%s\t%%0.%d%c, "
 		  HOST_WIDE_INT_PRINT_HEX ", %s %d", mnemonic, lane_count,
-		  element_char, UINTVAL (info.u.mov.value), shift_op,
+		  element_char, mov_value, shift_op,
 		  info.u.mov.shift);
       else
 	snprintf (templ, sizeof (templ), "%s\t%%0.%d%c, "
 		  HOST_WIDE_INT_PRINT_HEX, mnemonic, lane_count,
-		  element_char, UINTVAL (info.u.mov.value));
+		  element_char, mov_value);
     }
   else
     {

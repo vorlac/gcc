@@ -270,6 +270,7 @@ darwin_driver_init (unsigned int *decoded_options_count,
   bool seenX86_64 = false;
   bool seenPPC = false;
   bool seenPPC64 = false;
+  bool seenAArch64 = false;
   bool seenM32 = false;
   bool seenM64 = false;
   bool appendM32 = false;
@@ -299,7 +300,9 @@ darwin_driver_init (unsigned int *decoded_options_count,
 	  else if (!strcmp ((*decoded_options)[i].arg, "ppc64"))
 	    seenPPC64 = true;
 	  else if (!strcmp ((*decoded_options)[i].arg, "arm64"))
-	    /* AArch64 Darwin is always 64-bit LP64; nothing to do.  */;
+	    /* AArch64 Darwin is always 64-bit LP64; record it so the
+	       post-loop block can detect attempted fat builds.  */
+	    seenAArch64 = true;
 	  else
 	    error ("this compiler does not support %qs",
 		   (*decoded_options)[i].arg);
@@ -425,6 +428,26 @@ darwin_driver_init (unsigned int *decoded_options_count,
 		    " (%<-m32%> ignored)");
       if (! seenM64) /* Add -m64 if the User didn't. */
 	appendM64 = true;
+    }
+#elif DARWIN_AARCH64
+  /* AArch64 Darwin is single-arch (arm64, LP64) and this driver cannot
+     produce non-native or multi-slice ("fat") outputs.  Diagnose a request
+     for any non-arm64 architecture rather than silently emitting an arm64
+     binary for the wrong target.  */
+  if (seenX86 || seenX86_64 || seenPPC || seenPPC64)
+    {
+      if (seenAArch64)
+	/* arm64 plus a foreign arch: the User is asking for a fat binary,
+	   which is not supported; keep the native arm64 slice and ignore
+	   the extra arch(es).  */
+	warning (0, "this compiler does not support generating multiple"
+		    " architecture (%<fat%>) binaries"
+		    " (extra %<-arch%> options ignored)");
+      else
+	/* Only a foreign arch was requested: we cannot build it, so error
+	   out rather than produce a wrong-architecture binary.  */
+	error ("this compiler does not support the requested architecture;"
+	       " only %<-arch arm64%> is supported");
     }
 #endif
 

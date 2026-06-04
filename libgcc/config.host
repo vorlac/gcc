@@ -398,7 +398,15 @@ aarch64*-*-elf | aarch64*-*-rtems*)
 aarch64*-*-darwin*)
 	extra_parts="$extra_parts crtfastmath.o"
 	tmake_file="${tmake_file} ${cpu_type}/t-aarch64"
-	tmake_file="${tmake_file} ${cpu_type}/t-softfp t-softfp t-crtfm"
+	# Apple AArch64 uses long double == double (64-bit IEEE), handled
+	# natively by the FPU, so the 128-bit TFmode soft-float emulation in
+	# aarch64/t-softfp is not built (TARGET_LONG_DOUBLE_128 == 0 makes TFmode
+	# an unsupported scalar mode, so those tf* sources would not even compile).
+	# But __bf16 IS a supported type whose conversion helpers are not inlined,
+	# so build the bf16-only soft-fp subset (t-softfp-bf16, which names no tf
+	# modes) plus the generic soft-fp processor (t-softfp).  Keep t-crtfm: it
+	# builds crtfastmath.o and is unrelated to soft-float.
+	tmake_file="${tmake_file} ${cpu_type}/t-softfp-bf16 t-softfp t-crtfm"
 	tmake_file="${tmake_file} ${cpu_type}/t-heap-trampoline"
 	# t-aarch64-darwin must come after t-aarch64 to override
 	# the ELF-specific SME .S files that t-aarch64 adds.

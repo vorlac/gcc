@@ -775,6 +775,19 @@ output_call_frame_info (int for_eh)
   if (!fde_vec)
     return;
 
+  /* Don't emit anything if the CIE CFI data was never created.  cie_cfi_vec
+     is built by create_cie_data the first time pass_dwarf2_frame runs for a
+     function.  It can legitimately still be NULL here while fde_vec is
+     non-empty if every FDE came from a function that never ran that pass --
+     e.g. an __RTL function whose "startwith" pass is at or after final, or a
+     malformed __RTL function that errored out after its FDE was allocated.
+     With no CIE there is nothing valid to emit, and on targets that emit the
+     frame tables themselves rather than via the assembler's .cfi directives
+     (dwarf2out_do_cfi_asm () false, e.g. Darwin/Mach-O) the loop below would
+     dereference the null cie_cfi_vec and ICE.  Bail out cleanly instead.  */
+  if (cie_cfi_vec == NULL)
+    return;
+
   /* Nothing to do if the assembler's doing it all.  */
   if (dwarf2out_do_cfi_asm ())
     return;

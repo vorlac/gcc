@@ -183,8 +183,21 @@ aarch64_demangle_return_addr (struct _Unwind_Context *context,
 /* SME runtime function local to libgcc, streaming compatible
    and preserves more registers than the base PCS requires, but
    we don't rely on that here.  */
+#ifndef __APPLE__
 __attribute__ ((visibility ("hidden")))
 void __libgcc_arm_za_disable (void);
+#else
+/* On Darwin (Mach-O) the SME support routines (__arm_za_disable.S and
+   friends) are not built into libgcc: they use ELF-only assembler syntax
+   and are stripped from LIB2ADDEH by config/aarch64/t-aarch64-darwin.
+   Darwin EH is performed by libSystem's unwinder, so this DWARF-2 hook is
+   dormant there.  Provide a no-op so the static unwinder (unwind-dw2.c)
+   does not reference an absent ___libgcc_arm_za_disable symbol.  */
+static inline void
+__libgcc_arm_za_disable (void)
+{
+}
+#endif
 
 /* Disable the SME ZA state in case an unwound frame used the ZA
    lazy saving scheme. And unwind the GCS for EH.  */

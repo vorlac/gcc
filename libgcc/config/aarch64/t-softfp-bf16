@@ -1,0 +1,27 @@
+# AArch64 Darwin: build ONLY the bfloat16 soft-fp conversion helpers.
+#
+# The full aarch64/t-softfp also builds the 128-bit TFmode soft-float routines
+# (__addtf3, __trunctf*, ...), but Apple's long double is 64-bit
+# (TARGET_LONG_DOUBLE_128 == 0), which makes TFmode an unsupported scalar mode
+# on this target -- so any tf* soft-fp source fails to compile ("unable to
+# emulate 'TF'").  However __bf16 IS a supported AArch64 type, and its
+# conversion helpers are not emitted inline, so they must still be provided in
+# libgcc or C++23 <stdfloat>/<charconv>/<cmath> bf16 code fails to link with
+# undefined ___truncsfbf2 / ___extendbfsf2 / ...
+#
+# This fragment lists only the bf16 (and hf->bf) conversions and the int/bitint
+# <-> bf converters; it names NO 'tf' mode/extension/truncation, so nothing
+# referencing TFmode is built.  Used with the generic soft-fp processor
+# (config/t-softfp) via config.host.
+softfp_float_modes :=
+softfp_int_modes := si di ti
+softfp_extensions := bfsf
+softfp_truncations := dfbf sfbf hfbf
+softfp_exclude_libgcc2 := n
+softfp_extras += floatdibf floatundibf floattibf floatuntibf \
+		 floatbitintbf floatbitinthf
+
+TARGET_LIBGCC2_CFLAGS += -Wno-missing-prototypes
+
+# The soft-fp conversion helpers raise FP exceptions via this helper.
+LIB2ADD += $(srcdir)/config/aarch64/sfp-exceptions.c

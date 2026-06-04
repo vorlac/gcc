@@ -4907,6 +4907,13 @@ Valid choices are 'yes', 'bid', 'dpd', and 'no'." "$LINENO" 5 ;;
 else
 
   case $target in
+    aarch64*-*-darwin*)
+      # Match the i386/x86_64-apple-darwin precedent: Darwin has no DFP
+      # runtime in libgcc (no t-dfprules, no libbid arithmetic is built),
+      # so decimal float is not supported here.  Listed before the broad
+      # aarch64* case so aarch64-linux etc. keep DFP enabled.
+      enable_decimal_float=no
+      ;;
     aarch64* | \
     powerpc*-*-linux* | i?86*-*-linux* | x86_64*-*-linux* | s390*-*-linux* | \
     i?86*-*-elfiamcu | i?86*-*-gnu* | x86_64*-*-gnu* | \
